@@ -39,7 +39,7 @@ type StubRecord = Record<string, unknown>;
 // Recorded canvas ops, readable by tests via (globalThis as any).__paintOps
 // (reset it before the assertion window). fillStyle rides along so
 // style-color edits are assertable (M-STYLES paint-only epoch).
-const paintOps: Array<{ op: string; args: unknown[]; fillStyle?: string; font?: string }> = [];
+const paintOps: Array<{ op: string; args: unknown[]; fillStyle?: string; font?: string; strokeStyle?: string }> = [];
 (globalThis as { __paintOps?: typeof paintOps }).__paintOps = paintOps;
 
 const stubContext: StubRecord = {
@@ -74,6 +74,12 @@ const stubContext: StubRecord = {
   lineTo: () => {},
   arcTo: () => {},
   closePath: () => {},
+  // M-IMAGES-2.2: the FAILED-box cross-hatch strokes (recorded so the
+  // failed-vs-pending placeholder split is assertable).
+  strokeStyle: 'rgba(0,0,0,0.35)',
+  stroke: function (this: StubRecord, ...args: unknown[]) {
+    paintOps.push({ op: 'stroke', args, fillStyle: this.fillStyle as string, strokeStyle: this.strokeStyle as string });
+  },
   save: () => {},
   restore: () => {},
   clip: function (this: StubRecord, ...args: unknown[]) {

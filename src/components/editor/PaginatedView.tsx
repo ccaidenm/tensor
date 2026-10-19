@@ -12,6 +12,7 @@ import {
   blockRangeAround,
   caretGeometry,
   caretStackRect,
+  inlineObjectRect,
   paintedBounds,
   textRangeLineRects,
   textRangeTextExtents,
@@ -38,6 +39,8 @@ import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
 import { ImageLayer } from './paginated/ImageLayer';
 import { commitFloatDrag } from '@/lib/media/wrap';
+import { useMediaStore } from '@/lib/media/store';
+import { reportUnresolvedRefs } from '@/lib/media/diagnostics';
 import { ImageSelection } from './paginated/ImageSelection';
 import { countLineNumbers } from '@/lib/paginated/lineNumbers';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
@@ -47,7 +50,7 @@ import { FloatingToolbar } from './FloatingToolbar';
 import { LinkBubble } from './LinkBubble';
 import { useLinkBubble } from '@/lib/editor/useLinkBubble';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { bitmapVersionNow, resolveMediaBitmap, subscribeBitmaps } from '@/lib/media/bitmapCache';
+import { bitmapVersionNow, getBitmapFailed, resolveMediaBitmap, subscribeBitmaps } from '@/lib/media/bitmapCache';
 import { TooltipProvider } from '../ui/tooltip';
 
 /**
@@ -152,9 +155,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const [imageSel, setImageSel] = useState<{
     placed: import('@tensor-editor/engine').PlacedRect;
     pos: number;
-    nodeWidth: number;
-    nodeHeight: number;
     float: { dx: number; dy: number; z: 'front' | 'behind' } | null;
+    /** M-IMAGES-2.1: an INLINE object's selection — the overlay owns
+     *  the visualization, float-drag is OFF (an in-flow object has no
+     *  float placement of its own to drag into), resize stays. */
+    inline: boolean;
   } | null>(null);
   const [searchPaint, setSearchPaint] = useState<SearchPaint | null>(null);
   const [composing, setComposing] = useState<string | null>(null);
@@ -212,6 +217,35 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       }),
     []
   );
+  // M-IMAGES-2.2 — the unresolved-ref report ALSO rides store changes:
+  // a MediaStore removal triggers no PM transaction (so no relayout),
+  // but the doc's refs may have just gone gray — re-scan (dev only).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    return useMediaStore.subscribe(() => {
+      const ed = useDocumentStore.getState().editor;
+      if (ed) reportUnresolvedRefs(ed);
+    });
+  }, []);
+  // M-IMAGES-2.2 — the painted projections (floating toolbar, caret)
+  // track the VIEWPORT, not just the model: the desk's scroll moves
+  // the anchored overlays with the content, so an image scrolled to
+  // the desk's top edge keeps a toolbar computed for the OLD geometry
+  // and gets clipped by the overflow-hidden desk wrapper (the ribbon
+  // line). Recompute on scroll (the pageless hook's law, paginated
+  // side) — the projection is a pure function of (layout, selection).
+  // LISTENER PLACEMENT: the paginated root RE-MOUNTS across the view
+  // branches (the fonts-gate stub renders no refs at all), so a
+  // ref-anchored listener would attach to a node that doesn't exist
+  // yet and die on the branch flip. Scroll events don't BUBBLE, but
+  // they DO propagate down the CAPTURE phase from the document — one
+  // stable document-level listener sees every scroller, desk included.
+  useEffect(() => {
+    if (!editor) return;
+    const onScroll = () => selectionProjectionRef.current();
+    document.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    return () => document.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
+  }, [editor]);
   // Marker font fallback for EMPTY list items ("style from the block's
   // runs" — no runs → document default). Memoized for BlockCanvas's
   // prop-identity memo.
@@ -234,10 +268,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     [defaultFontFamily, defaultFontSize, mergedStyles]
   );
 
-  function computeToolbar(
-    rects: readonly PaintedRect[],
-    opts?: { forceAbove?: boolean }
-  ): FloatingToolbarPosition | null {
+  function computeToolbar(rects: readonly PaintedRect[]): FloatingToolbarPosition | null {
     const stack = stackRef.current;
     const bounds = paintedBounds(rects);
     if (!stack || !bounds) return null;
@@ -250,10 +281,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     const gap = EDGE_PAD;
     const aboveTop = sr.top + bounds.top * z;
     const belowTop = sr.top + bounds.bottom * z;
-    // M-IMAGES-1.5: images ALWAYS get the toolbar at their TOP edge
-    // (Word behavior); text keeps the room-check above/below.
-    const placement =
-      opts?.forceAbove || aboveTop - TOOLBAR_HEIGHT_EST >= view.top ? 'above' : 'below';
+    // M-IMAGES-1.5: images anchor at their TOP edge (Word behavior) —
+    // M-IMAGES-2.2: BUT ONLY WHEN IT FITS. The old forceAbove override
+    // placed the toolbar above UNCONDITIONALLY, so an image scrolled
+    // to the top of the desk had its toolbar clipped by the
+    // overflow-hidden desk wrapper (right under the ribbon). The room
+    // check (toolbar height + the gap clearance) wins for EVERYTHING
+    // now: no room above → below the anchor.
+    const fitsAbove = aboveTop - TOOLBAR_HEIGHT_EST - EDGE_PAD >= view.top;
+    const placement = fitsAbove ? 'above' : 'below';
     const left = Math.min(
       Math.max(sr.left + bounds.left * z, view.left + EDGE_PAD),
       Math.max(view.left + EDGE_PAD, view.right - EDGE_PAD - TOOLBAR_WIDTH_EST)
@@ -280,10 +316,34 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     setPageInfo(current.result.pages.length, useDocumentStore.getState().currentPage);
     // M-IMAGES-1: a NodeSelection on an image projects to the
     // placed rect (selection state + resize handles).
-    const isImageNodeSelection =
-      typeof (selection as { node?: { type?: { name?: string } } }).node === 'object' &&
-      (selection as { node?: { type?: { name?: string } } }).node?.type?.name === 'image';
-    if (isImageNodeSelection) {
+    // M-IMAGES-2.1: an INLINE object's NodeSelection projects to its
+    // PAINTED rect (inlineObjectRect — the token's line, baseline-
+    // seated) — the same overlay treatment, minus float-drag (an
+    // in-flow object has no float placement of its own to drag into).
+    const selNode = (selection as unknown as { node?: { type?: { name?: string }; attrs?: Record<string, unknown> } }).node;
+    const selName = selNode?.type?.name;
+    const isBlockImageNodeSelection = selName === 'image';
+    const isInlineImageNodeSelection = selName === 'inlineImage';
+    let inlineObjRect: import('@tensor-editor/engine').PlacedRect | null = null;
+    if (isInlineImageNodeSelection) {
+      const node = selNode as { attrs: { width?: unknown; height?: unknown } };
+      inlineObjRect = inlineObjectRect(current.blocks, current.result, selection.from, metricsRef.current!);
+      if (
+        inlineObjRect &&
+        typeof node.attrs.width === 'number' &&
+        typeof node.attrs.height === 'number'
+      ) {
+        setImageSel({
+          placed: inlineObjRect,
+          pos: selection.from,
+          float: null,
+          inline: true,
+        });
+      } else {
+        inlineObjRect = null;
+        setImageSel(null);
+      }
+    } else if (isBlockImageNodeSelection) {
       const node = (selection as unknown as { node: { attrs: Record<string, unknown> } }).node;
       const blockId = node.attrs.blockId as string | undefined;
       const placedRect = blockId
@@ -294,9 +354,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
         setImageSel({
           placed: placedRect,
           pos: block.from,
-          nodeWidth: node.attrs.width,
-          nodeHeight: node.attrs.height,
           float: (node.attrs.float as { dx: number; dy: number; z: 'front' | 'behind' } | null) ?? null,
+          inline: false,
         });
       } else {
         setImageSel(null);
@@ -304,7 +363,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     } else {
       setImageSel(null);
     }
-    const rects = selection.empty
+    // The overlay owns the inline object's visualization — the text
+    // selection band would paint a full line-box stripe OVER the
+    // image (and zero-width before the object-aware walk). The
+    // caret is suppressed too: a NodeSelection has no text caret.
+    const rects = selection.empty || isInlineImageNodeSelection
       ? []
       : textRangeLineRects(
           current.blocks,
@@ -314,8 +377,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
           metricsRef.current!,
           useDocumentStore.getState().pageSetup.pageGap
         );
+    if (isInlineImageNodeSelection) setCaret(null);
     setSelRects(rects);
-    const imageNode = isImageNodeSelection
+    const imageNode = isBlockImageNodeSelection
       ? (selection as unknown as { node: { attrs: { blockId?: string } } }).node
       : null;
     const imageRectForToolbar =
@@ -326,29 +390,26 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // path feeds — pageIndex stride + contentBox included). The first
     // cut passed content-relative coords, so the toolbar landed ~a
     // page-top/center and 96px left of the image (the reported
-    // "center, a little left").
+    // "center, a little left"). The INLINE object rides its painted
+    // rect (placed[] holds block images only — lines hold objects).
     const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
+    const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
+      pageIndex: pr.pageIndex,
+      left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
+      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
+      width: pr.rect.width,
+      height: pr.rect.height,
+    });
     const imageToolbarRect: PaintedRect | null = imageRectForToolbar
-      ? {
-          pageIndex: imageRectForToolbar.pageIndex,
-          left:
-            current.result.pages[imageRectForToolbar.pageIndex]!.contentBox.x +
-            imageRectForToolbar.rect.x,
-          top:
-            imageRectForToolbar.pageIndex * stride +
-            current.result.pages[imageRectForToolbar.pageIndex]!.contentBox.y +
-            imageRectForToolbar.rect.y,
-          width: imageRectForToolbar.rect.width,
-          height: imageRectForToolbar.rect.height,
-        }
-      : null;
+      ? stackRectOf(imageRectForToolbar)
+      : inlineObjRect
+        ? stackRectOf(inlineObjRect)
+        : null;
     setToolbarPos(
       !draggingRef.current &&
         useConfigStore.getState().config.useFloatingToolbar &&
         (imageToolbarRect || !selection.empty)
-        ? computeToolbar(imageToolbarRect ? [imageToolbarRect] : rects, {
-            forceAbove: imageToolbarRect != null, // ALWAYS at the image's top
-          })
+        ? computeToolbar(imageToolbarRect ? [imageToolbarRect] : rects)
         : null
     );
   }
@@ -413,6 +474,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // The heading styleId sync is the same load-path twin.
     ensureBlockIds(editor);
     ensureStyleSync(editor);
+    // M-IMAGES-2.2 — the UNRESOLVED-REF report (dev-only): a media://
+    // ref whose id is NOT in the MediaStore paints the placeholder in
+    // every surface with zero trace of WHY. The other silent-gray
+    // causes (decode failure) got their own diagnostic in bitmapCache;
+    // this is the missing-media half of the loud posture.
+    if (import.meta.env.DEV) reportUnresolvedRefs(editor);
     try {
       const __t0 = performance.now();
       const adapted = pmDocToSemantic(editor.state.doc, baseStyle, {
@@ -1181,6 +1248,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                         styleEpoch={layout.styleEpoch}
                         showCaptions={showCaptions}
                         resolveBitmap={resolveMediaBitmap}
+                        bitmapFailed={getBitmapFailed}
                         bitmapEpoch={bitmapEpoch}
                       />
                     );
@@ -1204,18 +1272,23 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                     ) : null;
                   })()}
 
-                {/* The selected image's border + resize handles. */}
+                {/* The selected image's border + resize handles. An
+                    INLINE object gets no float drag (in-flow objects
+                    have no float placement of their own to drag into)
+                    — its onFloatDrag is undefined and the body drag is
+                    inert (ImageSelection's receipt). */}
                 {imageSel && imageSel.placed.pageIndex === page.index && (
                   <ImageSelection
                     geometry={page}
                     placed={imageSel.placed}
-                    nodeWidth={imageSel.nodeWidth}
-                    nodeHeight={imageSel.nodeHeight}
                     editor={editor}
                     pos={imageSel.pos}
                     zoom={zoomLevel / 100}
-                    onFloatDrag={(dx: number, dy: number) =>
-                      commitFloatDrag(editor, imageSel.pos, imageSel.float, dx, dy)
+                    onFloatDrag={
+                      imageSel.inline
+                        ? undefined
+                        : (dx: number, dy: number) =>
+                            commitFloatDrag(editor, imageSel.pos, imageSel.float, dx, dy)
                     }
                   />
                 )}

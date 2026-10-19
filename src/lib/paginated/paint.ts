@@ -3,6 +3,7 @@ import type { BlockPaint, RunDecor, TextAlign } from './adapter';
 import { applyVariantCaps, fontString } from './metrics';
 import { alignOffset } from './positionMap';
 import { fitDownImage } from '@tensor-editor/engine';
+import { FAILED_HATCH, FAILED_TINT, PENDING_TINT } from '@/lib/media/bitmapCache';
 
 /**
  * Painting LineBox[] onto a per-block-per-page canvas.
@@ -73,8 +74,12 @@ export interface PaintExtras {
    *  SAME value; dims are never re-derived. */
   objectMaxWidth?: number;
   /** M-IMAGES-2: resolve a decoded bitmap for an inline image's sha
-   *  (media/bitmapCache). Absent bitmap → the tinted placeholder. */
+   *  (media/bitmapCache). Absent bitmap → the tinted placeholder;
+   *  TERMINAL failure (getBitmapFailed) → the failed box. */
   resolveBitmap?: (sha: string) => HTMLImageElement | undefined;
+  /** M-IMAGES-2.2: terminal-failure probe for the placeholder split
+   *  (pending tint vs failed box) — same module as resolveBitmap. */
+  bitmapFailed?: (sha: string) => boolean;
 }
 
 /** Paint-only glyph substitution: nbsp → middle-dot, tab → arrow. */
@@ -199,11 +204,25 @@ export function paintLines(
         const bitmap = sha != null ? extras.resolveBitmap?.(sha) : undefined;
         if (bitmap) {
           ctx.drawImage(bitmap, x, baselineY - dims.height, dims.width, dims.height);
+        } else if (sha != null && (extras.bitmapFailed?.(sha) ?? false)) {
+          // TERMINAL failure (M-IMAGES-2.2): darker tint + cross-hatch.
+          // save/restore keeps the hatch's stroke state off the text.
+          ctx.save();
+          ctx.fillStyle = FAILED_TINT;
+          ctx.fillRect(x, baselineY - dims.height, dims.width, dims.height);
+          ctx.strokeStyle = FAILED_HATCH;
+          ctx.beginPath();
+          ctx.moveTo(x, baselineY - dims.height);
+          ctx.lineTo(x + dims.width, baselineY);
+          ctx.moveTo(x + dims.width, baselineY - dims.height);
+          ctx.lineTo(x, baselineY);
+          ctx.stroke();
+          ctx.restore();
         } else {
-          // The tinted placeholder (a load is in flight or the media
-          // is unresolved) — identical geometry to the future bitmap.
+          // The PENDING tint (a load is in flight or the media is
+          // unresolved) — identical geometry to the future bitmap.
           const prevFill = ctx.fillStyle;
-          ctx.fillStyle = 'rgba(0,0,0,0.08)';
+          ctx.fillStyle = PENDING_TINT;
           ctx.fillRect(x, baselineY - dims.height, dims.width, dims.height);
           ctx.fillStyle = prevFill;
         }
@@ -313,25 +332,43 @@ export function paintLines(
 }
 
 /**
- * Dev-only contiguity assertion: LineBox rects must tile the page
- * content box with no seams — each page's lines, in document order, run
- * y=0, y+height, y+height+height... The walk machine guarantees this by
- * construction (the y cursor only resets at a page close); this assert is
- * the tripwire if that invariant ever breaks. Runs under vitest too
- * (import.meta.env.DEV is true there) — test (a) pins it.
+ * Dev-only contiguity assertion: the FLOW TRACK must tile the page
+ * content box with no seams — each page's flow items, in y order, run
+ * y=0, y+height, y+height+height... The walk machine guarantees this
+ * by construction (the y cursor only resets at a page close); this
+ * assert is the tripwire if that invariant ever breaks. Runs under
+ * vitest too (import.meta.env.DEV is true there) — test (a) pins it.
+ *
+ * M-IMAGES-2.1 RECIPT — the flow track is lines[] + NON-FLOATED
+ * placed[] MERGED: an image block consumes flow through its internal
+ * synthetic "line" (getLines, layout.ts) but emits ONLY its PlacedRect
+ * — lines[] alone have a y-gap exactly where an image sits (the false
+ * "contiguity violated" this assert reported on every image doc,
+ * pre-2.1). FLOATS are excluded: placeFloat has ZERO flow presence
+ * (the anchor block's space is never reserved — floats may overlap
+ * text by design; z is paint order).
  */
 export function assertContiguity(result: LayoutResult): void {
   if (!import.meta.env.DEV) return;
   for (let p = 0; p < result.pages.length; p++) {
-    let expectedY = 0;
+    const items: { y: number; h: number; what: string }[] = [];
     for (const line of result.lines) {
       if (line.pageIndex !== p) continue;
-      if (line.rect.y !== expectedY) {
+      items.push({ y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
+    }
+    for (const pr of result.placed) {
+      if (pr.pageIndex !== p || pr.z != null) continue;
+      items.push({ y: pr.rect.y, h: pr.rect.height, what: `placed(${pr.blockId})` });
+    }
+    items.sort((a, b) => a.y - b.y);
+    let expectedY = 0;
+    for (const it of items) {
+      if (it.y !== expectedY) {
         console.error(
-          `[paginated] contiguity violated on page ${p}: line y=${line.rect.y}, expected ${expectedY}`
+          `[paginated] contiguity violated on page ${p}: ${it.what} y=${it.y}, expected ${expectedY}`
         );
       }
-      expectedY = line.rect.y + line.rect.height;
+      expectedY = it.y + it.h;
     }
   }
 }

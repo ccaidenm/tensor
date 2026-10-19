@@ -17,6 +17,7 @@ import {
   IndentDecrease,
   IndentIncrease,
   Info,
+  Image as ImageIcon,
   Italic,
   Library,
   Link2,
@@ -61,6 +62,7 @@ import { usePaletteStore } from '@/lib/palette/store';
 import { useStyleDialogStore } from '@/lib/styles/dialogStore';
 import { useFontBrowserStore } from '@/lib/fonts/browserStore';
 import { insertCaptionForImage } from '@/lib/media/caption';
+import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
 
@@ -126,16 +128,24 @@ function editorCommand(id: string, def: Omit<CommandAction, 'id' | 'run' | 'cont
 }
 
 /** ─── M-IMAGES-1.5 module-scope image helpers (shared by the
- * command closure and the direct-entry write above). ────────────── */
-function selectedImageRef(): { pos: number; attrs: Record<string, unknown> } | null {
+ * command closure and the direct-entry write above). ──────────────
+ * M-IMAGES-2.1: BOTH node kinds qualify (block image + inlineImage)
+ * — a NodeSelection on either is an image selection. `kind` narrows
+ * when a command is shape-specific (align is a BLOCK-only fact — the
+ * adapter reads align on kind 'image' alone; inline objects are
+ * seated by the engine's baseline rule, so their align attr is
+ * inert). */
+function selectedImageRef(kind?: 'image' | 'inlineImage'): { pos: number; attrs: Record<string, unknown> } | null {
   const editor = useDocumentStore.getState().editor;
   if (!editor) return null;
   const sel = editor.state.selection as unknown as {
     node?: { type?: { name?: string }; attrs?: Record<string, unknown> };
     from?: number;
   };
-  if (sel.node?.type?.name !== 'image' || typeof sel.from !== 'number') return null;
-  return { pos: sel.from, attrs: sel.node.attrs ?? {} };
+  const name = sel.node?.type?.name;
+  const isImageKind = name === 'image' || name === 'inlineImage';
+  if (!isImageKind || (kind !== undefined && name !== kind) || typeof sel.from !== 'number') return null;
+  return { pos: sel.from, attrs: sel.node!.attrs ?? {} };
 }
 
 /** Radius law: clamp to [0, half the min dim] — an extreme radius
@@ -149,10 +159,12 @@ function clampRadiusRef(value: number, attrs: Record<string, unknown>): number {
 
 /** One attr write on the selected image (setNodeAttribute — the
  *  standard PM path; paint-only attrs splice, geometry attrs
- *  relayout). */
-function writeImageAttrsRef(writes: Record<string, unknown>): void {
+ *  relayout). `kind` narrows the accepted selection shape — align
+ *  passes 'image' (a BLOCK-only fact; the enablement and the write
+ *  must agree, or a disabled button would still write dead state). */
+function writeImageAttrsRef(writes: Record<string, unknown>, kind?: 'image' | 'inlineImage'): void {
   const editor = useDocumentStore.getState().editor;
-  const sel = selectedImageRef();
+  const sel = selectedImageRef(kind);
   if (!editor || !sel) return;
   editor
     .chain()
@@ -192,6 +204,23 @@ export const COMMANDS: CommandAction[] = [
     menuEventId: 'menu-open',
     keywords: ['open', 'file', 'load', 'document'],
     run: () => void doc().openFile(),
+  },
+  {
+    // M-IMAGES-2.2 — Insert > Image through the palette: the SAME
+    // pipeline as the ribbon's Illustrations button (OS picker → the
+    // ONE insertion pipeline, media/insert.ts). No keyboard shortcut —
+    // the palette IS the reach.
+    id: 'insertImage',
+    title: 'Insert Image',
+    icon: ImageIcon,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'image', 'picture', 'photo', 'upload', 'media'],
+    enablement: () => !!doc().editor,
+    run: () => {
+      const editor = doc().editor;
+      if (editor) void insertImageFromPicker(editor);
+    },
   },
   {
     id: 'save',
@@ -407,6 +436,11 @@ export const COMMANDS: CommandAction[] = [
   // is SELECTED — a NodeSelection). ──────────────────────────────
   ...(() => {
     const imageSelected = () => selectedImageRef() !== null;
+    // M-IMAGES-2.1: align is a BLOCK-image fact (the adapter reads it
+    // on kind 'image' alone; an inline object's align attr is inert —
+    // the engine seats objects by baseline). Enablement is honest:
+    // block selection only.
+    const blockImageSelected = () => selectedImageRef('image') !== null;
     const RADIUS_STEP = 4;
     const alignCommand = (align: 'left' | 'center' | 'right') => ({
       id: `imageAlign${align === 'left' ? 'Left' : align === 'center' ? 'Center' : 'Right'}`,
@@ -415,8 +449,8 @@ export const COMMANDS: CommandAction[] = [
       group: 'format' as const,
       contexts: ['editor'] as ('app' | 'editor')[],
       keywords: ['image', 'align', align],
-      enablement: imageSelected,
-      run: () => writeImageAttrsRef({ align }),
+      enablement: blockImageSelected,
+      run: () => writeImageAttrsRef({ align }, 'image'),
     });
     return [
       alignCommand('left'),

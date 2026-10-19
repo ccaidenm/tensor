@@ -5,7 +5,11 @@ import {
   bitmapVersionNow,
   ensureBitmap,
   getBitmap,
+  getBitmapFailed,
   subscribeBitmaps,
+  FAILED_HATCH,
+  FAILED_TINT,
+  PENDING_TINT,
 } from '@/lib/media/bitmapCache';
 
 /**
@@ -43,7 +47,6 @@ function pathRoundedRect(
   ctx.arcTo(x, y, x + r, y, r);
   ctx.closePath();
 }
-
 
 interface ImageLayerProps {
   geometry: PageGeometry;
@@ -122,10 +125,26 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
       const bitmap = sha ? getBitmap(sha) : undefined;
       if (bitmap) {
         ctx.drawImage(bitmap, px, py, width, height);
+      } else if (sha && getBitmapFailed(sha)) {
+        // M-IMAGES-2.2 — TERMINAL failure: darker tint + cross-hatch,
+        // never mistaken for "still loading". save/restore keeps the
+        // hatch's stroke state off the next paint.
+        ctx.save();
+        ctx.fillStyle = FAILED_TINT;
+        ctx.fillRect(px, py, width, height);
+        ctx.strokeStyle = FAILED_HATCH;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + width, py + height);
+        ctx.moveTo(px + width, py);
+        ctx.lineTo(px, py + height);
+        ctx.stroke();
+        ctx.restore();
       } else {
-        // The tinted placeholder — identical geometry to the future
-        // bitmap (placed[] owns the numbers).
-        ctx.fillStyle = 'rgba(0,0,0,0.08)';
+        // The PENDING tint — identical geometry to the future bitmap
+        // (placed[] owns the numbers).
+        ctx.fillStyle = PENDING_TINT;
         ctx.fillRect(px, py, width, height);
       }
       if (radius > 0) ctx.restore();

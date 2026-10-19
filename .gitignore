@@ -12,3 +12,6 @@ dist
 dist-ssr
 *.local
 .aider*
+
+src/generated
+src/generated/*

@@ -59,15 +59,15 @@ const CORNER_POS: Record<Corner, { x: string; y: string }> = {
 interface ImageSelectionProps {
   geometry: PageGeometry;
   placed: PlacedRect;
-  nodeWidth: number;
-  nodeHeight: number;
   editor: Editor;
   pos: number;
   zoom: number;
   /** Float drag commit (anchor-relative delta; the node's current
    *  float lives in the selection state the caller reads — commit is
-   *  the caller's command). */
-  onFloatDrag: (dx: number, dy: number) => void;
+   *  the caller's command). OPTIONAL: absent for an INLINE object's
+   *  selection — an in-flow object has no float placement of its own
+   *  to drag into (the body drag is inert; the cursor stays neutral). */
+  onFloatDrag?: (dx: number, dy: number) => void;
 }
 
 type Drag =
@@ -77,8 +77,6 @@ type Drag =
 export function ImageSelection({
   geometry,
   placed,
-  nodeWidth,
-  nodeHeight,
   editor,
   pos,
   zoom,
@@ -118,19 +116,27 @@ export function ImageSelection({
     const sx = drag.corner === 'ne' || drag.corner === 'se' ? 1 : -1;
     const sy = drag.corner === 'sw' || drag.corner === 'se' ? 1 : -1;
     let w = Math.max(MIN_DRAG, placed.rect.width + sx * dx);
-    if (drag.free) {
-      setPreview({ w, h: Math.max(MIN_DRAG, placed.rect.height + sy * dy) });
-    } else {
+    let h = Math.max(MIN_DRAG, placed.rect.height + sy * dy);
+    if (!drag.free) {
       // ASPECT-LOCKED (default): the dominant axis drives; the other
       // follows by the placed ratio.
       const hByW = Math.max(MIN_DRAG, w * drag.aspect);
-      const wByH = Math.max(MIN_DRAG, (Math.max(MIN_DRAG, placed.rect.height + sy * dy)) / drag.aspect);
+      const wByH = Math.max(MIN_DRAG, h / drag.aspect);
       if (Math.abs(dx) >= Math.abs(dy)) {
-        setPreview({ w, h: hByW });
+        h = hByW;
       } else {
-        setPreview({ w: wByH, h: Math.max(MIN_DRAG, placed.rect.height + sy * dy) });
+        w = wByH;
       }
     }
+    // M-IMAGES-2.2 — WYSIWYG CLAMP: the preview cannot exceed the
+    // page's content box. The ENGINE re-fits anything larger
+    // (fit-down), so an unclamped preview used to grow with the drag
+    // and then snap back on commit — "accepted the input and did
+    // nothing". The preview now STICKS at the page limit: an honest
+    // response, and the commit always lands where the preview is.
+    w = Math.min(w, geometry.contentBox.width);
+    h = Math.min(h, geometry.contentBox.height);
+    setPreview({ w: Math.max(MIN_DRAG, w), h: Math.max(MIN_DRAG, h) });
   }
 
   function commitResize() {
@@ -140,13 +146,15 @@ export function ImageSelection({
       setPreview(null);
       return;
     }
-    // COMMIT (model truth): scale the NODE's attrs by the same ratio
-    // the preview scaled the placed rect; the engine re-fits and the
-    // next placed[] is authoritative (fit-down reasserts).
-    const ratioW = preview.w / placed.rect.width;
-    const ratioH = drag.free ? preview.h / placed.rect.height : ratioW;
-    const newWidth = Math.max(MIN_DRAG, Math.round(nodeWidth * ratioW));
-    const newHeight = Math.max(MIN_DRAG, Math.round(nodeHeight * ratioH));
+    // COMMIT (M-IMAGES-2.2): the DRAGGED SIZE — the placed dims the
+    // user saw — not a ratio over the intrinsic attrs. An upload
+    // larger than the page is ENGINE-FITTED for display (placed ≠
+    // intrinsic), so the old ratio-scaled intrinsic commit recomputed
+    // attrs the engine re-fitted right back to the SAME placed rect —
+    // "accepted the input and did nothing". The dragged size IS the
+    // chosen document size; fit-down still reasserts on reflow.
+    const newWidth = Math.max(MIN_DRAG, Math.round(preview.w));
+    const newHeight = Math.max(MIN_DRAG, Math.round(preview.h));
     editor
       .chain()
       .command(({ tr, dispatch }) => {
@@ -161,7 +169,10 @@ export function ImageSelection({
   }
 
   // ─── FLOAT DRAG: the body of the selection is the drag zone.
+  // Absent for an INLINE object's selection (in-flow objects don't
+  // float) — the body drag is inert, the cursor neutral.
   function onBodyDown(e: React.PointerEvent) {
+    if (!onFloatDrag) return;
     e.stopPropagation();
     e.preventDefault();
     dragRef.current = { kind: 'float', startX: e.clientX, startY: e.clientY };
@@ -180,7 +191,7 @@ export function ImageSelection({
   function commitFloat() {
     const drag = dragRef.current;
     dragRef.current = null;
-    if (!move || !drag || drag.kind !== 'float') {
+    if (!onFloatDrag || !move || !drag || drag.kind !== 'float') {
       setMove(null);
       return;
     }
@@ -201,7 +212,7 @@ export function ImageSelection({
   }
   const moveTransform = move ? `translate(${move.dx}px, ${move.dy}px)` : undefined;
 
-  const cursor = dragRef.current ? 'grab' : 'move';
+  const cursor = dragRef.current ? 'grab' : onFloatDrag ? 'move' : 'default';
 
   return (
     <div

@@ -49,6 +49,9 @@ interface BlockCanvasProps {
    *  inline paint's LAST seam (M-IMAGES-2 shipped it undefined: the
    *  gray placeholder fired unconditionally). Absent → placeholder. */
   resolveBitmap?: (sha: string) => HTMLImageElement | undefined;
+  /** M-IMAGES-2.2: terminal-failure probe (the failed box vs the
+   *  pending tint). */
+  bitmapFailed?: (sha: string) => boolean;
   /** M-IMAGES-2.1: bumps when ANY bitmap lands — rides boxKey so the
    *  inline paint repaints ONCE on arrival (the arrival law). */
   bitmapEpoch: number;
@@ -69,7 +72,7 @@ interface BlockCanvasProps {
  * their pixels. Falls back to full repaint on canvas resize, first-line
  * edits, or style changes (the fallback cost = the old behavior).
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapEpoch }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -136,7 +139,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
       const damageTop = lines[damageFrom].rect.y - first.rect.y;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, damageTop, width, height - damageTop);
-      paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap });
+      paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed });
       // Receipt: px² actually rasterized (cleared + repainted region).
       __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
     } else {
@@ -145,7 +148,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
       canvas.width = newW;
       canvas.height = newH;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap });
+      paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed });
       // Receipt: full canvas.
       __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
     }
@@ -155,7 +158,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     prevBoxRef.current = boxKey;
   // showCaptions + wrapWidth + bitmapEpoch ride the repaint KEY —
   // each flips the paint when it changes (the arrival repaint).
-  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapEpoch]);
+  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch]);
 
   return (
     <canvas

@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core';
+import { convertInlineToBlock } from './wrap';
 
 /**
  * M-IMAGES-1 — the caption bond: "Add Caption" inserts a paragraph
@@ -10,12 +11,29 @@ import type { Editor } from '@tiptap/core';
  * the shell never re-implements the bond, only writes the flag).
  * The new paragraph is focused immediately — type right away (Word
  * behavior).
+ *
+ * M-IMAGES-2.1 — the INLINE policy (extract-then-caption): a caption
+ * bonds a BLOCK image to the paragraph BELOW it; an in-flow object
+ * cannot hold the bond (the adapter refuses float+keepNext's shape —
+ * the loud-validation seam). So an inline selection first runs the
+ * EXACT conversion the Wrap menu uses (convertInlineToBlock — which
+ * selects the new block node), then the block path proceeds
+ * unchanged. One policy, one conversion primitive, no forks.
  */
 export function insertCaptionForImage(editor: Editor): void {
-  const selection = editor.state.selection as unknown as {
-    node?: { type?: { name?: string }; nodeSize?: number; attrs?: Record<string, unknown> };
-    from?: number;
-  };
+  const readSel = () =>
+    editor.state.selection as unknown as {
+      node?: { type?: { name?: string }; nodeSize?: number; attrs?: Record<string, unknown> };
+      from?: number;
+    };
+  let selection = readSel();
+  // INLINE → EXTRACT first (the new block image is selected by the
+  // conversion; everything below then rides the block path).
+  if (selection.node?.type?.name === 'inlineImage') {
+    convertInlineToBlock(editor);
+    selection = readSel();
+    if (selection.node?.type?.name !== 'image') return; // conversion refused — bail honestly
+  }
   const node = selection.node;
   if (!node || node.type?.name !== 'image' || typeof selection.from !== 'number') return;
   const imagePos = selection.from;

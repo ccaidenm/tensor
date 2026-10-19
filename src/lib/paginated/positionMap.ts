@@ -1,5 +1,5 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
-import type { LayoutResult, LineBox, TextMetrics, TextStyle } from '@tensor-editor/engine';
+import { fitDownImage, type LayoutResult, type LineBox, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
 import type { AdapterBlock } from './adapter';
 
 // THE PRINCIPLE: all selection state changes go through PM
@@ -80,25 +80,95 @@ export function lineForOffset(lines: readonly LineBox[], offset: number): LineBo
 }
 
 /** x (content-box px) of a text offset within its line, measured with
- * the same metrics instance that measured the layout. */
+ * the same metrics instance that measured the layout. `objectMaxWidth`
+ * (the block's BASE wrap width — contentBox − indents, the engine's
+ * clamp input) makes the walk OBJECT-AWARE: an offset past an inline
+ * object's token pays the object's PLACED advance (the same fit-down
+ * the engine/painter used — data, never measured). Without it the
+ * walk is text-only (legacy callers; a caret past an object would sit
+ * at the object's LEFT edge — the zero-width selection rect bug). */
 export function lineOffsetX(
   line: LineBox,
   block: AdapterBlock,
   offset: number,
-  metrics: TextMetrics
+  metrics: TextMetrics,
+  objectMaxWidth?: number
 ): number {
   let x = line.rect.x;
   for (const seg of line.segments) {
     if (offset <= seg.start) break;
     const end = Math.min(offset, seg.end);
     const run = block.runs[seg.runIndex];
-    // M-IMAGES-2: objects have no text metrics — the engine's line
-    // geometry already accounts for their advance; the caret x math
-    // walks text only.
-    if (run && run.kind !== 'inlineImage') x += metrics.measure(block.text.slice(seg.start, end), run.style);
+    if (run && run.kind === 'inlineImage') {
+      // M-IMAGES-2: objects have no text metrics — the advance is the
+      // object's placed WIDTH (data; the same one-scale fit-down the
+      // engine measured the token with). Offsets at/before the token
+      // break above and never reach this branch.
+      if (objectMaxWidth != null) {
+        x += fitDownImage(run.width, run.height, objectMaxWidth, Infinity).width;
+      }
+    } else if (run) {
+      x += metrics.measure(block.text.slice(seg.start, end), run.style);
+    }
     if (offset < seg.end) break;
   }
   return x;
+}
+
+/** The block's BASE wrap width — the engine's breakLines maxWidth and
+ *  the inline object clamp's input (one derivation, exported for the
+ *  callers that previously re-derived it inline). */
+export function blockWrapWidth(contentWidth: number, block: AdapterBlock): number {
+  return contentWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0);
+}
+
+/**
+ * M-IMAGES-2.1 — the INLINE object's painted rect (the selection
+ * overlay's geometry): the token's line, baseline-seated, the object's
+ * placed dims — the SAME numbers paint.ts's drawImage uses. `pos` is
+ * the PM position of the inlineImage NODE (a NodeSelection's from) —
+ * it maps to the token offset (one position per object). Rect is
+ * content-box-relative (the PlacedRect frame — the overlay consumer
+ * adds the contentBox, identical to block images).
+ */
+export function inlineObjectRect(
+  blocks: readonly AdapterBlock[],
+  result: LayoutResult,
+  pos: number,
+  metrics: TextMetrics
+): import('@tensor-editor/engine').PlacedRect | null {
+  const bo = pmPosToBlockOffset(blocks, pos);
+  if (!bo) return null;
+  const { block, offset } = bo;
+  const page0 = result.pages[0];
+  const line = lineForOffset(result.lines.filter((l) => l.blockId === block.id), offset);
+  if (!page0 || !line) return null;
+  const cb = page0.contentBox;
+  const wrap = blockWrapWidth(cb.width, block);
+  const seg = line.segments.find((s) => offset >= s.start && offset < s.end);
+  const run = seg ? block.runs[seg.runIndex] : undefined;
+  if (!seg || !run || run.kind !== 'inlineImage') return null;
+  const dims = fitDownImage(run.width, run.height, wrap, Infinity);
+  const off = alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+  // The object's left edge: everything before the token advanced
+  // (text measured + earlier objects' placed widths).
+  const left = off + lineOffsetX(line, block, offset, metrics, wrap);
+  // BOTTOM-AT-BASELINE (the engine's seating rule — verticalFor grows
+  // the line's ascent by the placed height): the object's top is the
+  // baseline minus its height.
+  return {
+    blockId: block.id,
+    kind: 'image',
+    src: run.src,
+    alt: run.alt,
+    pageIndex: line.pageIndex,
+    rect: {
+      x: left,
+      y: line.rect.y + (line.baseline - dims.height),
+      width: dims.width,
+      height: dims.height,
+    },
+  };
 }
 
 /** The span walk shared by every range-rect derivation: PM range ->
@@ -163,8 +233,9 @@ export function textRangeLineRects(
       first || last
         ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
         : 0;
-    const x1 = first || last ? off + lineOffsetX(line, block, s, metrics) : line.rect.x;
-    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics) : cb.width;
+    const wrap = blockWrapWidth(cb.width, block);
+    const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
     return {
       pageIndex: line.pageIndex,
       left: cb.x + x1,
@@ -205,8 +276,9 @@ export function textRangeTextExtents(
       first || last
         ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
         : 0;
-    const x1 = first || last ? off + lineOffsetX(line, block, s, metrics) : line.rect.x;
-    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics) : cb.width;
+    const wrap = blockWrapWidth(cb.width, block);
+    const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
 
     // The matched runs' ink extent on this line.
     let ascent = 0;
@@ -292,7 +364,7 @@ export function caretGeometry(
   return {
     pageIndex: line.pageIndex,
     x:
-      lineOffsetX(line, bo.block, bo.offset, metrics) +
+      lineOffsetX(line, bo.block, bo.offset, metrics, blockWrapWidth(page0.contentBox.width, bo.block)) +
       // Indent-narrowed box (rect.x IS indentLeft): the caret x of a
       // centered/right-aligned indented block stays in its column.
       alignOffset(bo.block.align, line.rect.width, page0.contentBox.width - line.rect.x),
