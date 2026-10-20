@@ -109,7 +109,7 @@ function KeywordsField({ chips, pending, onPendingChange, onCommit, onRemove }: 
     <div className="flex items-start gap-2 text-sm">
       <span className="mt-1.5 w-20 flex-none text-muted-foreground">Keywords</span>
       <div
-        className="flex min-h-8 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50"
+        className="flex min-h-8 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-muted px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50"
         onClick={(e) => { if (e.target === e.currentTarget) inputRef.current?.focus(); }}
       >
         {chips.map((chip, i) => (
@@ -121,7 +121,7 @@ function KeywordsField({ chips, pending, onPendingChange, onCommit, onRemove }: 
             <button
               type="button"
               aria-label={`Remove keyword ${chip}`}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground cursor-pointer hover:text-foreground"
               onClick={() => onRemove(i)}
             >
               <X size={10} strokeWidth={2.5} />
@@ -132,7 +132,7 @@ function KeywordsField({ chips, pending, onPendingChange, onCommit, onRemove }: 
           ref={inputRef}
           className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           aria-label="Keywords"
-          placeholder={chips.length ? 'Add keyword…' : 'Comma-separated keywords'}
+          placeholder={chips.length ? 'Add keyword…' : ''}
           value={pending}
           onChange={(e) => onPendingChange(e.target.value)}
           onKeyDown={(e) => {
