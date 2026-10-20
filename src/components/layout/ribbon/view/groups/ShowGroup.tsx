@@ -9,6 +9,13 @@ export function ShowGroup() {
   // reads) is untouched.
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
   const setShowCaptions = useConfigStore((s) => s.setShowCaptions);
+  // M-RULER: the ruler is a PAGINATED-mode surface (it rules real page
+  // geometry) — like the page-setup controls, it disables (never
+  // disappears) in pageless mode.
+  const showRuler = useConfigStore((s) => s.config.editor.showRuler);
+  const setShowRuler = useConfigStore((s) => s.setShowRuler);
+  const isPageless =
+    useConfigStore((s) => s.config.editor.defaultPageLayout) !== 'Pages';
 
   return (
     <RibbonGroup>
@@ -21,8 +28,9 @@ export function ShowGroup() {
       <IconButton
         label="Show Ruler"
         icon={<Ruler size={16} />}
-        onClick={() => {}}
-        disabled
+        active={showRuler}
+        disabled={isPageless}
+        onClick={() => setShowRuler(!showRuler)}
       />
       <IconButton
         label="Show Margins"

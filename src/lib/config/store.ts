@@ -18,6 +18,7 @@ interface ConfigStore {
   setPasteOnMiddleClick: (value: boolean) => void;
   setShowNonPrintingChars: (value: boolean) => void;
   setShowCaptions: (value: boolean) => void;
+  setShowRuler: (value: boolean) => void;
   /** Zoom law: clamp to [50, 200] (ZOOM_MIN/ZOOM_MAX — ZoomGroup's
    *  constants, now the single spelling of the range). */
   setZoomLevel: (value: number) => void;
@@ -126,6 +127,14 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       },
     })),
 
+  setShowRuler: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, showRuler: value },
+      },
+    })),
+
   setZoomLevel: (value) =>
     set((state) => ({
       config: {
@@ -223,3 +232,23 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       },
     })),
 }));
+
+// M-RULER THEME SYNC: the `dark` class is applied SYNCHRONOUSLY with
+// every theme value, including the very first, from this module — one
+// writer, registered before any component subscribes (zustand listeners
+// fire in registration order, so the class is always current BEFORE
+// React re-renders). App's passive useEffect used to own this, but
+// layout-effect painters read computed styles BEFORE passive effects
+// run: chrome that paints from computed styles (the M-RULER canvas)
+// mounted after a persisted dark config loaded would take its FIRST
+// paint against the stale (light) class — white knockouts on a dark
+// bar — and, with no later theme change firing, never repaint.
+function applyThemeClass(theme: Config["theme"]): void {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+}
+applyThemeClass(useConfigStore.getState().config.theme);
+useConfigStore.subscribe((state, prev) => {
+  if (state.config.theme !== prev.config.theme) {
+    applyThemeClass(state.config.theme);
+  }
+});

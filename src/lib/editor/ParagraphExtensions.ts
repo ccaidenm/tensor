@@ -80,8 +80,10 @@ const indentAttribute = {
 
 /** The paragraph's EFFECTIVE left indent (px): the indentLeft attr plus
  * the legacy `indent` steps folded in. One writer (indentLeft), one
- * reader (this), migration on the first command press. */
-function currentIndentLeft(node: { attrs?: Record<string, unknown> }): number {
+ * reader (this — the indent commands AND the M-RULER projection both
+ * read through it, so the legacy fold can never fork), migration on
+ * the first command press. */
+export function currentIndentLeft(node: { attrs?: Record<string, unknown> }): number {
   const left = typeof node.attrs?.indentLeft === 'number' && Number.isFinite(node.attrs.indentLeft)
     ? node.attrs.indentLeft
     : 0;

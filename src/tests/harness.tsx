@@ -6,9 +6,17 @@ import { FakeMetrics } from './fakeMetrics';
 
 /** Renders the REAL production <Editor/> (tensorExtensions, mode routing,
  * PaginatedView) with deterministic FakeMetrics injected through the
- * metrics seam, optionally replacing the document content. */
+ * metrics seam, optionally replacing the document content. The desk
+ * wrapper/scroller structure mirrors App.tsx — the M-RULER bar portals
+ * into [data-desk-wrapper], so the contract must exist here too. */
 export function renderTensor(initialHTML?: string) {
-  const utils = render(<Editor metrics={FakeMetrics} />);
+  const utils = render(
+    <div data-desk-wrapper className="relative">
+      <div data-desk-scroll style={{ overflow: 'auto' }}>
+        <Editor metrics={FakeMetrics} />
+      </div>
+    </div>,
+  );
   const editor = useDocumentStore.getState().editor;
   if (!editor) throw new Error('editor not in document store after render');
   if (initialHTML) {
@@ -24,14 +32,17 @@ export function renderTensor(initialHTML?: string) {
 export function renderTensorInScrollContainer(initialHTML?: string) {
   let utils: ReturnType<typeof render> | null = null;
   const el: ReactElement = (
-    <div
-      data-testid="scroll-container"
-      // overflowY as an explicit longhand so jsdom's getComputedStyle
-      // (used by getScrollParent) reliably reports it — shorthand
-      // expansion for inline styles is inconsistent there.
-      style={{ overflow: 'auto', overflowY: 'auto', height: 400, width: 900 }}
-    >
-      <Editor metrics={FakeMetrics} />
+    <div data-desk-wrapper className="relative">
+      <div
+        data-testid="scroll-container"
+        data-desk-scroll
+        // overflowY as an explicit longhand so jsdom's getComputedStyle
+        // (used by getScrollParent) reliably reports it — shorthand
+        // expansion for inline styles is inconsistent there.
+        style={{ overflow: 'auto', overflowY: 'auto', height: 400, width: 900 }}
+      >
+        <Editor metrics={FakeMetrics} />
+      </div>
     </div>
   );
   utils = render(el);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
@@ -21,6 +21,7 @@ import {
   type PaintedRect,
 } from '@/lib/paginated/positionMap';
 import { hitTest } from '@/lib/paginated/hitTest';
+import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
 import { setPaintedScrollHandler } from '@/lib/paginated/ScrollGuardExtension';
 import { searchPluginKey } from '@/lib/editor/search/SearchExtension';
@@ -43,6 +44,7 @@ import { useMediaStore } from '@/lib/media/store';
 import { reportUnresolvedRefs } from '@/lib/media/diagnostics';
 import { ImageSelection } from './paginated/ImageSelection';
 import { countLineNumbers } from '@/lib/paginated/lineNumbers';
+import { Ruler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
@@ -206,6 +208,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   // M-IMAGES-1: caption display toggle (NPC precedent — ink only).
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
+  // M-RULER: gates the ruler PORTAL below — toggling unmounts the
+  // overlay chrome entirely (clean teardown; zero reflow either way).
+  const showRuler = useConfigStore((s) => s.config.editor.showRuler);
   // M-IMAGES-2.1 — the INLINE paint's arrival law: bumps when any
   // bitmap lands (pending inline objects repaint once; no relayout —
   // the bitmapVersion is geometry-free, it only rides boxKey).
@@ -246,6 +251,21 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     document.addEventListener('scroll', onScroll, { passive: true, capture: true });
     return () => document.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
   }, [editor]);
+  // M-RULER: the ruler bar is chrome OUTSIDE the desk's scroll flow —
+  // this view portals it into the desk wrapper (the relative flex
+  // container between the Ribbon and the scroller) as a static overlay:
+  // flush under the ribbon, always visible, zero reflow on show/hide.
+  // The wrapper is App-owned DOM; this closest() lookup is the one
+  // structural contract between them. Re-runs on the layout flip: the
+  // fonts-gate stub mounts a different root, so rootRef is null until
+  // the real branch first commits.
+  const hasLayout = layout !== null;
+  const [deskWrapper, setDeskWrapper] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setDeskWrapper(
+      rootRef.current?.closest<HTMLElement>('[data-desk-wrapper]') ?? null,
+    );
+  }, [hasLayout]);
   // Marker font fallback for EMPTY list items ("style from the block's
   // runs" — no runs → document default). Memoized for BlockCanvas's
   // prop-identity memo.
@@ -1148,6 +1168,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const { width: pageW, height: pageH } = geometry.size;
   const gap = pageSetup.pageGap;
   const z = zoomLevel / 100;
+  // M-RULER: the caret block's indent attrs — derived straight from the
+  // immutable PM state at render time (selection and doc changes always
+  // re-render through the projection setStates, so this never goes
+  // stale; the derivation itself is cheap — one node(1) read). null
+  // renders the margins-only ruler (headings/codeBlocks/lists).
+  const rulerModel = editor && layout ? deriveRulerModel(editor.state) : null;
   const stackW = pageW;
   const stackH = result.pages.length * pageH + (result.pages.length - 1) * gap;
   const rootRect = rootRef.current?.getBoundingClientRect();
@@ -1376,6 +1402,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
           />
         </TooltipProvider>
       )}
+      {/* M-RULER: the ruler bar portals OUT of the scroll flow into the
+          desk wrapper — static overlay chrome pinned to its top edge
+          (flush under the ribbon; show/hide reflows nothing). Geometry
+          comes from the engine's PageGeometry — the same facts the
+          pages below paint. */}
+      {showRuler &&
+        deskWrapper &&
+        createPortal(
+          <Ruler geometry={geometry} zoom={z} model={rulerModel} />,
+          deskWrapper,
+        )}
     </div>
   );
 }

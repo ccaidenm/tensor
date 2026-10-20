@@ -35,7 +35,7 @@ export function SymbolButton({ editor }: { editor: Editor }) {
             <PopoverTrigger render={<Button variant="ghost" size="icon-sm"><Omega size={16} /></Button>} />
           }
         />
-        <TooltipContent>Insert Symbol</TooltipContent>
+        <TooltipContent>Symbol</TooltipContent>
       </Tooltip>
 
       <PopoverContent className="w-80 p-2">
