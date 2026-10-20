@@ -130,21 +130,23 @@ function App() {
     return () => window.removeEventListener('tensor-bench', onBenchEvent);
   }, []);
 
-  const theme = useConfigStore((s) => s.config.theme);
   const styleDialog = useStyleDialogStore();
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme]);
 
   return (
     <>
       <main className="flex h-screen flex-col bg-background text-foreground">
         <Ribbon />
-        <div className="relative flex-1 overflow-hidden">
+        {/* data-desk-wrapper: the M-RULER portal target — the ruler bar
+            mounts here as static overlay chrome (flush under the Ribbon,
+            outside the scroller's flow; show/hide reflows nothing). */}
+        <div data-desk-wrapper className="relative flex-1 overflow-hidden">
           {/* Desk: the editor scroll surface — the muted token reads
-              as the classic gray desk in light mode and adapts in dark. */}
-          <div className="absolute inset-0 overflow-auto bg-muted pt-6 pb-6">
+              as the classic gray desk in light mode and adapts in dark.
+              data-desk-scroll: the ruler reads this element's clientWidth
+              (scrollbar-correct page centering) and scrollLeft (horizontal
+              overflow tracking). pt-8 leaves room for the 18px ruler
+              overlay + a 14px gap to the page. */}
+          <div className="absolute inset-0 overflow-auto bg-muted pt-8 pb-6" data-desk-scroll>
             <Editor />
           </div>
           <SearchPanel />

@@ -29,6 +29,11 @@ export const ConfigSchema = z.object({
      *  presentation-only ink, both modes; the model is untouched and
      *  ToF reads captions regardless). Default: captions visible. */
     showCaptions: z.boolean().default(true),
+    /** M-RULER: the ruler bars — per-axis display toggles (the command
+     *  palette's show/hide surface). Pages mode only (pageless has no
+     *  page geometry to rule). Defaults: visible, matching Word/GDocs. */
+    showHorizontalRuler: z.boolean().default(true),
+    showVerticalRuler: z.boolean().default(true),
     zoomLevel: z.number().default(100),
     /** Painted-selection background; '' = theme primary at selection
      * opacity (the default look). */
@@ -49,6 +54,8 @@ export const ConfigSchema = z.object({
     customColors: [],
     showNonPrintingChars: false,
     showCaptions: true,
+    showHorizontalRuler: true,
+    showVerticalRuler: true,
     zoomLevel: 100,
     selectionColor: '',
     measurementUnit: 'inches',

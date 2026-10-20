@@ -104,7 +104,7 @@ export function MarginsDialog() {
           <DialogTitle>Margins</DialogTitle>
           <DialogDescription>
             Page margins in {MEASUREMENT_UNITS[unit].label.toLowerCase()}. Changes apply when you
-            press Apply and are saved with the document.
+            press Done and are saved with the document.
           </DialogDescription>
         </DialogHeader>
 
@@ -147,8 +147,8 @@ export function MarginsDialog() {
         </div>
 
         <DialogFooter>
-          <Button size="sm" onClick={apply}>Apply</Button>
-          <Button size="sm" variant="ghost" onClick={closeMargins}>Done</Button>
+          <Button size="sm" variant="ghost" onClick={closeMargins}>Cancel</Button>
+          <Button size="sm" onClick={apply}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

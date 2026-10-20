@@ -14,6 +14,7 @@ import type { StyleDefinition, StyleRegistrySnapshot } from '@/lib/styles/types'
 import { headingStyleId } from '@/lib/styles/types';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { lookupStyle } from '@/lib/styles/registry';
+import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
 import {
   baselineRunStyle,
   resolveBlockTier,
@@ -730,6 +731,11 @@ function convertNode(
     ...(hints.rule ? { rule: true } : {}),
     ...(hints.code ? { code: true } : {}),
   };
+  // TAB STOPS (M-RULER Phase 3): projected onto the block px
+  // content-box-relative, normalized (sorted, deduped, absent when
+  // empty). Inert in the breaker until Phase 4; hashBlock deliberately
+  // doesn't cover the field yet (see engine/src/types.ts).
+  const tabStops = kind === 'paragraph' ? normalizeTabStops(node.attrs?.tabStops) : null;
   const shared = {
     id: blockId,
     runs,
@@ -738,6 +744,7 @@ function convertNode(
     ...(totalLeft ? { indentLeft: totalLeft } : {}),
     ...(indentRight ? { indentRight } : {}),
     ...(firstLineIndent != null ? { firstLineIndent } : {}),
+    ...(tabStops ? { tabStops } : {}),
     ...hintFields,
   };
 

@@ -74,6 +74,11 @@ const stubContext: StubRecord = {
   lineTo: () => {},
   arcTo: () => {},
   closePath: () => {},
+  // M-RULER Phase 5: the vertical ruler's rotated labels (no-ops — the
+  // stub records raw fillText args pre-transform, which is what the
+  // label assertions read).
+  translate: () => {},
+  rotate: () => {},
   // M-IMAGES-2.2: the FAILED-box cross-hatch strokes (recorded so the
   // failed-vs-pending placeholder split is assertable).
   strokeStyle: 'rgba(0,0,0,0.35)',

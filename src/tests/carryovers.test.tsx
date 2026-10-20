@@ -72,7 +72,7 @@ describe('margins-0', () => {
       });
     }
     act(() => {
-      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Apply')!);
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     await settle();
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({

@@ -31,6 +31,7 @@ import {
   Quote,
   Redo2,
   RemoveFormatting,
+  Ruler,
   Save,
   SaveAll,
   Scissors,
@@ -331,6 +332,21 @@ export const COMMANDS: CommandAction[] = [
     run: () => {
       const { config, setTheme } = cfg();
       setTheme(config.theme === 'dark' ? 'light' : 'dark');
+    },
+  },
+    // M-RULER: ONE toggle for both ruler bars (the config's
+  // showHorizontalRuler/showVerticalRuler flags — either visible → hide
+  // both; else show both — mirroring the ribbon button). Pages mode
+  // only; the bars unmount themselves outside it.
+  {
+    id: 'toggleRulers',
+    title: 'Toggle Rulers',
+    icon: Ruler,
+    group: 'actions',
+    keywords: ['ruler', 'rulers', 'show', 'hide', 'toggle', 'margins', 'tabs'],
+    run: () => {
+      const c = cfg().config.editor;
+      cfg().setBothRulers(!(c.showHorizontalRuler || c.showVerticalRuler));
     },
   },
   {
