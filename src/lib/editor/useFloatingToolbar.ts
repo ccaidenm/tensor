@@ -20,6 +20,23 @@ export interface FloatingToolbarPosition {
 const TOOLBAR_HEIGHT_ESTIMATE = 44;
 const VIEWPORT_EDGE_PADDING = 8;
 
+/**
+ * M-TABLES: the cell element under the (collapsed) caret, or null.
+ * Used to anchor the toolbar when the caret parks inside a table with
+ * an empty selection — collapsed text rects are zero-width, so the
+ * CELL's rendered box is the honest anchor (pageless surface only;
+ * the paginated view computes its own positions from painted rects).
+ */
+function caretTableCellElement(ed: Editor): HTMLElement | null {
+  try {
+    const domAt = ed.view.domAtPos(ed.state.selection.from);
+    const el = domAt.node instanceof HTMLElement ? domAt.node : domAt.node.parentElement;
+    return (el?.closest('td, th') as HTMLElement | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
   const [position, setPosition] = useState<FloatingToolbarPosition | null>(null);
   const isDragging = useRef(false);
@@ -37,7 +54,25 @@ export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
       const { empty } = state.selection;
 
       if (empty) {
-        setPosition(null);
+        // A caret parked inside a table cell still surfaces the table
+        // context strip (Word parity) — anchored to the cell's box.
+        const cellEl = caretTableCellElement(currentEditor);
+        if (!cellEl) {
+          setPosition(null);
+          return;
+        }
+        const cellRect = cellEl.getBoundingClientRect();
+        // jsdom lays out nothing (zero rects) — no reposition in tests.
+        if (cellRect.width === 0 && cellRect.height === 0) return;
+        const placement: 'above' | 'below' =
+          cellRect.top > TOOLBAR_HEIGHT_ESTIMATE + VIEWPORT_EDGE_PADDING ? 'above' : 'below';
+        setPosition({
+          left: cellRect.left,
+          top: cellRect.top,
+          bottom: cellRect.bottom,
+          placement,
+          gap: VIEWPORT_EDGE_PADDING,
+        });
         return;
       }
 

@@ -43,6 +43,7 @@ import {
   MessageSquareText,
   TextCursorInput,
   Squircle,
+  Table,
   WrapText,
   BringToFront,
   SendToBack,
@@ -67,6 +68,7 @@ import { insertCaptionForImage } from '@/lib/media/caption';
 import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
+import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
 
 /**
  * M-PALETTE. The declarative app command registry — the single source
@@ -222,6 +224,21 @@ export const COMMANDS: CommandAction[] = [
     run: () => {
       const editor = doc().editor;
       if (editor) void insertImageFromPicker(editor);
+    },
+  },
+  {
+    // M-TABLES — Insert > Table through the palette: opens the same
+    // exact-dimension dialog the ribbon grid picker's "Insert Table…"
+    // opens. No keyboard shortcut — the palette IS the reach.
+    id: 'insertTable',
+    title: 'Insert Table…',
+    icon: Table,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'table', 'grid', 'rows', 'columns', 'cells'],
+    enablement: () => !!doc().editor,
+    run: () => {
+      useInsertTableStore.getState().open();
     },
   },
   {

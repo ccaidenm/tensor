@@ -46,51 +46,93 @@ export function hitTest(
   if (y < first.rect.y) return { blockId: first.blockId, offset: first.rangeStart };
   if (y >= last.rect.y + last.rect.height) return { blockId: last.blockId, offset: last.rangeEnd };
 
-  // Lines tile the content box (contiguity invariant) — exactly one
-  // contains y; the fallback only guards a broken invariant.
-  const line = pageLines.find((l) => y >= l.rect.y && y < l.rect.y + l.rect.height) ?? last;
+  const x = localX - cb.x;
+
+  // M-TABLES — THE CELL-FIRST RULE: a click inside a tableCell rect
+  // resolves within THAT cell (the lane's own lines, y-clamped),
+  // regardless of parallel neighbors. The bands' rects tile the table;
+  // the per-glyph walk over a wrong lane would land the caret across
+  // the cell wall.
+  const pageCells = result.placed.filter(
+    (pr) => pr.pageIndex === pageIndex && pr.kind === 'tableCell',
+  );
+  const hitCell = pageCells.find(
+    (pr) =>
+      x >= pr.rect.x && x <= pr.rect.x + pr.rect.width && y >= pr.rect.y && y <= pr.rect.y + pr.rect.height,
+  );
+  const glyphWalk = (line: (typeof pageLines)[number], block: AdapterBlock): HitResult | null => {
+    // Same offset the painter and caret use — the indent-narrowed box
+    // (rect.x IS indentLeft). A click in the marker GUTTER (x < indent)
+    // falls through the nearest-glyph loop and resolves to the item's
+    // first position — the nearest-line rule stays symmetric with paint.
+    const baseX = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+    for (let si = 0; si < line.segments.length; si++) {
+      const seg = line.segments[si]!;
+      const run = block.runs[seg.runIndex];
+      if (!run) continue;
+      // M-RULER Phase 4: the cursor seeds from the ENGINE's placed x —
+      // prefix sums cannot model tab advances. A \t's advance is the gap
+      // to the next segment's x (the placed pen jump); the tab resolves
+      // by the same glyph-midpoint rule over that jump.
+      let cursor = baseX + seg.x;
+      if (run.kind === 'inlineImage') {
+        // M-IMAGES-2 — the object token: ONE position per object (the
+        // engine's unbreakable-token contract). The ENTIRE painted
+        // advance belongs to the object — a click anywhere inside it
+        // resolves to its offset (the token position BEFORE the node).
+        // The clamp width is the cell's LANE CONTENT width for table
+        // lines (the engine's own clamp input), else the block's BASE
+        // wrap width — the SAME inputs the engine's clamp used.
+        const wrap = line.tableCell ? line.tableCell.width : blockWrapWidth(cb.width, block);
+        const dims = fitDownImage(run.width, run.height, wrap, Infinity);
+        if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start };
+        continue;
+      }
+      const isTab = seg.end === seg.start + 1 && block.text[seg.start] === '\t';
+      const nextSeg = line.segments[si + 1];
+      for (let i = seg.start; i < seg.end; i++) {
+        const w = isTab
+          ? (nextSeg ? nextSeg.x : line.rect.width) - seg.x
+          : metrics.measure(block.text[i]!, run.style);
+        if (x < cursor + w / 2) return { blockId: line.blockId, offset: i };
+        cursor += w;
+      }
+    }
+    return { blockId: line.blockId, offset: line.rangeEnd };
+  };
+  if (hitCell?.cell) {
+    const block = blocks.find((b) => b.id === hitCell.blockId);
+    if (block) {
+      // The cell's OWN lines (lane identity: the anchor's row/col), y-ordered.
+      const laneLines = pageLines
+        .filter(
+          (l) =>
+            l.blockId === hitCell.blockId &&
+            l.tableCell &&
+            l.tableCell.row === hitCell.cell!.row &&
+            l.tableCell.col === hitCell.cell!.col,
+        )
+        .sort((a, b) => a.rect.y - b.rect.y);
+      const laneFirst = laneLines[0];
+      const laneLast = laneLines[laneLines.length - 1];
+      if (laneFirst && laneLast) {
+        // The lane's y-clamp: above the text → the slice's start; below
+        // → the line's end (the cell's remaining height is slack).
+        const line =
+          y < laneFirst.rect.y
+            ? laneFirst
+            : laneLines.find((l) => y >= l.rect.y && y < l.rect.y + l.rect.height) ?? laneLast;
+        return glyphWalk(line, block);
+      }
+    }
+  }
+
+  // Lines tile the content box (band-wise contiguity) — table cell
+  // lines are lane content (skipped: the cell-first rule above owns
+  // them); exactly one flow line contains y.
+  const line = pageLines.find((l) => !l.tableCell && y >= l.rect.y && y < l.rect.y + l.rect.height) ?? last;
 
   const block = blocks.find((b) => b.id === line.blockId);
   if (!block) return null;
-  const x = localX - cb.x;
-  // Same offset the painter and caret use — the indent-narrowed box
-  // (rect.x IS indentLeft). A click in the marker GUTTER (x < indent)
-  // falls through the nearest-glyph loop and resolves to the item's
-  // first position — the nearest-line rule stays symmetric with paint.
-  const baseX = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
-  for (let si = 0; si < line.segments.length; si++) {
-    const seg = line.segments[si]!;
-    const run = block.runs[seg.runIndex];
-    if (!run) continue;
-    // M-RULER Phase 4: the cursor seeds from the ENGINE's placed x —
-    // prefix sums cannot model tab advances. A \t's advance is the gap
-    // to the next segment's x (the placed pen jump); the tab resolves
-    // by the same glyph-midpoint rule over that jump.
-    let cursor = baseX + seg.x;
-    if (run.kind === 'inlineImage') {
-      // M-IMAGES-2 — the object token: ONE position per object (the
-      // engine's unbreakable-token contract). The ENTIRE painted
-      // advance belongs to the object — a click anywhere inside it
-      // resolves to its offset (the token position BEFORE the node);
-      // the glyph-midpoint rule above is text-only, never applied to
-      // objects (the 2.1 fix: half an image was dead click surface).
-      // The clamp width is the block's BASE wrap width — the SAME
-      // input the engine's inline clamp and the painter use (one
-      // scale, never a re-derivation).
-      const wrap = blockWrapWidth(cb.width, block);
-      const dims = fitDownImage(run.width, run.height, wrap, Infinity);
-      if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start };
-      continue;
-    }
-    const isTab = seg.end === seg.start + 1 && block.text[seg.start] === '\t';
-    const nextSeg = line.segments[si + 1];
-    for (let i = seg.start; i < seg.end; i++) {
-      const w = isTab
-        ? (nextSeg ? nextSeg.x : line.rect.width) - seg.x
-        : metrics.measure(block.text[i]!, run.style);
-      if (x < cursor + w / 2) return { blockId: line.blockId, offset: i };
-      cursor += w;
-    }
-  }
-  return { blockId: line.blockId, offset: line.rangeEnd };
+  return glyphWalk(line, block);
 }

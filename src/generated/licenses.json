@@ -870,6 +870,12 @@
     "repository": "https://github.com/ueberdosis/tiptap"
   },
   {
+    "name": "@tiptap/extension-table",
+    "version": "3.31.4",
+    "license": "MIT",
+    "repository": "https://github.com/ueberdosis/tiptap"
+  },
+  {
     "name": "@tiptap/extension-text",
     "version": "3.31.4",
     "license": "MIT",

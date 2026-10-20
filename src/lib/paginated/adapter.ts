@@ -7,6 +7,7 @@ import type {
   ParagraphBlock,
   Run,
   SemanticDoc,
+  TableBlock,
   TextStyle,
 } from '@tensor-editor/engine';
 import type { TextAlign } from './positionMap';
@@ -126,6 +127,18 @@ export interface AdapterBlock {
    * LineBox segments' runIndex) — shell-side paint concerns the engine's
    * layout math never sees. */
   runDecor: RunDecor[];
+  /**
+   * M-TABLES — present IFF this block is a table: the CELL-PARAGRAPH
+   * map, the PM↔table-text offset bridge. The table's runs/text are
+   * the CANONICAL concatenation (rows top-down, cells left-to-right,
+   * paragraphs in order); each entry names one cell paragraph's text:
+   * `relStart` = the paragraph's first text position relative to the
+   * TABLE node (pmStart = block.from + relStart), `textStart`/`textLen`
+   * = the paragraph's slice of the block text. The slices tile the
+   * block text exactly (no gaps) — PM's table cells are isolating, so
+   * every text selection lives inside one slice.
+   */
+  table?: { paragraphs: { relStart: number; textStart: number; textLen: number }[] };
 }
 
 export interface RunDecor {
@@ -196,7 +209,7 @@ function defaultListStyle(kind: 'bullet' | 'ordered'): string {
  */
 interface CachedConversion {
   gen: number;
-  semantic: ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock;
+  semantic: ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock | TableBlock;
   adapter: AdapterBlock;
   /** Projection facts this conversion was built under (sibling-dependent). */
   indentLeft: number;
@@ -373,7 +386,7 @@ function ownIndentRight(node: PMNode): number {
 
 /** How a PM node projects into the engine's Block union. */
 interface Projection {
-  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image';
+  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'table';
   /** Block-tier left indent (px) — 0 for unindented blocks. Images
    * don't wrap — the indent family is ignored for them (engine
    * ImageBlock law). */
@@ -453,91 +466,31 @@ function textStyleOf(resolved: RunStyle, lineHeight: number | undefined, withBol
  * resolveBlockTier (THE one function) with the registry snapshot —
  * baseStyle < paragraph style < charStyle < direct marks, per
  * property. */
-function convertNode(
+interface RunConversion {
+  runs: Run[];
+  runDecor: RunDecor[];
+  text: string;
+}
+
+/**
+ * THE PROSE RUN WALK (M-TABLES extraction): one paragraph-like node's
+ * children → runs/decor/text. inlineImage children map to
+ * InlineImageRuns; any other non-text inline child throws the
+ * sentinel. Shared by the flow tier AND table cell paragraphs — one
+ * run mapping, no fork.
+ */
+function walkProseRuns(
   node: PMNode,
-  projection: Projection,
-  blockId: string,
+  kind: string,
+  paraDef: StyleDefinition | null,
   base: RunStyle,
   definitions: Record<string, StyleDefinition>,
   dropped: Set<string>
-): CachedConversion {
-  const kind = projection.kind;
-
-  // M-IMAGES-1 — images convert structurally: no runs, no text, no
-  // BlockTier (indent/firstLine are wrap geometry the engine IGNORES
-  // for images by law; align is their horizontal control, relative to
-  // the FULL content box). src OPAQUE, dims REQUIRED (validated at
-  // the projection site), keepNext = the caption bond (FlowPolicy).
-  // M-IMAGES-2 — FLOATS (E-IMG-3): the float echo rides through; and
-  // the LOUD REFUSAL: a floated block NEVER carries flow — the
-  // engine's validateFloatFlow THROWS on float+keepNext (a float is
-  // not in flow and must not derive pages), so the adapter must never
-  // EMIT one. float present → flow omitted entirely, warned once.
-  if (kind === 'image') {
-    const float =
-      projection.float && Number.isFinite(projection.float.dx) && Number.isFinite(projection.float.dy)
-        ? { dx: projection.float.dx, dy: projection.float.dy, z: projection.float.z }
-        : null;
-    if (float && projection.keepNext) {
-      warnFloatFlowOnce();
-    }
-    const semantic: ImageBlock = {
-      id: blockId,
-      kind: 'image',
-      src: projection.src ?? '',
-      width: projection.width ?? 0,
-      height: projection.height ?? 0,
-      align: projection.align ?? 'left',
-      alt: projection.alt ?? '',
-      ...(float
-        ? { float }
-        : projection.keepNext
-          ? { flow: { keepNext: true } }
-          : {}),
-    };
-    return {
-      gen: cacheGeneration,
-      semantic,
-      // The AdapterBlock mirrors paint-side facts: images carry no
-      // text; placed[] (not lines[]) is the render surface.
-      adapter: { id: blockId, runs: [], text: '', from: 0, to: 0, align: 'left', runDecor: [] },
-      indentLeft: 0,
-    };
-  }
-
-  // The paragraph tier's style identity. Headings resolve through
-  // `heading-{level}` — the styleId attr's guaranteed twin (the
-  // HeadingSync plugin maintains the alignment); paragraphs through
-  // their styleId attr ('normal' default, schema-guaranteed).
-  const paraDef =
-    kind === 'heading'
-      ? lookupStyle(headingStyleId(node.attrs.level ?? 1), definitions)
-      : lookupStyle(
-          typeof node.attrs?.styleId === 'string' && node.attrs.styleId
-            ? node.attrs.styleId
-            : 'normal',
-          definitions
-        );
-
+): RunConversion {
   const runs: Run[] = [];
   const runDecor: RunDecor[] = [];
   let text = '';
-
-  const alignAttr = node.attrs?.textAlign;
-
-  if (kind === 'codeBlock') {
-    const code = codeRuns(node, base);
-    runs.push(...code.runs);
-    text = code.text;
-    // EMPTY-TEXTBLOCK INHERITANCE (P1): an empty codeBlock emits one
-    // zero-length run carrying the pageless-look style — the engine
-    // measures present-run styles over baseStyle (P1 ruling), so the
-    // blank line matches its mono siblings, not the prose default.
-    if (runs.length === 0) {
-      runs.push({ text: '', style: { fontFamily: 'monospace', fontSize: base.fontSize } });
-    }
-  } else {
-    node.forEach((child) => {
+  node.forEach((child) => {
       if (!child.isText || !child.text) {
         // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): an inlineImage child
         // maps to an InlineImageRun in the containing paragraph's
@@ -659,28 +612,257 @@ function convertNode(
         strike: resolved.strike,
       });
       text += runText;
-    });
+  });
+  return { runs, runDecor, text };
+}
+
+/**
+ * EMPTY-TEXTBLOCK INHERITANCE (P1): an empty paragraph/heading emits
+ * ONE zero-length run with the block's effective style — same
+ * resolution as normal runs minus the marks (none exist on an empty
+ * textblock). The engine measures present-run styles over baseStyle
+ * (P1 ruling), so an empty paragraph in a 2.0-spaced style measures
+ * 2.0 and its NPC ¶ paints at the right size. (The horizontalRule
+ * atom — kind 'paragraph' by projection — never reaches here: its
+ * baseStyle-measured placeholder line comes from the projection's own
+ * runs push.)
+ */
+function emptyTextBlockRun(
+  node: PMNode,
+  paraDef: StyleDefinition | null,
+  base: RunStyle
+): Run {
+  const resolved = resolveRun({ base, para: paraDef });
+  const attrLineHeight = parseLineHeight(node.attrs?.lineHeight, resolved.fontSize);
+  const tierLineHeight = paraDef?.properties.lineHeight;
+  const lineHeight = attrLineHeight !== undefined ? attrLineHeight : tierLineHeight;
+  // No bold/italic keys on the empty-textblock style (the pinned
+  // P1 projection shape) — the glyph is the ¶ placeholder.
+  return { text: '', style: textStyleOf(resolved, lineHeight, false) };
+}
+
+function convertNode(
+  node: PMNode,
+  projection: Projection,
+  blockId: string,
+  base: RunStyle,
+  definitions: Record<string, StyleDefinition>,
+  dropped: Set<string>
+): CachedConversion {
+  const kind = projection.kind;
+
+  // M-IMAGES-1 — images convert structurally: no runs, no text, no
+  // BlockTier (indent/firstLine are wrap geometry the engine IGNORES
+  // for images by law; align is their horizontal control, relative to
+  // the FULL content box). src OPAQUE, dims REQUIRED (validated at
+  // the projection site), keepNext = the caption bond (FlowPolicy).
+  // M-IMAGES-2 — FLOATS (E-IMG-3): the float echo rides through; and
+  // the LOUD REFUSAL: a floated block NEVER carries flow — the
+  // engine's validateFloatFlow THROWS on float+keepNext (a float is
+  // not in flow and must not derive pages), so the adapter must never
+  // EMIT one. float present → flow omitted entirely, warned once.
+  if (kind === 'image') {
+    const float =
+      projection.float && Number.isFinite(projection.float.dx) && Number.isFinite(projection.float.dy)
+        ? { dx: projection.float.dx, dy: projection.float.dy, z: projection.float.z }
+        : null;
+    if (float && projection.keepNext) {
+      warnFloatFlowOnce();
+    }
+    const semantic: ImageBlock = {
+      id: blockId,
+      kind: 'image',
+      src: projection.src ?? '',
+      width: projection.width ?? 0,
+      height: projection.height ?? 0,
+      align: projection.align ?? 'left',
+      alt: projection.alt ?? '',
+      ...(float
+        ? { float }
+        : projection.keepNext
+          ? { flow: { keepNext: true } }
+          : {}),
+    };
+    return {
+      gen: cacheGeneration,
+      semantic,
+      // The AdapterBlock mirrors paint-side facts: images carry no
+      // text; placed[] (not lines[]) is the render surface.
+      adapter: { id: blockId, runs: [], text: '', from: 0, to: 0, align: 'left', runDecor: [] },
+      indentLeft: 0,
+    };
   }
 
-  // EMPTY-TEXTBLOCK INHERITANCE (P1): an empty paragraph/heading emits
-  // ONE zero-length run with the block's effective style — same
-  // resolution as normal runs minus the marks (none exist on an empty
-  // textblock). The engine measures present-run styles over baseStyle
-  // (P1 ruling), so an empty paragraph in a 2.0-spaced style measures
-  // 2.0 and its NPC ¶ paints at the right size. The horizontalRule
-  // atom (kind 'paragraph' by projection) is excluded — it carries no
-  // text style and keeps the baseStyle-measured placeholder line.
+  // M-TABLES — the table projects WHOLE (one engine TableBlock, one
+  // blockId): rows → TableRowData, each cell's paragraphs through the
+  // SHARED walkProseRuns (one run mapping, no fork) into the table's
+  // CANONICAL arrays — rows top-down, cells left-to-right, paragraphs
+  // in order; the engine re-derives the same concatenation from the
+  // TableBlock structure (agreement by construction). Non-paragraph
+  // cell content throws the sentinel (v1 cell content = paragraphs
+  // only; the pageless fallback renders it until the engine grows
+  // cell code/quote/image support). The AdapterBlock carries the
+  // CELL-PARAGRAPH map (relStart positions relative to the table
+  // node — push() patches from/to the same way, and positionMap
+  // derives pmStart = from + relStart).
+  if (kind === 'table') {
+    const rows: TableBlock['rows'] = [];
+    const tableRuns: Run[] = [];
+    const tableDecor: RunDecor[] = [];
+    const paragraphs: { relStart: number; textStart: number; textLen: number }[] = [];
+    let tableText = '';
+    // Position walk with a MANUAL cursor (PM forEach offsets are
+    // CONTENT-relative and its third callback arg is an INDEX — never
+    // a position): cursor tracks each child node's position relative
+    // to the TABLE node. The table node's open is +1, so the first row
+    // sits at relative 1; each node's span = its nodeSize.
+    let cursor = 1;
+    node.forEach((row) => {
+      if (row.type.name !== 'tableRow') {
+        throw new UnsupportedDocError(`[adapter] unexpected node '${row.type.name}' inside a table`);
+      }
+      const rowPos = cursor;
+      cursor = rowPos + 1; // into the row's content
+      const cells: TableBlock['rows'][0]['cells'] = [];
+      let allHeader = row.childCount > 0;
+      row.forEach((cell) => {
+        if (cell.type.name !== 'tableCell' && cell.type.name !== 'tableHeader') {
+          throw new UnsupportedDocError(`[adapter] unexpected node '${cell.type.name}' inside a table row`);
+        }
+        if (cell.type.name !== 'tableHeader') allHeader = false;
+        const cellPos = cursor;
+        cursor = cellPos + 1; // into the cell's content
+        const content: ParagraphBlock[] = [];
+        cell.forEach((para) => {
+          if (para.type.name !== 'paragraph' && para.type.name !== 'heading') {
+            throw new UnsupportedDocError(
+              `[adapter] unsupported cell content '${para.type.name}' in a table — ` +
+                'cell content is paragraphs only in v1 (the pageless fallback renders it)',
+            );
+          }
+          const cellParaDef =
+            para.type.name === 'heading'
+              ? lookupStyle(headingStyleId(para.attrs.level ?? 1), definitions)
+              : lookupStyle(
+                  typeof para.attrs?.styleId === 'string' && para.attrs.styleId
+                    ? para.attrs.styleId
+                    : 'normal',
+                  definitions
+                );
+          const conv = walkProseRuns(para, para.type.name, cellParaDef, base, definitions, dropped);
+          if (conv.runs.length === 0) {
+            conv.runs.push(emptyTextBlockRun(para, cellParaDef, base));
+          }
+          const textStart = tableText.length;
+          content.push({
+            id: typeof para.attrs?.blockId === 'string' ? para.attrs.blockId : '',
+            kind: 'paragraph',
+            runs: conv.runs,
+          });
+          tableRuns.push(...conv.runs);
+          tableDecor.push(...conv.runDecor);
+          // THE SEPARATOR LAW (M-TABLES 2 — the engine's computeTableLayout
+          // advances textOffset by the same +1): every cell paragraph's
+          // slice gets a trailing '\n' in the canonical text, so empty
+          // cells own a DISTINCT textStart and the PM↔offset bridge
+          // round-trips. The separator never enters a line range.
+          tableText += conv.text + '\n';
+          // The paragraph's first text position, TABLE-relative:
+          // the paragraph node at `cursor` (relative to the table),
+          // its text at +1.
+          paragraphs.push({ relStart: cursor + 1, textStart, textLen: conv.text.length });
+          cursor += para.nodeSize;
+        });
+        cursor = cellPos + cell.nodeSize;
+        cells.push({
+          colspan: typeof cell.attrs.colspan === 'number' ? cell.attrs.colspan : 1,
+          rowspan: typeof cell.attrs.rowspan === 'number' ? cell.attrs.rowspan : 1,
+          colwidth:
+            Array.isArray(cell.attrs.colwidth) && cell.attrs.colwidth.some((w) => typeof w === 'number')
+              ? (cell.attrs.colwidth.map((w) => (typeof w === 'number' ? w : null)) as (number | null)[])
+              : null,
+          backgroundColor:
+            typeof cell.attrs.backgroundColor === 'string' && cell.attrs.backgroundColor
+              ? cell.attrs.backgroundColor
+              : null,
+          content,
+        });
+      });
+      cursor = rowPos + row.nodeSize;
+      rows.push({ isHeader: allHeader, cells });
+    });
+
+    const borderStyle = node.attrs?.borderStyle;
+    const semantic: TableBlock = {
+      id: blockId,
+      kind: 'table',
+      rows,
+      borderStyle: borderStyle === 'none' || borderStyle === 'outer' ? borderStyle : 'all',
+    };
+    return {
+      gen: cacheGeneration,
+      semantic,
+      adapter: {
+        id: blockId,
+        runs: tableRuns,
+        text: tableText,
+        from: 0,
+        to: 0,
+        align: 'left',
+        runDecor: tableDecor,
+        table: { paragraphs },
+      },
+      indentLeft: 0,
+    };
+  }
+
+  // The paragraph tier's style identity. Headings resolve through
+  // `heading-{level}` — the styleId attr's guaranteed twin (the
+  // HeadingSync plugin maintains the alignment); paragraphs through
+  // their styleId attr ('normal' default, schema-guaranteed).
+  const paraDef =
+    kind === 'heading'
+      ? lookupStyle(headingStyleId(node.attrs.level ?? 1), definitions)
+      : lookupStyle(
+          typeof node.attrs?.styleId === 'string' && node.attrs.styleId
+            ? node.attrs.styleId
+            : 'normal',
+          definitions
+        );
+
+  const runs: Run[] = [];
+  const runDecor: RunDecor[] = [];
+  let text = '';
+
+  const alignAttr = node.attrs?.textAlign;
+
+  if (kind === 'codeBlock') {
+    const code = codeRuns(node, base);
+    runs.push(...code.runs);
+    text = code.text;
+    // EMPTY-TEXTBLOCK INHERITANCE (P1): an empty codeBlock emits one
+    // zero-length run carrying the pageless-look style — the engine
+    // measures present-run styles over baseStyle (P1 ruling), so the
+    // blank line matches its mono siblings, not the prose default.
+    if (runs.length === 0) {
+      runs.push({ text: '', style: { fontFamily: 'monospace', fontSize: base.fontSize } });
+    }
+  } else {
+    // M-TABLES: the walk is SHARED — table cell paragraphs convert
+    // through the same walkProseRuns (one run mapping, no fork).
+    const prose = walkProseRuns(node, kind, paraDef, base, definitions, dropped);
+    runs.push(...prose.runs);
+    runDecor.push(...prose.runDecor);
+    text = prose.text;
+  }
+
+  // EMPTY-TEXTBLOCK INHERITANCE (P1) — the shared helper (M-TABLES:
+  // cell paragraphs inherit through the same function).
   if (
     runs.length === 0 &&
     (node.type.name === 'paragraph' || node.type.name === 'heading')
   ) {
-    const resolved = resolveRun({ base, para: paraDef });
-    const attrLineHeight = parseLineHeight(node.attrs?.lineHeight, resolved.fontSize);
-    const tierLineHeight = paraDef?.properties.lineHeight;
-    const lineHeight = attrLineHeight !== undefined ? attrLineHeight : tierLineHeight;
-    // No bold/italic keys on the empty-textblock style (the pinned
-    // P1 projection shape) — the glyph is the ¶ placeholder.
-    runs.push({ text: '', style: textStyleOf(resolved, lineHeight, false) });
+    runs.push(emptyTextBlockRun(node, paraDef, base));
   }
 
   // BLOCK TIER (M6 + M-STYLES): direct attrs beat the paragraph style's
@@ -1025,13 +1207,16 @@ export function pmDocToSemantic(
         node,
         offset,
       );
+    } else if (name === 'table') {
+      // M-TABLES — the table joins the projection: one engine
+      // TableBlock + the cell-paragraph map (see the conversion).
+      push(projected(node, { kind: 'table', indentLeft: 0 }, offset), node, offset);
     } else {
-      // THE THROW LIST (M6.1, pruned by M-IMAGES-1): only the true
-      // future features remain — BEFORE this milestone the list was
-      // (table, image, drawing); image has shipped.
+      // THE THROW LIST (M6.1, pruned by M-IMAGES-1 and M-TABLES): the
+      // last true future feature is (drawing).
       throw new UnsupportedDocError(
         `[adapter] unsupported block kind '${name}' at offset ${offset}: future features ` +
-          '(table, drawing) — the pageless fallback renders them until the engine supports them'
+          '(drawing) — the pageless fallback renders them until the engine supports them'
       );
     }
   });

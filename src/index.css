@@ -100,6 +100,73 @@ body {
   outline: none;
 }
 
+/* ── TABLES (pageless surface) — M-TABLES ─────────────────────────────
+   The pageless editor renders the PM DOM directly, so this is where the
+   paginated engine will eventually need to mirror (borders, padding,
+   the borderStyle presets read off data-table-border). Kept here —
+   scoped under .ProseMirror — so the planned pageless-mode rework can
+   move/rename it in one place. */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 8px 0;
+  position: relative;
+}
+.ProseMirror td,
+.ProseMirror th {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  position: relative;
+  vertical-align: top;
+  min-width: 25px;
+}
+.ProseMirror th {
+  font-weight: 600;
+  text-align: left;
+}
+/* borderStyle presets (the borderStyle attr's render marker). */
+.ProseMirror table[data-table-border='none'] td,
+.ProseMirror table[data-table-border='none'] th {
+  border: none;
+}
+.ProseMirror table[data-table-border='outer'] {
+  border: 1px solid var(--border);
+}
+.ProseMirror table[data-table-border='outer'] td,
+.ProseMirror table[data-table-border='outer'] th {
+  border: none;
+}
+/* Cell selection (prosemirror-tables .selectedCell) — a quiet primary
+   wash under multi-cell selections, over any cell shading. */
+.ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  pointer-events: none;
+}
+/* Built-in columnResizing (resizable: true) — the drag handle renders
+   at each column's right edge; the class below lands on the editor DOM
+   for the duration of a drag. */
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  z-index: 20;
+  background-color: var(--primary);
+  pointer-events: none;
+}
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
 /* The document's very first block gets its natural CSS margin-top
    collapsed, matching how every editor treats the top of the document. */
 .ProseMirror > :first-child {

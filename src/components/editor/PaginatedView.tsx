@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
+import { CellSelection } from '@tiptap/pm/tables';
 import type { LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import { pmDocToSemantic, UnsupportedDocError, type AdapterBlock } from '@/lib/paginated/adapter';
@@ -15,12 +16,17 @@ import {
   inlineObjectRect,
   paintedBounds,
   textRangeLineRects,
+  cellPosAt,
   textRangeTextExtents,
   wordRangeAround,
   type CaretGeometry,
   type PaintedRect,
 } from '@/lib/paginated/positionMap';
 import { hitTest } from '@/lib/paginated/hitTest';
+import { cellAround, findTable, TableMap } from '@tiptap/pm/tables';
+import type { CellSelection as CellSelectionType } from '@tiptap/pm/tables';
+import { TableCellLayer } from './paginated/TableCellLayer';
+import { TableResizeHandles } from './paginated/TableResizeHandles';
 import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
 import { setPaintedScrollHandler } from '@/lib/paginated/ScrollGuardExtension';
@@ -388,17 +394,85 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // selection band would paint a full line-box stripe OVER the
     // image (and zero-width before the object-aware walk). The
     // caret is suppressed too: a NodeSelection has no text caret.
-    const rects = selection.empty || isInlineImageNodeSelection
-      ? []
-      : textRangeLineRects(
-          current.blocks,
-          current.result,
-          selection.from,
-          selection.to,
-          metricsRef.current!,
-          useDocumentStore.getState().pageSetup.pageGap
-        );
-    if (isInlineImageNodeSelection) setCaret(null);
+    const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
+    const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
+      pageIndex: pr.pageIndex,
+      left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
+      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
+      width: pr.rect.width,
+      height: pr.rect.height,
+    });
+    // M-TABLES: a CELL selection paints the selected cells' rect
+    // slices (every page slice — a split cell highlights across its
+    // page fragments), matched by grid identity through the
+    // cell-paragraph map's table (prosemirror-tables findCell — the
+    // SAME grid identity the engine's cell rects echo).
+    const isCellSelection = selection instanceof CellSelection;
+    let cellRects: PaintedRect[] | null = null;
+    if (isCellSelection) {
+      cellRects = [];
+      (selection as CellSelectionType).forEachCell((_node, pos) => {
+        // The projection NEVER crashes a relayout: a boundary position
+        // (a cell's end) can miss the map — skip that cell.
+        try {
+          // The CELL NODE's own offset is the map's key (not a position
+          // inside it — cellAround resolves to the cell's start, which
+          // sits inside the row, the depth findTable's map wants).
+          const cellPos = cellAround(editor.state.doc.resolve(pos + 1));
+          if (!cellPos) return;
+          const loc = findTable(cellPos);
+          if (!loc) return;
+          const blockId = loc.node.attrs?.blockId;
+          if (typeof blockId !== 'string') return;
+          const cellBox = TableMap.get(loc.node).findCell(cellPos.pos - loc.start);
+          for (const pr of current.result.placed) {
+            if (pr.kind !== 'tableCell' || pr.blockId !== blockId) continue;
+            if (pr.cell?.row !== cellBox.top || pr.cell?.col !== cellBox.left) continue;
+            cellRects!.push(stackRectOf(pr));
+          }
+        } catch {
+          return;
+        }
+      });
+    }
+    // M-TABLES: a caret parked inside a cell anchors the toolbar at
+    // the CELL's slice on the caret's page (Word's context bar).
+    let caretCellAnchor: PaintedRect | null = null;
+    if (selection.empty && !isCellSelection) {
+      try {
+        const cellPos = cellAround(editor.state.doc.resolve(selection.head));
+        const loc = cellPos ? findTable(cellPos) : null;
+        const blockId = loc?.node.attrs?.blockId;
+        if (cellPos && loc && typeof blockId === 'string') {
+          const cellBox = TableMap.get(loc.node).findCell(cellPos.pos - loc.start);
+          const pageIdx = geom?.pageIndex ?? 0;
+          const slice = current.result.placed.find(
+            (p) =>
+              p.kind === 'tableCell' &&
+              p.blockId === blockId &&
+              p.cell?.row === cellBox.top &&
+              p.cell?.col === cellBox.left &&
+              p.pageIndex === pageIdx,
+          );
+          if (slice) caretCellAnchor = stackRectOf(slice);
+        }
+      } catch {
+        caretCellAnchor = null; // a boundary position missed the map — no anchor
+      }
+    }
+    const rects = isCellSelection
+      ? cellRects!
+      : selection.empty || isInlineImageNodeSelection
+        ? []
+        : textRangeLineRects(
+            current.blocks,
+            current.result,
+            selection.from,
+            selection.to,
+            metricsRef.current!,
+            useDocumentStore.getState().pageSetup.pageGap
+          );
+    if (isInlineImageNodeSelection || isCellSelection) setCaret(null);
     setSelRects(rects);
     const imageNode = isBlockImageNodeSelection
       ? (selection as unknown as { node: { attrs: { blockId?: string } } }).node
@@ -413,14 +487,6 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // page-top/center and 96px left of the image (the reported
     // "center, a little left"). The INLINE object rides its painted
     // rect (placed[] holds block images only — lines hold objects).
-    const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
-    const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
-      pageIndex: pr.pageIndex,
-      left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
-      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
-      width: pr.rect.width,
-      height: pr.rect.height,
-    });
     const imageToolbarRect: PaintedRect | null = imageRectForToolbar
       ? stackRectOf(imageRectForToolbar)
       : inlineObjRect
@@ -429,8 +495,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     setToolbarPos(
       !draggingRef.current &&
         useConfigStore.getState().config.useFloatingToolbar &&
-        (imageToolbarRect || !selection.empty)
-        ? computeToolbar(imageToolbarRect ? [imageToolbarRect] : rects)
+        (imageToolbarRect || caretCellAnchor || isCellSelection || !selection.empty)
+        ? computeToolbar(
+            imageToolbarRect
+              ? [imageToolbarRect]
+              : caretCellAnchor
+                ? [caretCellAnchor]
+                : isCellSelection
+                  ? cellRects!
+                  : rects,
+          )
         : null
     );
   }
@@ -597,7 +671,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       const point = pending;
       pending = null;
       const pos = pmPosAt(point);
-      if (pos != null) editor?.commands.setTextSelection({ from: anchor, to: pos });
+      if (pos != null) {
+        // M-TABLES: a drag crossing a cell wall becomes a CELL
+        // selection (prosemirror-tables' drag rule, shell-side — the
+        // painted surface owns the events; the hidden view never sees
+        // the mouse). Same cell → the plain text selection.
+        const anchorCell = editor ? cellPosAt(editor.state.doc, anchor) : null;
+        const headCell = editor && pos != null ? cellPosAt(editor.state.doc, pos) : null;
+        if (anchorCell != null && headCell != null && anchorCell !== headCell) {
+          editor?.commands.setCellSelection({ anchorCell, headCell });
+        } else {
+          editor?.commands.setTextSelection({ from: anchor, to: pos });
+        }
+      }
     };
     const onMove = (ev: MouseEvent) => {
       pending = { clientX: ev.clientX, clientY: ev.clientY };
@@ -675,10 +761,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
         inPageX <= p.rect.x + p.rect.width &&
         inPageY >= p.rect.y &&
         inPageY <= p.rect.y + p.rect.height;
-      // 1. FRONT + in-flow (topmost wins):
+      // 1. FRONT + in-flow (topmost wins): IMAGES ONLY — the
+      //    tableCell rects are paint geometry; a click inside a cell
+      //    routes to the text hitTest (the caret/cell rules).
       for (let i = layout.result.placed.length - 1; i >= 0; i--) {
         const p = layout.result.placed[i]!;
-        if (p.pageIndex !== pageIndex || p.z === 'behind') continue;
+        if (p.kind !== 'image' || p.pageIndex !== pageIndex || p.z === 'behind') continue;
         if (inside(p)) {
           const block = layout.blocks.find((b) => b.id === p.blockId);
           if (block) {
@@ -699,7 +787,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       if (!textTrackHit) {
         for (let i = layout.result.placed.length - 1; i >= 0; i--) {
           const p = layout.result.placed[i]!;
-          if (p.pageIndex !== pageIndex || p.z !== 'behind') continue;
+          if (p.kind !== 'image' || p.pageIndex !== pageIndex || p.z !== 'behind') continue;
           if (inside(p)) {
             behindCandidate = p.blockId;
             break;
@@ -1141,9 +1229,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     return (
       <div className="relative" data-testid="paginated-fallback">
         <div className="mx-auto w-full max-w-3xl px-8 py-6">
-          <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            This document contains content the paginated engine does not handle yet (lists,
-            quotes, code blocks, rules). Rendering without pages — nothing is lost.
+          <div
+            className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            data-testid="paginated-fallback-banner"
+          >
+            This document contains content the paginated engine does not handle yet (tables,
+            lists, quotes, code blocks, rules). Rendering without pages — nothing is lost.
           </div>
           <EditorContent
             editor={editor}
@@ -1254,9 +1345,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                   <ImageLayer
                     geometry={page}
                     placed={result.placed.filter(
-                      (p) => p.pageIndex === page.index && p.z === 'behind',
+                      (p) => p.pageIndex === page.index && p.z === 'behind' && p.kind === 'image',
                     )}
                     radii={imageRadii}
+                  />
+                )}
+                {/* M-TABLES: cell fills/borders paint UNDER the text
+                    tracks (above the sheet + behind-floats). */}
+                {(visiblePages === null || visiblePages.has(page.index)) && (
+                  <TableCellLayer
+                    geometry={page}
+                    cells={result.placed.filter(
+                      (p) => p.pageIndex === page.index && p.kind === 'tableCell',
+                    )}
                   />
                 )}
                 {(visiblePages === null || visiblePages.has(page.index)) &&
@@ -1296,6 +1397,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                       />
                     );
                   })}
+                {/* M-TABLES: the column drag handles (above the text
+                    canvases for pointer reach). */}
+                {(visiblePages === null || visiblePages.has(page.index)) && (
+                  <TableResizeHandles
+                    geometry={page}
+                    cells={result.placed.filter(
+                      (p) => p.pageIndex === page.index && p.kind === 'tableCell',
+                    )}
+                    editor={editor}
+                    tablePosOf={(blockId) => blocks.find((b) => b.id === blockId)?.from ?? null}
+                  />
+                )}
                 {lnNumbers &&
                   (() => {
                     const entries: { line: (typeof result.lines)[number]; number: number }[] = [];
