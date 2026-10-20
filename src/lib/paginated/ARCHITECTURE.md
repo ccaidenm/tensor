@@ -391,7 +391,7 @@ Clicks land on the painted surface, a div/canvas stack PM knows nothing about. `
 
 > Clicks resolve to the nearest line WITHIN the nearest sheet: a click in a page margin or the inter-sheet gap clamps to that sheet's nearest line, and x beyond a line's end resolves to that line's end position.
 
-Mechanically: the page stride is $s = h_{\text{page}} + g$ (page height plus gap), so the click's page index is $p = \lfloor y / s \rfloor$; a click in the second half of an inter-sheet gap ($y - ps > h_{\text{page}} + \tfrac{g}{2}$) belongs to the next sheet. The containing line is found by y-contiguity, then a per-character walk using `metrics.measure` with the same `alignOffset` the painter used, choosing the offset whose glyph midpoint the click passed.
+Mechanically: the page stride is $s = h_{\text{page}} + g$ (page height plus gap), so the click's page index is $p = \lfloor y / s \rfloor$; a click in the second half of an inter-sheet gap ($y - ps > h_{\text{page}} + \tfrac{g}{2}$) belongs to the next sheet. The containing line is found by y-contiguity, then a per-character walk using `metrics.measure` with the same `alignOffset` the painter used, choosing the offset whose glyph midpoint the click passed. INLINE OBJECTS (M-IMAGES-2.1) are the exception to the midpoint rule: the object's ENTIRE painted advance resolves to the token (one position per object — half an image is not text), clamped with the same `fitDownImage` on the block's base wrap width the engine and painter use.
 
 The legacy pipeline died on clicks in spacers and gaps; those exact dead zones are now regression tests (`src/tests/interaction.test.tsx`, "legacy dead-zone fixtures"): trailing spaces after short last lines, bottom-margin clicks, both halves of the inter-sheet gap, and "far-right click never lands on page 2".
 
@@ -453,7 +453,7 @@ Note what isn't there: no debounce, no rAF, no timeout. The model is **synchrono
 
 Store subscriptions (`pageSetup`, `defaultFontFamily/Size`) exist only to *schedule* `relayoutRef.current()`; the values are always re-read at call time (L4).
 
-`assertContiguity` (`paint.ts`) is a dev-mode tripwire that line rects tile each page's content box with no seams, the invariant [hit testing](#hit-testing)'s line search and all y-math rely on. It also runs under vitest, where integration test (a) pins that a 3-page document produces no contiguity errors.
+`assertContiguity` (`paint.ts`) is a dev-mode tripwire that the FLOW TRACK tiles each page's content box with no seams, the invariant [hit testing](#hit-testing)'s line search and all y-math rely on. The flow track is `lines[]` merged with NON-FLOATED `placed[]` (M-IMAGES-2.1: an image block consumes flow through its internal synthetic line but emits only its PlacedRect — lines[] alone have a y-gap exactly where an image sits; floats have zero flow presence and are excluded). It also runs under vitest, where integration test (a) pins that a 3-page document produces no contiguity errors.
 
 ### The DOM shape and the zoom law
 
@@ -617,6 +617,8 @@ One gotcha worth knowing: `useDocumentStore` is a module-level singleton, so tes
 | `coalescing.test.tsx` | Sync-first budget behavior and caret phase |
 | `links.test.tsx` | Painted links: click-to-caret, Ctrl+click open, painted-coords bubble |
 | `blockId.test.tsx` | Id minting and paste re-minting |
+| `images.test.tsx` / `images2.test.tsx` | The image suites: insert pipeline, placement, resize, caption/alt/radius, round-trip + GC, inline conversion, floats, z-order hit-testing |
+| `images3.test.tsx` | M-IMAGES-2.1/2.2: inline click surface (both halves), the inline selection overlay (painted rect + handles), commands on inline selections (align honestly block-only), extract-then-caption, exact conversion shapes, pending-vs-failed placeholder states, the clipboard-scoped round-trip |
 
 </details>
 

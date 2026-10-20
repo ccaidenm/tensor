@@ -1,6 +1,6 @@
-import type { LayoutResult, TextMetrics } from '@tensor-editor/engine';
+import { fitDownImage, type LayoutResult, type TextMetrics } from '@tensor-editor/engine';
 import type { AdapterBlock } from './adapter';
-import { alignOffset } from './positionMap';
+import { alignOffset, blockWrapWidth } from './positionMap';
 
 // THE NEAREST-LINE RULE (from the legacy dead-zone fixtures): clicks
 // resolve to the nearest line WITHIN the nearest sheet — a click in a
@@ -61,6 +61,22 @@ export function hitTest(
   for (const seg of line.segments) {
     const run = block.runs[seg.runIndex];
     if (!run) continue;
+    if (run.kind === 'inlineImage') {
+      // M-IMAGES-2 — the object token: ONE position per object (the
+      // engine's unbreakable-token contract). The ENTIRE painted
+      // advance belongs to the object — a click anywhere inside it
+      // resolves to its offset (the token position BEFORE the node);
+      // the glyph-midpoint rule above is text-only, never applied to
+      // objects (the 2.1 fix: half an image was dead click surface).
+      // The clamp width is the block's BASE wrap width — the SAME
+      // input the engine's inline clamp and the painter use (one
+      // scale, never a re-derivation).
+      const wrap = blockWrapWidth(cb.width, block);
+      const dims = fitDownImage(run.width, run.height, wrap, Infinity);
+      if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start };
+      cursor += dims.width;
+      continue;
+    }
     for (let i = seg.start; i < seg.end; i++) {
       const w = metrics.measure(block.text[i]!, run.style);
       if (x < cursor + w / 2) return { blockId: line.blockId, offset: i };
