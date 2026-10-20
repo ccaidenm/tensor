@@ -1,20 +1,24 @@
 import type { ReactNode } from 'react';
-import { Moon, Type, Paintbrush, Accessibility as AccessibilityIcon, Mouse } from 'lucide-react';
+import { Moon, Type, Paintbrush, User, Accessibility as AccessibilityIcon, Mouse } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
+import { useSettingsDialogStore } from '@/lib/settings/store';
+import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 
 export const GENERAL_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'appearance', label: 'Appearance' },
+  { id: 'user', label: 'User' },
   { id: 'editor', label: 'Editor' },
   { id: 'behavior', label: 'Behavior' },
   { id: 'accessibility', label: 'Accessibility' },
 ];
 
-function Row({ icon, label, description, children }: { icon: ReactNode; label: string; description?: string; children: ReactNode }) {
+function Row({ icon, label, description, children }: { icon: ReactNode; label: string; description?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-3">
       <div className="flex items-start gap-3">
@@ -27,6 +31,14 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
       {children}
     </div>
   );
+}
+
+/** M-META: the "Review > Document Properties" reference in the
+ *  identity row is LIVE — it closes Settings and opens the dialog for
+ *  the current document. */
+function openDocumentProperties() {
+  useSettingsDialogStore.getState().close();
+  useDocumentPropertiesStore.getState().open();
 }
 
 function SelectionColorRow() {
@@ -50,6 +62,40 @@ function SelectionColorRow() {
   );
 }
 
+/** M-META: the user identity — the default author for new documents'
+ *  metadata (see the config schema note for the onboarding plan). */
+function IdentityRow() {
+  const author = useConfigStore((s) => s.config.identity.author);
+  const setIdentityAuthor = useConfigStore((s) => s.setIdentityAuthor);
+
+  return (
+    <Row
+      icon={<User className="h-4 w-4" />}
+      label="Author Name"
+      description={
+        <>
+          {'Default author for new documents\u2019 metadata; each document can override it in '}
+          <button
+            type="button"
+            className="rounded outline-none underline underline-offset-2 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={openDocumentProperties}
+          >
+            Review &gt; Document Properties
+          </button>
+        </>
+      }
+    >
+      <Input
+        className="h-8 w-48"
+        aria-label="Author name"
+        placeholder="Your name"
+        value={author}
+        onChange={(e) => setIdentityAuthor(e.target.value)}
+      />
+    </Row>
+  );
+}
+
 export function GeneralPanel() {
   const theme = useConfigStore((s) => s.config.theme);
   const setTheme = useConfigStore((s) => s.setTheme);
@@ -66,6 +112,10 @@ export function GeneralPanel() {
         <Row icon={<Moon className="h-4 w-4" />} label="Dark Mode" description="Switch between light and dark appearance">
           <Switch checked={theme === 'dark'} onCheckedChange={(checked: boolean) => setTheme(checked ? 'dark' : 'light')} />
         </Row>
+      </SettingsSection>
+
+      <SettingsSection id="user" title="User">
+        <IdentityRow />
       </SettingsSection>
 
       <SettingsSection id="editor" title="Editor">

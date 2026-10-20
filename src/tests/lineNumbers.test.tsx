@@ -329,16 +329,19 @@ describe('persistence (.wpdoc metadata, styles precedent)', () => {
 
   it('saveDocument writes the setting into the v2 container; a null setting is omitted', async () => {
     const { editor } = renderTensor('<p>hello</p>');
-    await saveDocument(editor, '/x/a.wpdoc', useDocumentStore.getState().pageSetup, {
-      enabled: true,
-      mode: 'per-page',
+    await saveDocument(editor, '/x/a.wpdoc', {
+      pageSetup: useDocumentStore.getState().pageSetup,
+      lineNumbers: {
+        enabled: true,
+        mode: 'per-page',
+      },
     });
     // v2: the setting rides in the packaged container's document.json.
     const written = JSON.parse((wpdocFiles.get('/x/a.wpdoc') as { document: string }).document);
     expect(written.metadata.lineNumbers).toEqual({ enabled: true, mode: 'per-page' });
 
     wpdocFiles.clear();
-    await saveDocument(editor, '/x/a.wpdoc', useDocumentStore.getState().pageSetup, null);
+    await saveDocument(editor, '/x/a.wpdoc', { pageSetup: useDocumentStore.getState().pageSetup });
     const clean = JSON.parse((wpdocFiles.get('/x/a.wpdoc') as { document: string }).document);
     expect(clean.metadata.lineNumbers).toBeUndefined();
   });

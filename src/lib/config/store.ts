@@ -32,6 +32,8 @@ interface ConfigStore {
   setFetchLinkMetadata: (value: boolean) => void;
   setAutoCheckForUpdates: (value: boolean) => void;
   setAllowFontCatalogs: (value: boolean) => void;
+  /** M-META: the user identity (the default author for new docs). */
+  setIdentityAuthor: (value: string) => void;
 
   loadConfig: (raw: unknown) => void;
 }
@@ -210,6 +212,14 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         privacy: { ...state.config.privacy, allowFontCatalogs: value },
+      },
+    })),
+
+  setIdentityAuthor: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        identity: { ...state.config.identity, author: value },
       },
     })),
 }));

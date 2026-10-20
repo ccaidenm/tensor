@@ -1,8 +1,8 @@
 import { exists, mkdir, remove } from '@tauri-apps/plugin-fs';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import type { Editor } from '@tiptap/core';
-import { CURRENT_DOCUMENT_VERSION, type DocumentFile, type LineNumbersSetting } from './schema';
-import type { PageSetup } from './pageSetup';
+import { assembleDocumentFile, type SaveDocumentOptions } from './fileOperations';
+import type { DocumentFile } from './schema';
 import { collectReferencedMediaIds, openWpdoc, saveWpdoc } from './wpdoc';
 
 // Stable per-app-launch id, used for recovery files of never-yet-saved
@@ -31,20 +31,12 @@ async function getRecoveryPath(originalPath: string | null): Promise<string> {
 export async function saveRecoveryCopy(
   editor: Editor,
   originalPath: string | null,
-  pageSetup: PageSetup,
-  lineNumbers?: LineNumbersSetting | null
+  options: SaveDocumentOptions
 ): Promise<void> {
   try {
-    const file: DocumentFile = {
-      version: CURRENT_DOCUMENT_VERSION,
-      docJSON: editor.getJSON(),
-      metadata: {
-        modifiedAt: new Date().toISOString(),
-        originalPath: originalPath ?? undefined,
-        pageSetup,
-        ...(lineNumbers ? { lineNumbers } : {}),
-      },
-    };
+    // M-META: the SAME assembly as saves (snapshot parity — snapshots
+    // used to omit styles). The back-pointer rides the options.
+    const file = assembleDocumentFile(editor, { ...options, originalPath });
     // M-IMAGES-0: snapshots are v2 containers now — the SAME
     // package command as saves (media rides along, GC'd to the
     // document's references). The path is unchanged.

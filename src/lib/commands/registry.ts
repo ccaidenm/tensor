@@ -52,6 +52,7 @@ import {
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
 import { runEditorCommand } from '@/lib/editor/editorCommands';
+import { focusedTextControl } from '@/lib/editor/domUtils';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { saveRecoveryCopy } from '@/lib/document/recovery';
 import { useDocumentStore } from '@/lib/document/store';
@@ -252,6 +253,14 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['undo', 'revert', 'history'],
     enablement: canUndo,
     run: () => {
+      // A focused text control (dialog fields) owns undo: the native
+      // menu accelerator consumed the keystroke, so execCommand
+      // replays it on THAT control's own history — the same
+      // focused-surface stance as cut/copy below.
+      if (focusedTextControl()) {
+        document.execCommand('undo');
+        return;
+      }
       doc().editor?.commands.undo();
     },
   },
@@ -265,6 +274,11 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['redo', 'repeat', 'history'],
     enablement: canRedo,
     run: () => {
+      // Focused-text-control routing — see undo.
+      if (focusedTextControl()) {
+        document.execCommand('redo');
+        return;
+      }
       doc().editor?.commands.redo();
     },
   },
@@ -328,14 +342,14 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['quit', 'exit', 'close', 'shutdown'],
     requiresSafeQuit: true,
     run: async () => {
-      const { editor, filePath, isDirty, pageSetup, lineNumbers } = doc();
+      const { editor, filePath, isDirty, pageSetup, lineNumbers, coreProperties } = doc();
       // Safe-quit: dirty doc → recovery snapshot NOW via the EXISTING
       // autosave recovery path (recovery.ts saveRecoveryCopy — same
       // format, same appDataDir()/recovery/ location), so the existing
       // restore flow picks it up. No second snapshot format, no
       // forked restore logic.
       if (editor && isDirty) {
-        await saveRecoveryCopy(editor, filePath, pageSetup, lineNumbers);
+        await saveRecoveryCopy(editor, filePath, { pageSetup, lineNumbers, coreProperties });
       }
       getCurrentWindow().close();
     },
@@ -382,7 +396,7 @@ export const COMMANDS: CommandAction[] = [
     title: 'Document Properties',
     icon: Info,
     group: 'navigate',
-    keywords: ['properties', 'margins', 'size', 'document', 'info'],
+    keywords: ['properties', 'metadata', 'title', 'author', 'subject', 'keywords', 'comments', 'document', 'info'],
     run: () => useDocumentPropertiesStore.getState().open(),
   },
   {
