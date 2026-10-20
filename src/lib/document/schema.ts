@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { DocumentCoreProperties } from './coreProperties';
 import type { PageSetup } from './pageSetup';
 import { StyleDefinitionSchema, type StyleDefinition } from '@/lib/styles/types';
 
@@ -46,11 +47,29 @@ export const LineNumbersSchema = z.object({
 
 export type LineNumbersSetting = z.infer<typeof LineNumbersSchema>;
 
+/**
+ * M-META: the document's standard core properties — the fields the
+ * Properties dialog edits and the exporters embed (DOCX #37 / PDF #39
+ * consume the mappings in lib/document/coreProperties.ts). All
+ * optional: old files predate them and open with them empty (the
+ * styles precedent). `title` predates this milestone (never written
+ * by the save path until M-META); keywords are ONE string — OOXML and
+ * PDF both spell keywords that way. The schema is compile-checked
+ * against the model type, so the two can't drift.
+ */
+const CorePropertiesSchema = z.object({
+  title: z.string().optional(),
+  author: z.string().optional(),
+  subject: z.string().optional(),
+  keywords: z.string().optional(),
+  comments: z.string().optional(),
+}) satisfies z.ZodType<DocumentCoreProperties>;
+
 export const DocumentFileSchema = z.object({
   version: z.number(),
   docJSON: z.any(),
   metadata: z.object({
-    title: z.string().optional(),
+    ...CorePropertiesSchema.shape,
     createdAt: z.string().optional(),
     modifiedAt: z.string().optional(),
     originalPath: z.string().optional(),

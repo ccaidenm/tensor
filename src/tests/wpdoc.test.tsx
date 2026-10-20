@@ -89,6 +89,7 @@ beforeEach(() => {
     isDirty: false,
     filePath: null,
     lineNumbers: null,
+    coreProperties: {},
   });
 });
 
@@ -159,7 +160,10 @@ describe('v1 legacy converter', () => {
     expect(editor.state.doc.textContent).toContain('A v1 document: plain JSON on disk');
 
     // Save: writes v2 (package_document), never v1 JSON again.
-    await saveDocument(editor, '/x/old.wpdoc', useDocumentStore.getState().pageSetup, result!.lineNumbers);
+    await saveDocument(editor, '/x/old.wpdoc', {
+      pageSetup: useDocumentStore.getState().pageSetup,
+      lineNumbers: result!.lineNumbers,
+    });
     const saved = wpdocFiles.get('/x/old.wpdoc')!;
     expect(saved.kind).toBe('v2');
     const parsed = DocumentFileSchema.parse(JSON.parse((saved as { document: string }).document));
@@ -251,7 +255,7 @@ describe('recovery snapshots', () => {
   it('v2 round-trip: snapshot → read → identical document', async () => {
     const { editor } = renderTensor('<p>recover me</p>');
     await settleLayout();
-    await saveRecoveryCopy(editor, null, useDocumentStore.getState().pageSetup, null);
+    await saveRecoveryCopy(editor, null, { pageSetup: useDocumentStore.getState().pageSetup });
     // The M5 recovery path convention: session-keyed when unnamed.
     const snapPath = '/appdata/recovery/' + [...wpdocFiles.keys()][0]!.split('/').pop()!;
     const restored = await readRecoveryCopy(snapPath);
@@ -274,8 +278,61 @@ describe('atomicity (TS contract)', () => {
   it('the write path is package_document ONLY — the atomic temp+rename lives Rust-side', async () => {
     const { editor } = renderTensor('<p>atomic</p>');
     await settleLayout();
-    await saveDocument(editor, '/x/atomic.wpdoc', useDocumentStore.getState().pageSetup, null);
+    await saveDocument(editor, '/x/atomic.wpdoc', { pageSetup: useDocumentStore.getState().pageSetup });
     const commands = (invoke as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([cmd]) => cmd);
     expect(commands).toEqual(['package_document']); // one atomic command, no other write surface
+  });
+});
+
+// ─── 8. M-META: core properties ride metadata (save/open/recovery) ──────
+
+describe('M-META core properties', () => {
+  it('save writes them normalized (empties omitted); open returns them', async () => {
+    const { editor } = renderTensor('<p>meta</p>');
+    await settleLayout();
+    await saveDocument(editor, '/x/meta.wpdoc', {
+      pageSetup: useDocumentStore.getState().pageSetup,
+      coreProperties: { title: ' T ', author: '  ', subject: 'S', keywords: 'a, b', comments: '' },
+    });
+    const saved = JSON.parse(
+      (wpdocFiles.get('/x/meta.wpdoc') as Extract<Stored, { kind: 'v2' }>).document,
+    );
+    expect(saved.metadata.title).toBe('T'); // trimmed
+    expect(saved.metadata.author).toBeUndefined(); // whitespace-only dropped
+    expect(saved.metadata.subject).toBe('S');
+    expect(saved.metadata.keywords).toBe('a, b');
+    expect(saved.metadata.comments).toBeUndefined(); // empty dropped
+
+    dialogMocks.openPath = '/x/meta.wpdoc';
+    const result = await openDocument(editor);
+    expect(result!.coreProperties).toEqual({ title: 'T', subject: 'S', keywords: 'a, b' });
+  });
+
+  it('a file that predates the fields opens with empty properties', async () => {
+    wpdocFiles.set('/x/old.wpdoc', {
+      kind: 'v2',
+      document: JSON.stringify({ version: 1, docJSON: {}, metadata: {} }),
+      media: [],
+    });
+    dialogMocks.openPath = '/x/old.wpdoc';
+    const { editor } = renderTensor('<p>placeholder</p>');
+    await settleLayout();
+    const result = await openDocument(editor);
+    expect(result!.coreProperties).toEqual({});
+  });
+
+  it('recovery snapshots carry them (same assembler as saves — and styles too)', async () => {
+    const { editor } = renderTensor('<p>recover meta</p>');
+    await settleLayout();
+    await saveRecoveryCopy(editor, '/x/doc.wpdoc', {
+      pageSetup: useDocumentStore.getState().pageSetup,
+      coreProperties: { author: 'Ada' },
+    });
+    const snapPath = [...wpdocFiles.keys()].find((k) => k.includes('recovery'))!;
+    const restored = await readRecoveryCopy(snapPath);
+    expect(restored.metadata.author).toBe('Ada');
+    // The M-META unification: snapshots use the save assembler, so the
+    // doc style layer rides along (it never used to).
+    expect(restored.metadata.styles).toBeDefined();
   });
 });

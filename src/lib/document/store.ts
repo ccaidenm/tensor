@@ -7,6 +7,7 @@ import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
 import type { PageSetup } from './pageSetup';
 import type { LineNumbersSetting } from './schema';
+import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
 
 function defaultPageSetup(): PageSetup {
   const { config } = useConfigStore.getState();
@@ -31,6 +32,12 @@ interface DocumentStore {
    *  it travels in .wpdoc metadata like pageSetup. */
   lineNumbers: LineNumbersSetting | null;
   setLineNumbers: (setting: LineNumbersSetting | null) => void;
+  /** M-META: the document's standard core properties (title, author,
+   *  subject, keywords, comments). Writing marks the doc dirty — they
+   *  travel in .wpdoc metadata like pageSetup/lineNumbers. Normalized
+   *  on write: the store never holds empty strings. */
+  coreProperties: DocumentCoreProperties;
+  setCoreProperties: (props: DocumentCoreProperties) => void;
   save: () => Promise<void>;
   saveAs: () => Promise<void>;
   openFile: () => Promise<void>;
@@ -55,22 +62,30 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   lineNumbers: null,
   setLineNumbers: (setting) => set((state) => ({ lineNumbers: setting, isDirty: true, revision: state.revision + 1 })),
 
+  coreProperties: {},
+  setCoreProperties: (props) =>
+    set((state) => ({
+      coreProperties: normalizeCoreProperties(props),
+      isDirty: true,
+      revision: state.revision + 1,
+    })),
+
   save: async () => {
-    const { editor, filePath, pageSetup, lineNumbers } = get();
+    const { editor, filePath, pageSetup, lineNumbers, coreProperties } = get();
     if (!editor) return;
     if (!filePath) {
       await get().saveAs();
       return;
     }
-    await saveDocument(editor, filePath, pageSetup, lineNumbers);
+    await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties });
     await clearRecoveryCopy(filePath);
     set({ isDirty: false });
   },
 
   saveAs: async () => {
-    const { editor, filePath: oldPath, pageSetup, lineNumbers } = get();
+    const { editor, filePath: oldPath, pageSetup, lineNumbers, coreProperties } = get();
     if (!editor) return;
-    const newPath = await saveDocumentAs(editor, pageSetup, lineNumbers);
+    const newPath = await saveDocumentAs(editor, { pageSetup, lineNumbers, coreProperties });
     if (newPath) {
       await clearRecoveryCopy(oldPath);
       set({ filePath: newPath, isDirty: false });
@@ -92,6 +107,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           isDirty: false,
           pageSetup: result.pageSetup ?? defaultPageSetup(),
           lineNumbers: result.lineNumbers ?? null,
+          // M-META: normalized in openDocument — {} for old files.
+          coreProperties: result.coreProperties,
         });
       }
     } catch (err) {
@@ -112,6 +129,16 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
 useConfigStore.subscribe(() => {
   const { filePath, isDirty } = useDocumentStore.getState();
   if (!filePath && !isDirty) {
-    useDocumentStore.setState({ pageSetup: defaultPageSetup() });
+    // M-META: a pristine document's author defaults from the app's
+    // user identity (Settings > General > User) — the same posture
+    // as defaultPageSetup: visible and editable in the Properties
+    // dialog; once saved or edited, the document owns its properties.
+    // (Pre-release onboarding will seed the identity; the setting
+    // itself lives in config permanently.)
+    const { author } = useConfigStore.getState().config.identity;
+    useDocumentStore.setState({
+      pageSetup: defaultPageSetup(),
+      coreProperties: author ? { author } : {},
+    });
   }
 });

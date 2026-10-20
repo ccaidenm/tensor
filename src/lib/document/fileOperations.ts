@@ -4,23 +4,33 @@ import { CURRENT_DOCUMENT_VERSION, type DocumentFile, type LineNumbersSetting } 
 import type { PageSetup } from './pageSetup';
 import { useStyleRegistryStore } from '@/lib/styles/registry';
 import type { StyleDefinition } from '@/lib/styles/types';
+import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
 import { openWpdoc, saveWpdoc } from './wpdoc';
 
 const FILE_FILTERS = [{ name: 'Word Processor Document', extensions: ['wpdoc'] }];
 
 /**
- * M-IMAGES-0: .wpdoc v2 — saves write the zip container (the Rust
- * package_document command; ATOMIC temp+rename lives Rust-side now,
- * the old writeDocumentAtomic pattern moved with it). The media set
- * packaged is the document's REFERENCED media only (saveWpdoc's GC).
+ * M-META: the ONE document-level bundle that rides .wpdoc metadata.
+ * saveDocument, saveDocumentAs and saveRecoveryCopy all take it, and
+ * assembleDocumentFile is the ONLY metadata assembly — saves and
+ * recovery snapshots can never drift (snapshots used to omit styles).
  */
-export async function saveDocument(
-  editor: Editor,
-  filePath: string,
-  pageSetup: PageSetup,
-  lineNumbers?: LineNumbersSetting | null
-): Promise<void> {
-  const file: DocumentFile = {
+export interface SaveDocumentOptions {
+  pageSetup: PageSetup;
+  /** M-LINENUMS: absent/null = never set (old docs / gutter off). */
+  lineNumbers?: LineNumbersSetting | null;
+  /** M-META: written normalized — only non-empty fields land in the
+   *  file (the lineNumbers conditional-spread precedent: absent means
+   *  "never set", empty strings never write). */
+  coreProperties?: DocumentCoreProperties | null;
+  /** Recovery snapshots only: the snapshot's back-pointer. */
+  originalPath?: string | null;
+}
+
+/** THE metadata assembly (single source — see SaveDocumentOptions). */
+export function assembleDocumentFile(editor: Editor, options: SaveDocumentOptions): DocumentFile {
+  const { pageSetup, lineNumbers, coreProperties, originalPath } = options;
+  return {
     version: CURRENT_DOCUMENT_VERSION,
     docJSON: editor.getJSON(),
     metadata: {
@@ -33,19 +43,35 @@ export async function saveDocument(
       // M-LINENUMS: absent when never set (old docs / gutter off by
       // default) — the styles optional-field precedent.
       ...(lineNumbers ? { lineNumbers } : {}),
+      // M-META: absent means "never set" — whitespace-only values
+      // drop out (normalizeCoreProperties).
+      ...normalizeCoreProperties(coreProperties),
+      ...(originalPath ? { originalPath } : {}),
     },
   };
-  await saveWpdoc(filePath, file);
+}
+
+/**
+ * M-IMAGES-0: .wpdoc v2 — saves write the zip container (the Rust
+ * package_document command; ATOMIC temp+rename lives Rust-side now,
+ * the old writeDocumentAtomic pattern moved with it). The media set
+ * packaged is the document's REFERENCED media only (saveWpdoc's GC).
+ */
+export async function saveDocument(
+  editor: Editor,
+  filePath: string,
+  options: SaveDocumentOptions,
+): Promise<void> {
+  await saveWpdoc(filePath, assembleDocumentFile(editor, options));
 }
 
 export async function saveDocumentAs(
   editor: Editor,
-  pageSetup: PageSetup,
-  lineNumbers?: LineNumbersSetting | null
+  options: SaveDocumentOptions,
 ): Promise<string | null> {
   const path = await save({ filters: FILE_FILTERS, defaultPath: 'Untitled.wpdoc' });
   if (!path) return null;
-  await saveDocument(editor, path, pageSetup, lineNumbers);
+  await saveDocument(editor, path, options);
   return path;
 }
 
@@ -59,6 +85,9 @@ export interface OpenDocumentResult {
   /** M-LINENUMS: the file's gutter setting; null = the file predates
    *  it or never enabled it. */
   lineNumbers: LineNumbersSetting | null;
+  /** M-META: the file's standard core properties, normalized;
+   *  {} = the file predates them. */
+  coreProperties: DocumentCoreProperties;
 }
 
 export async function openDocument(editor: Editor): Promise<OpenDocumentResult | null> {
@@ -80,10 +109,12 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
   void import('@/lib/media/backfill').then(({ backfillImageDims }) =>
     backfillImageDims(editor),
   );
+  const { title, author, subject, keywords, comments } = file.metadata;
   return {
     path,
     pageSetup: file.metadata.pageSetup ?? null,
     styleDefinitions: file.metadata.styles?.definitions ?? [],
     lineNumbers: file.metadata.lineNumbers ?? null,
+    coreProperties: normalizeCoreProperties({ title, author, subject, keywords, comments }),
   };
 }

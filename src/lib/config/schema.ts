@@ -72,6 +72,15 @@ export const ConfigSchema = z.object({
   }).default({
     reduceMotion: 'system',
   }),
+  /** M-META: the user's own identity — the default AUTHOR for new
+   *  documents' metadata. Empty = unset: nothing is baked into files
+   *  the user didn't explicitly save with their name (privacy-first;
+   *  local config.json only). Pre-release onboarding will write this
+   *  during setup; the setting itself is permanent — Settings >
+   *  General > User. */
+  identity: z.object({
+    author: z.string().default(''),
+  }).default({ author: '' }),
   /** Keyed by ShortcutDefinition.id (see src/lib/shortcuts.ts). Flat
    *  record rather than a fixed shape — every command in the Shortcuts
    *  registry gets an entry here, seeded from that registry's defaults.
