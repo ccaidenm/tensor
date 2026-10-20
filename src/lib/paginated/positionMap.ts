@@ -92,27 +92,33 @@ export function lineOffsetX(
   block: AdapterBlock,
   offset: number,
   metrics: TextMetrics,
-  objectMaxWidth?: number
+  _objectMaxWidth?: number
 ): number {
-  let x = line.rect.x;
+  // M-RULER Phase 4: the breaker EMITS each segment's placed x (the
+  // pen walk) — the walk seeds from it instead of accumulating measured
+  // prefix sums, which cannot model tab advances (a \t's jump is
+  // pen-dependent; center/right stops reposition their text). The
+  // objectMaxWidth parameter is legacy: the engine's placement already
+  // includes an inline object's placed advance.
   for (const seg of line.segments) {
-    if (offset <= seg.start) break;
-    const end = Math.min(offset, seg.end);
+    // Boundary offsets belong to the LATER segment (the lineForOffset
+    // rule) — its seeded x is the boundary's x.
+    if (offset <= seg.start) return line.rect.x + seg.x;
     const run = block.runs[seg.runIndex];
-    if (run && run.kind === 'inlineImage') {
-      // M-IMAGES-2: objects have no text metrics — the advance is the
-      // object's placed WIDTH (data; the same one-scale fit-down the
-      // engine measured the token with). Offsets at/before the token
-      // break above and never reach this branch.
-      if (objectMaxWidth != null) {
-        x += fitDownImage(run.width, run.height, objectMaxWidth, Infinity).width;
+    const x = line.rect.x + seg.x;
+    if (offset < seg.end) {
+      // Inside this segment: add the segment-local prefix. A tab
+      // segment owns exactly one live position (its start — the pen
+      // before the jump); offset == seg.end belongs to the next
+      // segment, which the break above routes there.
+      if (run && run.kind !== 'inlineImage' && block.text[seg.start] !== '\t') {
+        return x + metrics.measure(block.text.slice(seg.start, offset), run.style);
       }
-    } else if (run) {
-      x += metrics.measure(block.text.slice(seg.start, end), run.style);
+      return x;
     }
-    if (offset < seg.end) break;
   }
-  return x;
+  // Past the last segment (the line's end): the placed pen.
+  return line.rect.x + line.rect.width;
 }
 
 /** The block's BASE wrap width — the engine's breakLines maxWidth and

@@ -42,7 +42,7 @@ function line(width: number): LineBox {
     baseline: 13,
     rangeStart: 0,
     rangeEnd: 8,
-    segments: [{ runIndex: 0, start: 0, end: 8 }],
+    segments: [{ runIndex: 0, start: 0, end: 8, x: 0 }],
   };
 }
 
@@ -114,7 +114,7 @@ describe('paint: marks', () => {
         blockId: 'a', lineIndex: 0, pageIndex: 0,
         rect: { x: 0, y: 0, width: 90, height: 16 },
         baseline: 13, rangeStart: 0, rangeEnd: 9,
-        segments: [{ runIndex: 0, start: 0, end: 4 }, { runIndex: 1, start: 4, end: 9 }],
+        segments: [{ runIndex: 0, start: 0, end: 4, x: 0 }, { runIndex: 1, start: 4, end: 9, x: 40 }],
       },
     ];
     paintLines(ctx as unknown as CanvasRenderingContext2D, lines, monoRuns, 'code plain', 0, FakeMetrics, LEFT);
@@ -156,7 +156,7 @@ describe('paint: non-printing characters (M6 v1)', () => {
 
   it('nbsp and tab paint as middle-dot and arrow — ink only, same advance', () => {
     const text = 'a\u00A0b\tc';
-    const box: LineBox = { ...line(50), rangeEnd: 5, segments: [{ runIndex: 0, start: 0, end: 5 }] };
+    const box: LineBox = { ...line(50), rangeEnd: 5, segments: [{ runIndex: 0, start: 0, end: 5, x: 0 }] };
     const ctx = paintWith(text, box, true);
     const texts = ctx.ops.filter((o) => o.op === 'fillText');
     expect(texts[0]!.args[0]).toBe('a·b→c');
@@ -165,7 +165,7 @@ describe('paint: non-printing characters (M6 v1)', () => {
   });
 
   it('an earlier fragment of a split block paints no ¶', () => {
-    const box: LineBox = { ...line(80), rangeEnd: 4, segments: [{ runIndex: 0, start: 0, end: 4 }] };
+    const box: LineBox = { ...line(80), rangeEnd: 4, segments: [{ runIndex: 0, start: 0, end: 4, x: 0 }] };
     const ctx = paintWith('Hi there', box, true);
     expect(ctx.ops.filter((o) => o.op === 'fillText')).toHaveLength(1);
   });
@@ -187,7 +187,7 @@ describe('paint: non-printing characters (M6 v1)', () => {
     const box: LineBox = {
       ...line(80),
       rangeEnd: 2,
-      segments: [{ runIndex: 0, start: 0, end: 2 }],
+      segments: [{ runIndex: 0, start: 0, end: 2, x: 0 }],
     };
     const boldRuns: Run[] = [{ text: 'Hi', style: { ...STYLE, bold: true, italic: true } }];
     paintLines(ctx as unknown as CanvasRenderingContext2D, [box], boldRuns, 'Hi', 0, FakeMetrics, {
@@ -209,7 +209,7 @@ describe('paint: non-printing characters (M6 v1)', () => {
     const box: LineBox = {
       ...line(80),
       rangeEnd: 2,
-      segments: [{ runIndex: 0, start: 0, end: 2 }],
+      segments: [{ runIndex: 0, start: 0, end: 2, x: 0 }],
     };
     const bigRuns: Run[] = [{ text: 'Hi', style: { ...STYLE, fontSize: 24 } }];
     paintLines(ctx as unknown as CanvasRenderingContext2D, [box], bigRuns, 'Hi', 0, FakeMetrics, {
@@ -254,7 +254,7 @@ describe('paint: block decor (M6.1 — markers, blockquote, code, rule)', () => 
       baseline: 13,
       rangeStart: 0,
       rangeEnd: 6,
-      segments: text ? [{ runIndex: 0, start: 0, end: 6 }] : [],
+      segments: text ? [{ runIndex: 0, start: 0, end: 6, x: 0 }] : [],
     };
   }
   let text = 'aaaaaa';

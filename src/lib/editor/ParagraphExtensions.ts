@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core';
 import Paragraph from '@tiptap/extension-paragraph';
 import Heading from '@tiptap/extension-heading';
+import type { TabStop } from '@tensor-editor/engine';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -10,6 +11,7 @@ declare module '@tiptap/core' {
       increaseIndent: () => ReturnType;
       decreaseIndent: () => ReturnType;
       clearFormatting: () => ReturnType;
+      setTabStops: (stops: TabStop[]) => ReturnType;
     };
   }
 }
@@ -132,6 +134,73 @@ const spacingAttributes = {
 };
 
 /**
+ * TAB STOPS (M-RULER Phase 3/3.5): the engine's TabStop objects — px
+ * from the CONTENT-BOX LEFT EDGE (margin-relative: indent edits never
+ * move tab stops), each with an alignment kind (left/center/right —
+ * the context menu's choice). Sorted ascending by position, deduped,
+ * null = none. Round-trips through `data-tab-stops="96:left,192:right"`
+ * (bare numbers parse as left stops, for tolerance); .wpdoc rides the
+ * docJSON free. The breaker advance rule (and with it the Tab keymap's
+ * mid-line branch) lands in Phase 4 — until then the attr is
+ * ruler-visible data only.
+ */
+export function normalizeTabStops(stops: unknown): TabStop[] | null {
+  if (!Array.isArray(stops)) return null;
+  const clean = stops
+    .map((v): TabStop | null => {
+      if (v == null || typeof v !== 'object') return null;
+      const position = (v as { position?: unknown }).position;
+      if (typeof position !== 'number' || !Number.isFinite(position) || position < 0) {
+        return null;
+      }
+      const alignment = (v as { alignment?: unknown }).alignment;
+      return {
+        position,
+        alignment:
+          alignment === 'center' || alignment === 'right' ? alignment : 'left',
+      };
+    })
+    .filter((v): v is TabStop => v != null)
+    .sort((a, b) => a.position - b.position);
+  const deduped: TabStop[] = [];
+  for (const stop of clean) {
+    const last = deduped[deduped.length - 1];
+    if (last == null || stop.position - last.position > 0.5) {
+      deduped.push(stop);
+    }
+  }
+  return deduped.length ? deduped : null;
+}
+
+const tabStopsAttribute = {
+  tabStops: {
+    default: null,
+    parseHTML: (element: HTMLElement) => {
+      const raw = element.getAttribute('data-tab-stops');
+      if (!raw) return null;
+      return normalizeTabStops(
+        raw.split(',').map((part) => {
+          const [pos, align] = part.split(':');
+          return {
+            position: parseFloat(pos),
+            alignment: align === 'center' || align === 'right' ? align : 'left',
+          };
+        }),
+      );
+    },
+    renderHTML: (attributes: { tabStops?: TabStop[] | null }) => {
+      const stops = normalizeTabStops(attributes.tabStops);
+      if (!stops) return {};
+      return {
+        'data-tab-stops': stops
+          .map((s) => `${s.position}:${s.alignment}`)
+          .join(','),
+      };
+    },
+  },
+};
+
+/**
  * M-STYLES: the paragraph's STYLE IDENTITY — a reference into the
  * style registry, never a bundle of stamped attrs. Non-optional
  * INVARIANT: every paragraph carries a styleId; old documents get it
@@ -161,6 +230,7 @@ export const ParagraphWithExtras = Paragraph.extend({
       ...directionalIndentAttributes,
       ...firstLineIndentAttribute,
       ...spacingAttributes,
+      ...tabStopsAttribute,
       ...styleIdAttribute('normal'),
     };
   },
@@ -197,6 +267,47 @@ export const ParagraphExtraCommands = Extension.create({
         ({ commands }: { commands: any }) =>
           commands.focus() &&
           ['paragraph', 'heading'].every((type: string) => commands.resetAttributes(type, 'lineHeight')),
+
+      // TAB STOPS (M-RULER Phase 3): ONE writer — the tabStops attr, px
+      // content-box-relative, normalized (sorted, deduped, null when
+      // empty) on the way in. Targets the CARET's block for an empty
+      // selection and every top-level paragraph overlapped by a range
+      // selection (Word semantics: a selection applies to all of them).
+      // Skips writes that wouldn't change anything, so the ruler's
+      // release commit stays idempotent and undo stays one-step-per-
+      // gesture.
+      setTabStops:
+        (stops: TabStop[]) =>
+        ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
+          const normalized = normalizeTabStops(stops);
+          const { empty, from, to, $from } = tr.selection;
+          const targets: Array<{ pos: number; node: any }> = [];
+          if (empty) {
+            const pos = $from.before(1);
+            const node = state.doc.nodeAt(pos);
+            if (node?.type.name === 'paragraph') targets.push({ pos, node });
+          } else {
+            state.doc.forEach((node: any, offset: number) => {
+              if (node.type.name !== 'paragraph') return;
+              if (offset >= to || offset + node.nodeSize <= from) return;
+              targets.push({ pos: offset, node });
+            });
+          }
+          if (targets.length === 0) return false;
+          let changed = false;
+          const nextJson = JSON.stringify(normalized);
+          for (const { pos, node } of targets) {
+            const current = Array.isArray(node.attrs.tabStops)
+              ? JSON.stringify(node.attrs.tabStops)
+              : JSON.stringify(null);
+            if (current === nextJson) continue;
+            if (dispatch) {
+              tr.setNodeMarkup(pos, undefined, { ...node.attrs, tabStops: normalized });
+            }
+            changed = true;
+          }
+          return changed;
+        },
 
       // INDENT COMMANDS (M6.2): ONE writer — the indentLeft attr, in
       // px, stepped by INDENT_STEP_PX (32, the historical step, now in
@@ -331,6 +442,36 @@ export const ParagraphExtraCommands = Extension.create({
         : 0;
 
     return {
+      /**
+       * ENTER (M-RULER ruling — the user's deliberate call): paragraph
+       * tab stops do NOT continue across Enter — the split's NEW block
+       * strips them, so every new line starts with no stops (Word/GDocs
+       * continue them; Tensor diverges deliberately). ONE transaction:
+       * the chain shares a single tr, so undo collapses Enter to one
+       * step. Lists/codeBlock/headings fall through to their own Enter
+       * (tabStops only live on top-level paragraphs).
+       */
+      Enter: () => {
+        const { $from, empty } = this.editor.state.selection;
+        if ($from.depth !== 1 || $from.parent.type.name !== 'paragraph') return false;
+        // ONE transaction: split + strip — one history step, so undo
+        // collapses Enter (no stop-resurrection half-step).
+        const tr = this.editor.state.tr;
+        if (!empty) tr.deleteSelection();
+        const pos = tr.selection.$from.pos;
+        tr.split(pos, 1);
+        // The depth-1 split inserts close+open tokens at `pos` — the
+        // NEW paragraph starts at pos + 1. Strip its tab stops (the
+        // ruling: stops do not continue across Enter).
+        const newBlockPos = pos + 1;
+        const node = tr.doc.nodeAt(newBlockPos);
+        if (node?.type.name === 'paragraph' && Array.isArray(node.attrs.tabStops)) {
+          tr.setNodeMarkup(newBlockPos, undefined, { ...node.attrs, tabStops: null });
+        }
+        this.editor.view.dispatch(tr);
+        return true;
+      },
+
       Tab: () => {
         const { $from, empty } = this.editor.state.selection;
         const name = $from.parent.type.name;
@@ -342,14 +483,21 @@ export const ParagraphExtraCommands = Extension.create({
         if (name !== 'paragraph') return false; // headings: nothing today
         if (inListItem($from)) return false; // the list owns Tab
 
-        // Mid-line: NO-OP v1 (see the deferred tab-stop note above).
-        if (!empty || $from.parentOffset !== 0) return true;
+        // BLOCK START (empty caret at offset 0): the GDocs convention —
+        // firstLineIndent += 32, one gutter out.
+        if (empty && $from.parentOffset === 0) {
+          const node = $from.parent;
+          return this.editor.commands.updateAttributes('paragraph', {
+            firstLineIndent: firstLineIndentOf(node) + INDENT_STEP_PX,
+          });
+        }
 
-        // Block start: first line indent, one gutter out.
-        const node = $from.parent;
-        return this.editor.commands.updateAttributes('paragraph', {
-          firstLineIndent: firstLineIndentOf(node) + INDENT_STEP_PX,
-        });
+        // M-RULER Phase 4: the deferred tab-CHAR branch lands — the
+        // engine's \t advance rule jumps the pen to the next stop (the
+        // block's custom stops or the 0.5" default grid), so the cursor
+        // lands exactly ON the stop instead of a fixed-width gap. A
+        // non-empty selection is replaced by the tab (Word behavior).
+        return this.editor.commands.insertContent('\t');
       },
 
       'Shift-Tab': () => {
@@ -358,10 +506,33 @@ export const ParagraphExtraCommands = Extension.create({
 
         if (name !== 'paragraph') return false;
         if (inListItem($from)) return false;
-        if (!empty || $from.parentOffset !== 0) return true; // NO-OP v1 (symmetric)
 
-        // Floor: 0 (below that there is nothing to un-indent via
-        // Shift+Tab — ctrl+[ owns paragraph indentLeft).
+        // M-RULER Phase 4: mid-line CARET — backtrack to the current
+        // tab section's start (just after the nearest preceding \t;
+        // already at a section start → chain back one more stop, one
+        // stop per press). Non-destructive: the caret MOVE is the
+        // backtrack (the destructive un-tab is Backspace's job). No
+        // tab behind → the legacy mid-line no-op.
+        if (empty && $from.parentOffset > 0) {
+          const text = $from.parent.textContent;
+          const off = $from.parentOffset;
+          let i = off - 1;
+          while (i >= 0 && text[i] !== '\t') i--;
+          if (i >= 0 && i + 1 === off) {
+            // Already AT the section start: chain back one more stop.
+            i--;
+            while (i >= 0 && text[i] !== '\t') i--;
+          }
+          if (i >= 0) {
+            return this.editor.commands.setTextSelection($from.before(1) + 1 + i + 1);
+          }
+          return true;
+        }
+        if (!empty) return true; // non-empty selections: the legacy no-op
+
+        // BLOCK START (offset 0): out-dent, floored at 0 (below that
+        // there is nothing to un-indent via Shift+Tab — ctrl+[ owns
+        // paragraph indentLeft).
         const node = $from.parent;
         const fli = firstLineIndentOf(node);
         if (fli <= 0) return false;

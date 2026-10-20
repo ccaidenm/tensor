@@ -104,7 +104,7 @@ export function MarginsDialog() {
           <DialogTitle>Margins</DialogTitle>
           <DialogDescription>
             Page margins in {MEASUREMENT_UNITS[unit].label.toLowerCase()}. Changes apply when you
-            press Apply and are saved with the document.
+            press Done and are saved with the document.
           </DialogDescription>
         </DialogHeader>
 

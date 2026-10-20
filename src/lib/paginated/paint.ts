@@ -165,7 +165,7 @@ export function paintLines(
   for (const line of lines) {
     const off = alignOffset(align, line.rect.width, contentWidth - line.rect.x);
     const baselineY = line.rect.y - minY + line.baseline;
-    let x = line.rect.x + off;
+    const baseX = line.rect.x + off;
 
     // BLOCK DECOR (before ink, per line — fragments tile seamlessly):
     if (paint?.blockquote) {
@@ -186,6 +186,11 @@ export function paintLines(
     for (const segment of line.segments) {
       const run = runs[segment.runIndex];
       if (!run) continue;
+      // M-RULER Phase 4: each segment's x is the ENGINE's placed pen,
+      // seeded per segment — never accumulated. Prefix sums cannot
+      // model tab advances (a \t's jump is pen-dependent; center/right
+      // stops reposition their text).
+      const x = baseX + segment.x;
       // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): the U+FFFC token paints
       // as the image itself, BASELINE-SEATED (bottom at the baseline;
       // the engine grew the line's ascent for it — the shell fills the
@@ -226,12 +231,17 @@ export function paintLines(
           ctx.fillRect(x, baselineY - dims.height, dims.width, dims.height);
           ctx.fillStyle = prevFill;
         }
-        x += dims.width;
         continue;
       }
       const decor = runDecor[segment.runIndex] ?? {};
       const segmentText = text.slice(segment.start, segment.end);
-      const width = metrics.measure(segmentText, run.style);
+      // A tab paints NOTHING (its advance is the jump the next
+      // segment's x already carries) — except under NPC, where the
+      // substitute arrow marks the jump's start.
+      const isTab = segmentText === '\t';
+      if (isTab && !npc) continue;
+      const paintText = npc ? npcSubstitute(segmentText) : segmentText;
+      const width = metrics.measure(isTab ? npcSubstitute(segmentText) : segmentText, run.style);
 
       if (decor.highlight) {
         const ascent = metrics.ascent(run.style);
@@ -246,7 +256,7 @@ export function paintLines(
       // singleton used to MEASURE this run — painted advances can
       // never diverge from measured widths (the one-ruler rule).
       applyVariantCaps(ctx, run.style);
-      ctx.fillText(npc ? npcSubstitute(segmentText) : segmentText, x, baselineY);
+      ctx.fillText(paintText, x, baselineY);
 
       // TODO(typographic polish): proper underline/strike metrics per
       // font (nskipping ink gaps, weight-scaled thickness) — the
@@ -263,8 +273,6 @@ export function paintLines(
           ctx.fillRect(x, baselineY - 0.3 * run.style.fontSize, width, thickness);
         }
       }
-
-      x += width;
     }
 
     // LIST MARKER (the block's first line only — the indent gutter
@@ -324,7 +332,9 @@ export function paintLines(
         });
       }
       ctx.fillStyle = NPC_COLOR;
-      ctx.fillText('¶', x, baselineY);
+      // The line-end pen: the loop's per-segment x's end at the placed
+      // width (M-RULER Phase 4 — segments carry their own x).
+      ctx.fillText('¶', baseX + line.rect.width, baselineY);
       ctx.fillStyle = restore;
       ctx.font = restoreFont;
     }

@@ -16,6 +16,7 @@ import { ptToPx } from '@/lib/document/pageSetup';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
+import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import { GEOMETRY, renderTensor, settleLayout } from './harness';
 
 // The module-level config/document stores leak across suites (the
@@ -485,5 +486,257 @@ describe('margin dragging', () => {
     // follows in the same commit — one writer, two readers.
     expect(grabber('left').style.left).toBe(`${ptToPx(144)}px`);
     expect(grabber('right').style.left).toBe('720px'); // untouched
+  });
+});
+
+// ─── Phase 3: tab stops (attr + ruler UI) ─────────────────────────────
+
+describe('tab stops', () => {
+  function tabStopsOf(editor: { state: { doc: import('@tiptap/pm/model').Node } }): number[] | null {
+    const node = editor.state.doc.child(0);
+    const stops = node.attrs.tabStops;
+    return Array.isArray(stops) ? stops : null;
+  }
+
+  function tabMarkers(): HTMLElement[] {
+    return [...document.querySelectorAll('[data-testid="ruler-tab-stop"]')] as HTMLElement[];
+  }
+
+  /** The click-add default: a left-aligned stop at `position`. */
+  const leftStop = (position: number) => ({ position, alignment: 'left' as const });
+
+  /** prosemirror-history merges adjacent transactions within its 500ms
+   *  newGroupDelay — a test's rapid-fire chain (setContent included)
+   *  would collapse into ONE undo step. A quiet gap splits the loaded
+   *  document from the gesture, so one undo restores the loaded state
+   *  (real sessions never hit the merge — minutes between load and
+   *  drag). */
+  async function undoBarrier() {
+    await new Promise((resolve) => setTimeout(resolve, 550));
+  }
+
+  it('round-trips the attr through data-tab-stops (sorted, deduped, kinds kept)', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="192:center,96:right,96:left">A</p>');
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([
+      { position: 96, alignment: 'right' },
+      { position: 192, alignment: 'center' },
+    ]);
+    expect(editor.getHTML()).toContain('data-tab-stops="96:right,192:center"');
+  });
+
+  it('projects tabStops onto the semantic block (normalized; absent when empty)', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="192:center,96:right">A</p><p>B</p>');
+    await settleLayout();
+    // The SEMANTIC blocks (doc.blocks) carry it; the AdapterBlock
+    // sidecar (blocks) doesn't. tabStops lives on the ParagraphBlock
+    // arm of the Block union — narrow before reading.
+    const { doc } = pmDocToSemantic(editor.state.doc, {
+      fontFamily: 'system-ui',
+      fontSize: 16,
+    });
+    expect(doc.blocks[0]!.kind).toBe('paragraph');
+    expect((doc.blocks[0] as import('@tensor-editor/engine').ParagraphBlock).tabStops).toEqual([
+      { position: 96, alignment: 'right' },
+      { position: 192, alignment: 'center' },
+    ]);
+    expect((doc.blocks[1] as import('@tensor-editor/engine').ParagraphBlock).tabStops).toBeUndefined();
+  });
+
+  it('renders the caret block\u2019s stops at contentX + stop', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96,192">A</p>');
+    await settleLayout();
+    editor.commands.setTextSelection(1); // inside paragraph A
+    await settleLayout();
+    const markers = tabMarkers();
+    expect(markers).toHaveLength(2);
+    expect(markers[0]!.style.left).toBe(`${GEOMETRY.contentX + 96}px`);
+    expect(markers[1]!.style.left).toBe(`${GEOMETRY.contentX + 192}px`);
+  });
+
+  it('swaps the displayed stops when the caret moves between blocks', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96">A</p><p>B</p>');
+    await settleLayout();
+    // setContent leaves the caret at the END — inside paragraph B (no stops).
+    expect(tabMarkers()).toHaveLength(0);
+    act(() => {
+      editor.commands.setTextSelection(1); // paragraph A
+    });
+    await settleLayout();
+    expect(tabMarkers()).toHaveLength(1);
+  });
+
+  it('adds a stop on a band click (snapped) — undoable', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96,192">A</p>');
+    await settleLayout();
+    // Recorded history baseline (see undoBarrier).
+    editor.commands.setTextSelection(1);
+    await undoBarrier();
+    const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
+    // clientX 340 → page x 340 → raw stop 244 → snap(340) = 336 → stop 240.
+    act(() => {
+      fireEvent.pointerDown(inner, { clientX: 340, button: 0 });
+      fireEvent.pointerUp(inner, { clientX: 340, button: 0 });
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(192), leftStop(240)]);
+    expect(tabMarkers()).toHaveLength(3);
+    // PM transaction → undo restores the exact prior state.
+    act(() => {
+      editor.commands.undo();
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(192)]);
+    expect(tabMarkers()).toHaveLength(2);
+  });
+
+  it('ignores margin-span band clicks', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96">A</p>');
+    await settleLayout();
+    const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
+    act(() => {
+      // x 40 → the left margin span; x 760 → beyond contentR (720).
+      fireEvent.pointerDown(inner, { clientX: 40, button: 0 });
+      fireEvent.pointerUp(inner, { clientX: 40, button: 0 });
+      fireEvent.pointerDown(inner, { clientX: 760, button: 0 });
+      fireEvent.pointerUp(inner, { clientX: 760, button: 0 });
+    });
+    expect(tabStopsOf(editor)).toEqual([leftStop(96)]);
+  });
+
+  it('drags a stop with preview and commits ONE undoable transaction', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96,192">A</p>');
+    await settleLayout();
+    // Recorded history baseline (see undoBarrier).
+    editor.commands.setTextSelection(1);
+    await undoBarrier();
+    const markers = tabMarkers();
+    act(() => {
+      fireEvent.pointerDown(markers[1]!, { clientX: 500, button: 0 });
+      fireEvent.pointerMove(markers[1]!, { clientX: 548 }); // +48 → 240
+    });
+    // Preview: the doc is untouched mid-gesture; the marker rides the draft.
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(192)]);
+    expect(markers[1]!.style.left).toBe(`${GEOMETRY.contentX + 240}px`);
+    act(() => {
+      fireEvent.pointerUp(markers[1]!, { clientX: 548 });
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(240)]);
+    act(() => {
+      editor.commands.undo();
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(192)]);
+  });
+
+  it('dragging preserves the alignment kind', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="192:center">A</p>');
+    await settleLayout();
+    editor.commands.setTextSelection(1);
+    await undoBarrier();
+    const markers = tabMarkers();
+    act(() => {
+      fireEvent.pointerDown(markers[0]!, { clientX: 500, button: 0 });
+      fireEvent.pointerMove(markers[0]!, { clientX: 548 }); // +48 → 240
+      fireEvent.pointerUp(markers[0]!, { clientX: 548 });
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([{ position: 240, alignment: 'center' }]);
+  });
+
+  it('the band context menu adds a stop with a chosen alignment', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96">A</p>');
+    await settleLayout();
+    const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
+    // Right-click at page x 340 → raw stop 244 → snap → 240.
+    act(() => {
+      fireEvent.contextMenu(inner, { clientX: 340, button: 2 });
+    });
+    const menu = document.querySelector('[data-testid="ruler-tab-menu"]');
+    expect(menu).not.toBeNull();
+    act(() => {
+      fireEvent.click(
+        document.querySelector('[data-testid="ruler-tab-menu-center"]')!,
+      );
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([
+      leftStop(96),
+      { position: 240, alignment: 'center' },
+    ]);
+    // The menu closes after acting.
+    expect(document.querySelector('[data-testid="ruler-tab-menu"]')).toBeNull();
+  });
+
+  it('the stop context menu re-aligns and removes', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96:left,192:right">A</p>');
+    await settleLayout();
+    const marker = tabMarkers()[0]!;
+    act(() => {
+      fireEvent.contextMenu(marker, { button: 2 });
+    });
+    act(() => {
+      fireEvent.click(
+        document.querySelector('[data-testid="ruler-tab-menu-right"]')!,
+      );
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([
+      { position: 96, alignment: 'right' },
+      { position: 192, alignment: 'right' },
+    ]);
+    // Remove the other one via its own menu (separate act blocks: the menu
+    // renders after the contextMenu's state commit).
+    act(() => {
+      fireEvent.contextMenu(tabMarkers()[1]!, { button: 2 });
+    });
+    act(() => {
+      fireEvent.click(
+        document.querySelector('[data-testid="ruler-tab-menu-remove"]')!,
+      );
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([{ position: 96, alignment: 'right' }]);
+  });
+
+  it('removes a stop dragged out of the content band', async () => {
+    const { editor } = renderTensor('<p data-tab-stops="96,192">A</p>');
+    await settleLayout();
+    // Recorded history baseline (see undoBarrier).
+    editor.commands.setTextSelection(1);
+    await undoBarrier();
+    const markers = tabMarkers();
+    act(() => {
+      fireEvent.pointerDown(markers[0]!, { clientX: 500, button: 0 });
+      fireEvent.pointerMove(markers[0]!, { clientX: 250 }); // raw −250 < 0
+      fireEvent.pointerUp(markers[0]!, { clientX: 250 });
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(192)]);
+    act(() => {
+      editor.commands.undo();
+    });
+    await settleLayout();
+    expect(tabStopsOf(editor)).toEqual([leftStop(96), leftStop(192)]);
+  });
+
+  it('applies to every selected paragraph (Word semantics)', async () => {
+    const { editor } = renderTensor('<p>A</p><p>B</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.setTextSelection({
+        from: 1,
+        to: editor.state.doc.content.size - 1,
+      });
+    });
+    const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
+    act(() => {
+      fireEvent.pointerDown(inner, { clientX: 192, button: 0 }); // stop 96
+      fireEvent.pointerUp(inner, { clientX: 192, button: 0 });
+    });
+    await settleLayout();
+    expect(editor.state.doc.child(0).attrs.tabStops).toEqual([leftStop(96)]);
+    expect(editor.state.doc.child(1).attrs.tabStops).toEqual([leftStop(96)]);
   });
 });

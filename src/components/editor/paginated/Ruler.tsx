@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import type { PageGeometry } from '@tensor-editor/engine';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import type { Editor } from '@tiptap/core';
+import type { PageGeometry, TabStop } from '@tensor-editor/engine';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
+import { MoveHorizontal, MoveLeft, MoveRight } from 'lucide-react';
 import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
 import { pxToPt } from '@/lib/document/pageSetup';
 import {
@@ -137,6 +139,33 @@ function Marker({
   );
 }
 
+/** The stop glyphs (Word's shapes): ⌐ left, ┴ center, right mirrored. */
+function TabGlyph({ alignment }: { alignment: TabStop['alignment'] }) {
+  return (
+    <span className="relative block h-[9px] w-[7px]">
+      <span
+        className={`absolute top-0 h-full w-[2px] bg-foreground ${
+          alignment === 'right'
+            ? 'right-0'
+            : alignment === 'center'
+              ? 'left-[2.5px]'
+              : 'left-0'
+        }`}
+      />
+      <span className="absolute bottom-0 h-[2px] w-full bg-foreground" />
+    </span>
+  );
+}
+
+/** The tooltip's direction icon (Lucide, muted) — the side the text
+ *  sits on: left tab → text flows right; right tab → text ends at the
+ *  stop; center → both (M-RULER 3.5 ruling). */
+const ALIGNMENT_ARROW: Record<TabStop['alignment'], ReactNode> = {
+  left: <MoveRight size={12} className="text-muted-foreground" />,
+  center: <MoveHorizontal size={12} className="text-muted-foreground" />,
+  right: <MoveLeft size={12} className="text-muted-foreground" />,
+};
+
 /** The margin drag handle: the ENTIRE bar-height column at a content
  * edge is grabbable (the thin-bar ruling made a small tab too hard a
  * target — the grab region is now the full vertical height of the
@@ -190,14 +219,20 @@ export function Ruler({
   geometry,
   zoom,
   model,
+  editor,
 }: {
   /** The FIRST page's engine geometry — the single source of page and
    * content-box dims (L1: never re-derived from pageSetup here). */
   geometry: PageGeometry;
   /** zoomLevel / 100 — scales content positions, not the bar. */
   zoom: number;
-  /** The caret block's indent attrs, or null (margins-only ruler). */
+  /** The caret block's indent attrs + tab stops, or null (margins-only
+   * ruler — headings/codeBlocks/lists carry none of these). */
   model: RulerModel | null;
+  /** The PM editor — the tab-stop writers route through it (PM
+   * transactions: undoable, one step per gesture). Null in the fonts
+   * gate stub only; every tab handler guards. */
+  editor: Editor | null;
 }) {
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   // Canvas colors are computed-style READS at paint time, not live CSS —
@@ -211,6 +246,7 @@ export function Ruler({
   const [deskScrollLeft, setDeskScrollLeft] = useState(0);
   const barRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const mutedProbeRef = useRef<HTMLSpanElement>(null);
 
   const pageW = geometry.size.width;
@@ -376,6 +412,175 @@ export function Ruler({
   const dragContentL = marginDrag?.side === 'left' ? marginDrag.draftPx : contentX;
   const dragContentR = marginDrag?.side === 'right' ? marginDrag.draftPx : contentR;
 
+  // ── M-RULER PHASE 3: tab stops ──
+  // The band (the content area of the page strip) ADDS a stop on click
+  // (snapped to the tick grid; Alt = free). An existing stop's marker
+  // DRAGS — preview on the bar, ONE PM transaction at release — and
+  // dragging it out of the content band REMOVES it. Tab stops are PM
+  // attributes, so their writes are UNDOABLE and MUST stay one-step-
+  // per-gesture: unlike the margin drags there is NO live-commit mode
+  // here in either Reduce Motion setting (a transaction per frame
+  // would flood the undo stack).
+  interface TabDrag {
+    index: number;
+    startClientX: number;
+    startStopPx: number;
+    draftPx: number;
+    removing: boolean;
+  }
+
+  const tabDragRef = useRef<TabDrag | null>(null);
+  const [tabDrag, setTabDrag] = useState<TabDrag | null>(null);
+  // The band's pending click (down → up with <4px travel adds a stop).
+  // Ref only: nothing renders from it, so a bare band press costs no
+  // render.
+  const tabAddRef = useRef<{ clientX: number } | null>(null);
+
+  /** Engine px from the PAGE's left edge for a pointer event (the
+   *  inner container's frame — the tab-stop positions' own frame). */
+  function bandPageX(e: { clientX: number }): number | null {
+    const rect = innerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    return (e.clientX - rect.left) / zoom;
+  }
+
+  function handleBandPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    // Markers own their events; bare band clicks only.
+    if (e.target !== e.currentTarget || e.button !== 0) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    tabAddRef.current = { clientX: e.clientX };
+  }
+
+  function handleBandPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const down = tabAddRef.current;
+    tabAddRef.current = null;
+    if (!down || !editor || !model) return;
+    if (Math.abs(e.clientX - down.clientX) >= 4) return; // a drag, not a click
+    const pageX = bandPageX(e);
+    if (pageX == null) return;
+    const rawStop = pageX - contentX;
+    if (rawStop < 0 || rawStop > contentW) return; // margin spans stay inert
+    const snapped = e.altKey ? rawStop : snapToMinor(pageX, unit) - contentX;
+    const stop = Math.min(contentW, Math.max(0, snapped));
+    // Left-click adds the DEFAULT kind (left) — the context menu owns
+    // the alignment choice.
+    editor.commands.setTabStops([...model.tabStops, { position: stop, alignment: 'left' }]);
+  }
+
+  function startTabDrag(index: number) {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || !editor) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      const startStopPx = model?.tabStops[index]?.position ?? 0;
+      const drag: TabDrag = {
+        index,
+        startClientX: e.clientX,
+        startStopPx,
+        draftPx: startStopPx,
+        removing: false,
+      };
+      tabDragRef.current = drag;
+      setTabDrag(drag);
+    };
+  }
+
+  function moveTabDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = tabDragRef.current;
+    if (!drag) return;
+    const raw = drag.startStopPx + (e.clientX - drag.startClientX) / zoom;
+    const snapped = e.altKey ? raw : snapToMinor(contentX + raw, unit) - contentX;
+    // Out of the content band = the removal drag (a small tolerance is
+    // unnecessary — the snap grid keeps in-band jitters on-grid).
+    const next: TabDrag = {
+      ...drag,
+      draftPx: snapped,
+      removing: raw < 0 || raw > contentW,
+    };
+    tabDragRef.current = next;
+    setTabDrag(next);
+  }
+
+  function endTabDrag(commit: boolean) {
+    return () => {
+      const drag = tabDragRef.current;
+      tabDragRef.current = null;
+      setTabDrag(null);
+      if (!drag || !commit || !editor || !model) return;
+      const stops = [...model.tabStops];
+      if (drag.removing) stops.splice(drag.index, 1);
+      else stops[drag.index] = { ...stops[drag.index], position: drag.draftPx };
+      editor.commands.setTabStops(stops);
+    };
+  }
+
+  // ── the tab context menu (M-RULER 3.5): right-click the band to add
+  // with an alignment (GDocs's move), right-click a stop to re-align or
+  // remove it. Band actions apply through setTabStops — every selected
+  // paragraph, like the click-add; stop actions target the caret block
+  // (stops may legitimately differ per block in a selection).
+  type TabMenu =
+    | { mode: 'band'; pageX: number }
+    | { mode: 'stop'; index: number; pageX: number };
+  const [tabMenu, setTabMenu] = useState<TabMenu | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!tabMenu) return;
+    const onOutside = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setTabMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTabMenu(null);
+    };
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onOutside, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [tabMenu]);
+
+  function handleBandContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return; // stops own their menus
+    e.preventDefault();
+    const pageX = bandPageX(e);
+    if (pageX == null) return;
+    const rawStop = pageX - contentX;
+    if (rawStop < 0 || rawStop > contentW) return; // margins: no menu
+    setTabMenu({ mode: 'band', pageX });
+  }
+
+  function addStopAt(alignment: TabStop['alignment']) {
+    if (!tabMenu || tabMenu.mode !== 'band' || !editor || !model) return;
+    const snapped = snapToMinor(tabMenu.pageX, unit) - contentX;
+    const stop = Math.min(contentW, Math.max(0, snapped));
+    editor.commands.setTabStops([
+      ...model.tabStops,
+      { position: stop, alignment },
+    ]);
+    setTabMenu(null);
+  }
+
+  function changeStopAlignment(alignment: TabStop['alignment']) {
+    if (!tabMenu || tabMenu.mode !== 'stop' || !editor || !model) return;
+    editor.commands.setTabStops(
+      model.tabStops.map((s, i) =>
+        i === tabMenu.index ? { ...s, alignment } : s,
+      ),
+    );
+    setTabMenu(null);
+  }
+
+  function removeStop() {
+    if (!tabMenu || tabMenu.mode !== 'stop' || !editor || !model) return;
+    editor.commands.setTabStops(
+      model.tabStops.filter((_, i) => i !== tabMenu.index),
+    );
+    setTabMenu(null);
+  }
+
   // Deps are the PAINT INPUTS as primitives, deliberately NOT the
   // geometry object: relayout issues a new PageGeometry per call even
   // when values are identical (zero-copy contract covers LineBoxes, not
@@ -504,6 +709,23 @@ export function Ruler({
   const rightIndentX =
     model != null ? (dragContentR - model.indentRight) * zoom : 0;
 
+  // The drag badge (shared by margin and tab drags): the live value at
+  // the draft edge/stop, in the user's measurement unit.
+  const dragBadge = marginDrag
+    ? {
+        x: pageLeft + marginDrag.draftPx * zoom,
+        text:
+          marginDrag.side === 'left'
+            ? fmtVal(marginDrag.draftPx)
+            : fmtVal(pageW - marginDrag.draftPx),
+      }
+    : tabDrag
+      ? {
+          x: pageLeft + (dragContentL + tabDrag.draftPx) * zoom,
+          text: fmtVal(tabDrag.draftPx),
+        }
+      : null;
+
   return (
     <TooltipProvider>
       <div
@@ -533,8 +755,15 @@ export function Ruler({
         />
         <div
           data-testid="ruler-inner"
+          ref={innerRef}
           className="absolute top-0 h-full"
           style={{ left: `${pageLeft}px`, width: `${pageWz}px` }}
+          onPointerDown={handleBandPointerDown}
+          onPointerUp={handleBandPointerUp}
+          onPointerCancel={() => {
+            tabAddRef.current = null;
+          }}
+          onContextMenu={handleBandContextMenu}
         >
           {/* Margin handles — the PHASE 2 drag targets: the full bar-height
               column at each content edge (preview-aware `x`; the little
@@ -558,7 +787,49 @@ export function Ruler({
             onPointerUp={endMarginDrag(true)}
             onPointerCancel={endMarginDrag(false)}
           />
-          {/* Indent markers (drag wiring: Phase 2) — hidden when the
+          {/* Tab stops (Phase 3/3.5): one glyph per stop of the caret
+              block — ⌐ left, ┴ center, right mirrored — hanging at the
+              band's bottom edge (Word's zone). Drag = move (preview on
+              the bar, ONE undoable PM transaction at release); drag out
+              of the content band = remove (the glyph fades); right-
+              click = the alignment menu. Rides the PREVIEW left edge,
+              so a margin drag carries the stops along. */}
+          {model?.tabStops.map((stop, i) => {
+            const dragging = tabDrag?.index === i;
+            const draft = dragging ? tabDrag!.draftPx : stop.position;
+            const removing = dragging && tabDrag!.removing;
+            return (
+              <div
+                key={stop.position}
+                data-testid="ruler-tab-stop"
+                aria-label={`${stop.alignment} tab stop at ${fmtVal(stop.position)}`}
+                className={`absolute bottom-0 -translate-x-1/2 translate-y-1/2 touch-none cursor-ew-resize${removing ? ' opacity-40' : ''}`}
+                style={{ left: `${(dragContentL + draft) * zoom}px` }}
+                onPointerDown={startTabDrag(i)}
+                onPointerMove={moveTabDrag}
+                onPointerUp={endTabDrag(true)}
+                onPointerCancel={endTabDrag(false)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTabMenu({ mode: 'stop', index: i, pageX: contentX + stop.position });
+                }}
+              >
+                <Tooltip>
+                  <TooltipTrigger render={<span className="block p-1" />}>
+                    <TabGlyph alignment={stop.alignment} />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <span className="text-muted-foreground">
+                      {ALIGNMENT_ARROW[stop.alignment]}
+                    </span>
+                    <span>{fmtVal(stop.position)}</span>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            );
+          })}
+          {/* Indent markers (drag wiring: a later phase) — hidden when the
               caret block carries no indent attrs (headings, code
               blocks, lists: structural indents are not attr edits). */}
           {model != null && (
@@ -603,18 +874,71 @@ export function Ruler({
             </>
           )}
         </div>
-        {/* The drag badge: the live value at the draft edge, in the
-            user's measurement unit — the "current length shown in real
-            time" criterion. Pointer-transparent; hangs below the bar. */}
-        {marginDrag && (
+        {/* The drag badge (margin + tab drags): the live value at the
+            draft edge/stop, in the user's measurement unit — the
+            "current length shown in real time" criterion.
+            Pointer-transparent; hangs below the bar. */}
+        {dragBadge && (
           <div
             data-testid="ruler-drag-badge"
             className="pointer-events-none absolute top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground shadow-sm"
-            style={{ left: `${pageLeft + marginDrag.draftPx * zoom}px` }}
+            style={{ left: `${dragBadge.x}px` }}
           >
-            {marginDrag.side === 'left'
-              ? fmtVal(marginDrag.draftPx)
-              : fmtVal(pageW - marginDrag.draftPx)}
+            {dragBadge.text}
+          </div>
+        )}
+        {/* The tab context menu (3.5): band right-click adds with an
+            alignment; stop right-click re-aligns or removes. Clamped to
+            stay inside the bar; closes on outside pointerdown/Esc. */}
+        {tabMenu && (
+          <div
+            ref={menuRef}
+            data-testid="ruler-tab-menu"
+            className="absolute top-full z-50 mt-1 min-w-[130px] -translate-x-1/2 rounded-md border border-border bg-background py-1 shadow-md"
+            style={{
+              left: `${Math.min(
+                Math.max(pageLeft + tabMenu.pageX * zoom, 70),
+                Math.max(70, deskW - 70),
+              )}px`,
+            }}
+          >
+            {tabMenu.mode === 'band'
+              ? (['left', 'center', 'right'] as const).map((alignment) => (
+                  <button
+                    key={alignment}
+                    data-testid={`ruler-tab-menu-${alignment}`}
+                    className="block w-full px-2.5 py-1 text-left text-xs hover:bg-muted"
+                    onClick={() => addStopAt(alignment)}
+                  >
+                    Add {alignment} tab
+                  </button>
+                ))
+              : (
+                  <>
+                    {(['left', 'center', 'right'] as const).map((alignment) => (
+                      <button
+                        key={alignment}
+                        data-testid={`ruler-tab-menu-${alignment}`}
+                        className="block w-full px-2.5 py-1 text-left text-xs hover:bg-muted"
+                        onClick={() => changeStopAlignment(alignment)}
+                      >
+                        {alignment === 'left'
+                          ? 'Left tab'
+                          : alignment === 'center'
+                            ? 'Center tab'
+                            : 'Right tab'}
+                      </button>
+                    ))}
+                    <div className="my-1 h-px bg-border" />
+                    <button
+                      data-testid="ruler-tab-menu-remove"
+                      className="block w-full px-2.5 py-1 text-left text-xs text-destructive hover:bg-muted"
+                      onClick={removeStop}
+                    >
+                      Remove tab stop
+                    </button>
+                  </>
+                )}
           </div>
         )}
       </div>

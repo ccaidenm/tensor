@@ -302,7 +302,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
     expect(pageSheets()).toHaveLength(3);
 
     act(() => {
-      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Apply')!);
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     await settle();
 
@@ -344,7 +344,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
       fireEvent.click(presetBtn);
     });
     act(() => {
-      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Apply')!);
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     await settle();
 

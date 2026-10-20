@@ -57,10 +57,16 @@ export function hitTest(
   // (rect.x IS indentLeft). A click in the marker GUTTER (x < indent)
   // falls through the nearest-glyph loop and resolves to the item's
   // first position — the nearest-line rule stays symmetric with paint.
-  let cursor = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
-  for (const seg of line.segments) {
+  const baseX = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+  for (let si = 0; si < line.segments.length; si++) {
+    const seg = line.segments[si]!;
     const run = block.runs[seg.runIndex];
     if (!run) continue;
+    // M-RULER Phase 4: the cursor seeds from the ENGINE's placed x —
+    // prefix sums cannot model tab advances. A \t's advance is the gap
+    // to the next segment's x (the placed pen jump); the tab resolves
+    // by the same glyph-midpoint rule over that jump.
+    let cursor = baseX + seg.x;
     if (run.kind === 'inlineImage') {
       // M-IMAGES-2 — the object token: ONE position per object (the
       // engine's unbreakable-token contract). The ENTIRE painted
@@ -74,11 +80,14 @@ export function hitTest(
       const wrap = blockWrapWidth(cb.width, block);
       const dims = fitDownImage(run.width, run.height, wrap, Infinity);
       if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start };
-      cursor += dims.width;
       continue;
     }
+    const isTab = seg.end === seg.start + 1 && block.text[seg.start] === '\t';
+    const nextSeg = line.segments[si + 1];
     for (let i = seg.start; i < seg.end; i++) {
-      const w = metrics.measure(block.text[i]!, run.style);
+      const w = isTab
+        ? (nextSeg ? nextSeg.x : line.rect.width) - seg.x
+        : metrics.measure(block.text[i]!, run.style);
       if (x < cursor + w / 2) return { blockId: line.blockId, offset: i };
       cursor += w;
     }

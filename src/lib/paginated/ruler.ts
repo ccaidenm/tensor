@@ -1,4 +1,5 @@
 import type { EditorState } from '@tiptap/pm/state';
+import type { TabStop } from '@tensor-editor/engine';
 import {
   MEASUREMENT_UNITS,
   PX_PER_PT,
@@ -6,7 +7,7 @@ import {
   ptToPx,
   type MeasurementUnit,
 } from '@/lib/document/pageSetup';
-import { currentIndentLeft } from '@/lib/editor/ParagraphExtensions';
+import { currentIndentLeft, normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
 
 /**
  * M-RULER — pure ruler math. No DOM, no React, no canvas: everything
@@ -173,6 +174,10 @@ export interface RulerModel {
   indentLeft: number;
   indentRight: number;
   firstLineIndent: number;
+  /** The block's tab stops — px, CONTENT-BOX-relative (margin-relative:
+   *  indent edits never move them), ascending, normalized, each with
+   *  its alignment kind. Empty when the block has none. */
+  tabStops: TabStop[];
 }
 
 /**
@@ -194,5 +199,6 @@ export function deriveRulerModel(state: EditorState): RulerModel | null {
     indentLeft: currentIndentLeft(block),
     indentRight: num(block.attrs.indentRight),
     firstLineIndent: num(block.attrs.firstLineIndent),
+    tabStops: normalizeTabStops(block.attrs.tabStops) ?? [],
   };
 }

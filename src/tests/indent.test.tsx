@@ -128,7 +128,7 @@ describe('Tab keymaps (receipts pinned)', () => {
     expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
   });
 
-  it('P1: mid-line Tab in prose is a NO-OP (indent and fli unchanged)', async () => {
+  it('P1 → M-RULER Phase 4: mid-line Tab inserts a REAL tab character (no indent change)', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settle();
     act(() => {
@@ -136,9 +136,13 @@ describe('Tab keymaps (receipts pinned)', () => {
       pressTab();
       pressTab(true);
     });
+    // The block-start indent branch does NOT fire mid-line; the tab
+    // character is real content whose advance the ENGINE rules on (the
+    // stops or the 0.5" default grid). Shift+Tab mid-line is still a
+    // no-op for indents.
     expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
     expect(editor.getAttributes('paragraph').firstLineIndent).toBeNull();
-    expect(editor.state.doc.textContent).toBe('hello world');
+    expect(editor.state.doc.textContent).toBe('he\tllo world');
   });
 
   it('P1: Backspace-at-start ordering — firstLineIndent steps out first, then indentLeft', async () => {

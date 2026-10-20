@@ -19,6 +19,17 @@ export default defineConfig(() => ({
     },
   },
 
+  // M-RULER Phase 4: the engine is a `file:`-linked workspace package —
+  // pre-bundling it SNAPSHOTs its dist into .vite/deps, so a rebuilt
+  // engine never reached the running dev server (the tab-advance rule
+  // shipped invisible until a forced re-optimization). The engine is
+  // dependency-free pure ESM TS: excluded, Vite serves + transforms its
+  // source directly, WATCHES it, and engine edits hot-reload like the
+  // shell's own.
+  optimizeDeps: {
+    exclude: ['@tensor-editor/engine'],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

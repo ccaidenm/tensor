@@ -1409,8 +1409,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
           pages below paint. */}
       {showRuler &&
         deskWrapper &&
+        editor &&
         createPortal(
-          <Ruler geometry={geometry} zoom={z} model={rulerModel} />,
+          <Ruler geometry={geometry} zoom={z} model={rulerModel} editor={editor} />,
           deskWrapper,
         )}
     </div>

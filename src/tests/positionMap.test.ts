@@ -28,7 +28,7 @@ function makeLine(blockId: string, page: number, index: number, rangeStart: numb
     baseline: 13,
     rangeStart,
     rangeEnd,
-    segments: [{ runIndex: 0, start: rangeStart, end: rangeEnd }],
+    segments: [{ runIndex: 0, start: rangeStart, end: rangeEnd, x: 0 }],
   };
 }
 
