@@ -9,6 +9,7 @@ import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
 import { pxToPt } from '@/lib/document/pageSetup';
 import {
   RULER_HEIGHT,
+  RULER_WIDTH,
   clampMarginSpan,
   formatPxAsUnit,
   generateTicks,
@@ -939,6 +940,356 @@ export function Ruler({
                     </button>
                   </>
                 )}
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
+  );
+}
+/**
+ * M-RULER Phase 5 — the VERTICAL ruler.
+ *
+ * Mount law: wrapper-FIXED viewport column (the same desk-wrapper
+ * overlay the horizontal bar portals into — `absolute inset-y-0
+ * left-0`), so the background spans the entire container height at
+ * every scroll position (the horizontal's w-full law, verticalized).
+ * The SCALE travels instead: the whole tick field translates by the
+ * desk's scrollTop (page-attached ticks, Word's fixed-bar/moving-scale
+ * model), repainted from the scroll listener — the paint loop skips
+ * pages outside the visible range, so a scroll frame costs strokes for
+ * the visible pages only.
+ *
+ * One margin-handle pair per page, all reading/writing the same store
+ * margins through the same two write modes (live vs preview on Reduce
+ * Motion) as the horizontal drags. The pad top offset (the desk's
+ * pt-8) is read from the scroller's computed style — the same
+ * documented coupling as the horizontal's flush mount.
+ */
+export function VerticalRuler({
+  geometry,
+  zoom,
+  editor,
+  pageCount,
+}: {
+  geometry: PageGeometry;
+  zoom: number;
+  editor: Editor | null;
+  pageCount: number;
+}) {
+  const unit = useConfigStore((s) => s.config.editor.measurementUnit);
+  const theme = useConfigStore((s) => s.config.theme);
+  const reducedMotion = useReducedMotion();
+  const pageGap = useDocumentStore((s) => s.pageSetup.pageGap);
+  const [containerH, setContainerH] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [padTop, setPadTop] = useState(0);
+  const barRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mutedProbeRef = useRef<HTMLSpanElement>(null);
+
+  const pageH = geometry.size.height;
+  const pageHz = pageH * zoom;
+  const contentY = geometry.contentBox.y;
+  const contentH = geometry.contentBox.height;
+  const contentB = contentY + contentH;
+  const stride = (pageH + pageGap) * zoom;
+  // The scale's screen origin: the desk's top padding (pt-8) minus the
+  // scroll — page-attached ticks in a viewport-fixed column.
+  const scaleTop = padTop - scrollTop;
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    // The bar's parent IS the desk wrapper; the scroller is its child.
+    const scroller = bar.parentElement?.querySelector('[data-desk-scroll]') as HTMLDivElement | null;
+    if (!scroller) return;
+    const wrapperRo = new ResizeObserver(() => setContainerH(bar.parentElement!.clientHeight));
+    wrapperRo.observe(bar.parentElement!);
+    setContainerH(bar.parentElement!.clientHeight);
+    setPadTop(parseFloat(getComputedStyle(scroller).paddingTop) || 0);
+    const onScroll = () => setScrollTop(scroller.scrollTop);
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    setScrollTop(scroller.scrollTop);
+    return () => {
+      wrapperRo.disconnect();
+      scroller.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
+  // Deps are the PAINT INPUTS as primitives (the horizontal bar's law:
+  // a value-identical PageGeometry must not repaint into the paint-ops
+  // window) — plus scrollTop/padTop/containerH: the scale's frame.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const bar = barRef.current;
+    if (!canvas || !bar) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(RULER_WIDTH * dpr));
+    canvas.height = Math.max(1, Math.round(containerH * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, RULER_WIDTH, containerH);
+
+    const fg = getComputedStyle(bar).color || '#000';
+    const muted =
+      (mutedProbeRef.current && getComputedStyle(mutedProbeRef.current).color) || fg;
+    const barBg = getComputedStyle(bar).backgroundColor || 'transparent';
+
+    ctx.font = '500 9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let p = 0; p < pageCount; p++) {
+      const pageTop = scaleTop + p * stride; // screen y of the page's top edge
+      // Off-viewport cull — only meaningful with a measured container
+      // (jsdom's zero-height degenerate paints everything, keeping the
+      // paint-ops assertions honest for every page).
+      if (containerH > 0 && (pageTop > containerH || pageTop + pageHz < 0)) continue;
+      const topMs = pageTop + contentY * zoom; // the top margin's inner edge
+      const botMs = pageTop + contentB * zoom; // the bottom margin's inner edge
+      // Margin strips (un-usable space) — muted ink, mirrored two-tone.
+      ctx.fillStyle = muted;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(0, Math.round(pageTop), RULER_WIDTH, 1); // page top edge
+      ctx.fillRect(0, Math.round(botMs), RULER_WIDTH, 1); // bottom edge
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(0, pageTop, RULER_WIDTH, topMs - pageTop);
+      ctx.fillRect(0, botMs, RULER_WIDTH, pageTop + pageHz - botMs);
+
+      // The page's tick field: functional (fg) inside the content span,
+      // muted short ticks in the margin spans; majors numbered 0 from
+      // the page's top edge (Word's vertical numbering), rendered
+      // UPRIGHT over a bar-background knockout (the horizontal label
+      // treatment, transplanted).
+      const ticks = generateTicks(pageH, unit);
+      for (const tick of ticks) {
+        const y = pageTop + tick.x * zoom;
+        const ry = Math.round(y);
+        const inContent = y >= topMs - 1e-6 && y <= botMs + 1e-6;
+        if (tick.kind === 'major') {
+          ctx.fillStyle = inContent ? fg : muted;
+          ctx.globalAlpha = inContent ? 0.9 : 0.5;
+          ctx.fillRect(0, ry, RULER_WIDTH, 1);
+          if (inContent) {
+            const label = String(tick.label);
+            // UPRIGHT number (the horizontal's treatment): centered in
+            // the bar's width at the tick's y, over a bar-background
+            // knockout so the major line forms the border around the
+            // digits.
+            const w = ctx.measureText(label).width + LABEL_BOX_PAD * 2;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = barBg;
+            ctx.fillRect(RULER_WIDTH / 2 - w / 2, y - LABEL_BOX_H / 2, w, LABEL_BOX_H);
+            ctx.fillStyle = fg;
+            ctx.fillText(label, RULER_WIDTH / 2, y + 0.5);
+          }
+        } else if (inContent) {
+          ctx.fillStyle = fg;
+          ctx.globalAlpha = tick.kind === 'medium' ? 0.7 : 0.45;
+          const len = tick.kind === 'medium' ? MED_LEN : MIN_LEN;
+          ctx.fillRect(RULER_WIDTH - len, ry, len, 1);
+        } else {
+          ctx.fillStyle = muted;
+          ctx.globalAlpha = 0.4;
+          ctx.fillRect(RULER_WIDTH - MIN_LEN, ry, MIN_LEN, 1);
+        }
+      }
+      // Content-box rails — the margin handles' boundaries (vertical
+      // 1px lines spanning the bar's width).
+      ctx.fillStyle = fg;
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(0, Math.round(topMs), RULER_WIDTH, 1);
+      ctx.fillRect(0, Math.round(botMs), RULER_WIDTH, 1);
+    }
+    ctx.globalAlpha = 1;
+  }, [
+    containerH,
+    contentB,
+    contentH,
+    contentY,
+    pageCount,
+    pageH,
+    pageHz,
+    padTop,
+    scaleTop,
+    stride,
+    theme,
+    unit,
+    zoom,
+  ]);
+
+  // ── vertical margin dragging (top/bottom) — the horizontal's two
+  // write modes, y-axis plumbing ──
+  interface VMarginDrag {
+    side: 'top' | 'bottom';
+    page: number;
+    startClientY: number;
+    startEdgePx: number;
+    draftPx: number;
+  }
+  const dragRef = useRef<VMarginDrag | null>(null);
+  const [drag, setDrag] = useState<VMarginDrag | null>(null);
+  const pendingWriteRef = useRef<number | null>(null);
+
+  function commitMargin(d: VMarginDrag, px: number) {
+    const ps = useDocumentStore.getState().pageSetup;
+    const margins = { ...ps.margins };
+    if (d.side === 'top') margins.top = pxToPt(px);
+    else margins.bottom = pxToPt(pageH - px);
+    if (margins.top === ps.margins.top && margins.bottom === ps.margins.bottom) return;
+    useDocumentStore.getState().setPageSetup({ ...ps, margins });
+  }
+
+  function startDrag(side: 'top' | 'bottom', page: number) {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || !editor) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      const startEdgePx = side === 'top' ? contentY : contentB;
+      const d: VMarginDrag = {
+        side,
+        page,
+        startClientY: e.clientY,
+        startEdgePx,
+        draftPx: startEdgePx,
+      };
+      dragRef.current = d;
+      setDrag(d);
+    };
+  }
+
+  function moveDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = dragRef.current;
+    if (!d) return;
+    const raw = d.startEdgePx + (e.clientY - d.startClientY) / zoom;
+    const snapped = e.altKey ? raw : snapToMinor(raw, unit);
+    const [top, bottom] = clampMarginSpan(
+      d.side === 'top' ? snapped : contentY,
+      d.side === 'bottom' ? snapped : contentB,
+      pageH,
+    );
+    const draftPx = d.side === 'top' ? top : bottom;
+    if (draftPx === d.draftPx) return;
+    const next = { ...d, draftPx };
+    dragRef.current = next;
+    setDrag(next);
+    if (!reducedMotion) {
+      if (pendingWriteRef.current != null) cancelAnimationFrame(pendingWriteRef.current);
+      if (typeof requestAnimationFrame === 'function') {
+        pendingWriteRef.current = requestAnimationFrame(() => {
+          pendingWriteRef.current = null;
+          commitMargin(next, next.draftPx);
+        });
+      } else {
+        commitMargin(next, next.draftPx);
+      }
+    }
+  }
+
+  function endDrag(commit: boolean) {
+    return () => {
+      if (pendingWriteRef.current != null) {
+        cancelAnimationFrame(pendingWriteRef.current);
+        pendingWriteRef.current = null;
+      }
+      const d = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (d && commit) commitMargin(d, d.draftPx);
+    };
+  }
+
+  // The handle/badge screen-y law: the scale's origin + the page's
+  // stack offset + the edge (all × zoom), in the wrapper frame.
+  const handleY = (page: number, edgePx: number): number =>
+    scaleTop + page * stride + edgePx * zoom;
+
+  const fmt = (px: number, what: string): string =>
+    `${what}: ${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
+  const fmtVal = (px: number): string =>
+    `${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
+
+  const badge = drag
+    ? {
+        y: handleY(drag.page, drag.draftPx),
+        text:
+          drag.side === 'top'
+            ? fmtVal(drag.draftPx)
+            : fmtVal(pageH - drag.draftPx),
+      }
+    : null;
+
+  return (
+    <TooltipProvider>
+      <div
+        ref={barRef}
+        data-testid="ruler-vertical"
+        className={`absolute inset-y-0 left-0 z-20 select-none bg-card${drag ? ' cursor-ns-resize' : ''}`}
+        style={{ left: 0, width: `${RULER_WIDTH}px` }}
+      >
+        <span
+          ref={mutedProbeRef}
+          aria-hidden
+          className="invisible absolute text-muted-foreground"
+        />
+        <canvas
+          ref={canvasRef}
+          data-testid="ruler-vertical-canvas"
+          role="presentation"
+          className="pointer-events-none absolute left-0 top-0"
+          style={{ width: `${RULER_WIDTH}px`, height: `${containerH}px` }}
+        />
+        {/* Per-page margin handles: full-width columns at each page's
+            content-box edges (the horizontal's full-height law,
+            rotated). Every pair drives the SAME store margins. */}
+        {Array.from({ length: pageCount }, (_, p) => {
+          const topY = handleY(p, drag?.side === 'top' && drag.page === p ? drag.draftPx : contentY);
+          const botY = handleY(p, drag?.side === 'bottom' && drag.page === p ? drag.draftPx : contentB);
+          return (
+            <div key={p}>
+              <div
+                data-testid={p === 0 ? 'ruler-vertical-top' : undefined}
+                aria-label={fmt(contentY, 'Top margin')}
+                className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
+                style={{ top: `${topY}px` }}
+                onPointerDown={startDrag('top', p)}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag(true)}
+                onPointerCancel={endDrag(false)}
+              >
+                <Tooltip>
+                  <TooltipTrigger render={<span className="absolute inset-0 block" />} />
+                  <TooltipContent side="right">{fmt(contentY, 'Top margin')}</TooltipContent>
+                </Tooltip>
+                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
+              </div>
+              <div
+                data-testid={p === 0 ? 'ruler-vertical-bottom' : undefined}
+                aria-label={fmt(pageH - contentB, 'Bottom margin')}
+                className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
+                style={{ top: `${botY}px` }}
+                onPointerDown={startDrag('bottom', p)}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag(true)}
+                onPointerCancel={endDrag(false)}
+              >
+                <Tooltip>
+                  <TooltipTrigger render={<span className="absolute inset-0 block" />} />
+                  <TooltipContent side="right">{fmt(pageH - contentB, 'Bottom margin')}</TooltipContent>
+                </Tooltip>
+                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
+              </div>
+            </div>
+          );
+        })}
+        {badge && (
+          <div
+            data-testid="ruler-vertical-drag-badge"
+            className="pointer-events-none absolute z-40 ml-1 -translate-y-1/2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground shadow-sm"
+            style={{ top: `${badge.y}px`, left: `${RULER_WIDTH}px` }}
+          >
+            {badge.text}
           </div>
         )}
       </div>

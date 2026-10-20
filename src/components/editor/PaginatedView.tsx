@@ -44,7 +44,7 @@ import { useMediaStore } from '@/lib/media/store';
 import { reportUnresolvedRefs } from '@/lib/media/diagnostics';
 import { ImageSelection } from './paginated/ImageSelection';
 import { countLineNumbers } from '@/lib/paginated/lineNumbers';
-import { Ruler } from './paginated/Ruler';
+import { Ruler, VerticalRuler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
@@ -208,9 +208,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   // M-IMAGES-1: caption display toggle (NPC precedent — ink only).
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
-  // M-RULER: gates the ruler PORTAL below — toggling unmounts the
-  // overlay chrome entirely (clean teardown; zero reflow either way).
-  const showRuler = useConfigStore((s) => s.config.editor.showRuler);
+  // M-RULER: per-axis display gates (the command palette owns the
+  // granular show/hide; the ribbon button toggles both).
+  const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
+  const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
   // M-IMAGES-2.1 — the INLINE paint's arrival law: bumps when any
   // bitmap lands (pending inline objects repaint once; no relayout —
   // the bitmapVersion is geometry-free, it only rides boxKey).
@@ -1187,6 +1188,22 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   return (
     <div className="relative" data-testid="paginated-root" ref={rootRef}>
       <HiddenInputView editor={editor} />
+      {/* M-RULER Phase 5: the vertical ruler — a wrapper-FIXED viewport
+          column (the background spans the container at every scroll
+          position) whose SCALE translates with the desk's scroll:
+          page-attached ticks, Word's fixed-bar/moving-scale model. */}
+      {showVerticalRuler &&
+        deskWrapper &&
+        editor &&
+        createPortal(
+          <VerticalRuler
+            geometry={geometry}
+            zoom={z}
+            editor={editor}
+            pageCount={result.pages.length}
+          />,
+          deskWrapper,
+        )}
       {/* Explicit outer size = natural stack dimensions x zoom, so scroll
           extents are correct BY CONSTRUCTION; the inner stack transform
           scales; every painted child lives inside the transform; NOTHING
@@ -1407,7 +1424,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
           (flush under the ribbon; show/hide reflows nothing). Geometry
           comes from the engine's PageGeometry — the same facts the
           pages below paint. */}
-      {showRuler &&
+      {showHorizontalRuler &&
         deskWrapper &&
         editor &&
         createPortal(

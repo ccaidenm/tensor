@@ -73,7 +73,7 @@ Read top to bottom, that's the order data flows on every edit. The rest of this 
 | `src/lib/paginated/bench.ts` | Differential performance harness (dev-only) |
 | `src/components/editor/PaginatedView.tsx` | The orchestrator: owns the engine, schedules relayout, projects selection/caret/search, renders the page stack |
 | `src/components/editor/paginated/*.tsx` | Paint surfaces and overlays |
-| `src/components/editor/paginated/Ruler.tsx` (+ `src/lib/paginated/ruler.ts`) | M-RULER: the horizontal ruler — static overlay chrome portaled to the desk wrapper (ticks per measurement unit, margin/indent markers) |
+| `src/components/editor/paginated/Ruler.tsx` (+ `src/lib/paginated/ruler.ts`) | The horizontal ruler (static overlay chrome portaled to the desk wrapper) + the vertical ruler (page-attached, inside the scroll content) — ticks per measurement unit, margin/indent markers, tab stops |
 | `src/lib/document/pageSetup.ts` | Page dimensions/margins (points) → engine `LayoutOptions` (px) |
 | `src/lib/editor/BlockIdExtension.ts` | Mints stable `blockId` attrs on every top-level PM node |
 

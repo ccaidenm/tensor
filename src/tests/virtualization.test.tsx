@@ -44,9 +44,11 @@ const canvasesOn = (pageIndex: number) =>
   document.querySelector(`[data-page-index="${pageIndex}"]`)?.querySelectorAll('canvas').length ?? 0;
 
 const allCanvases = () =>
-  // The ruler bar owns a canvas too (M-RULER) — the virtualization
-  // counts are about BLOCK canvases, so exclude it.
-  document.querySelectorAll('canvas:not([data-testid="ruler-canvas"])').length;
+  // The ruler bars own canvases too (M-RULER) — the virtualization
+  // counts are about BLOCK canvases, so exclude both.
+  document.querySelectorAll(
+    'canvas:not([data-testid="ruler-canvas"]):not([data-testid="ruler-vertical-canvas"])',
+  ).length;
 
 beforeEach(() => {
   useDocumentStore.getState().setPageInfo(1, 1);
@@ -116,7 +118,9 @@ describe('dirty-block repaint', () => {
     const { editor } = renderTensorInScrollContainer('<p>one</p><p>two</p><p>three</p>');
     await settleLayout();
     expect(
-      document.querySelectorAll('canvas:not([data-testid="ruler-canvas"])'),
+      document.querySelectorAll(
+        'canvas:not([data-testid="ruler-canvas"]):not([data-testid="ruler-vertical-canvas"])',
+      ),
     ).toHaveLength(3);
 
     const ops = () => (globalThis as { __paintOps?: Array<{ op: string; args: unknown[] }> }).__paintOps ?? [];

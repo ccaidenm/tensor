@@ -378,11 +378,11 @@ describe('Layout tab (ArrangeGroup) + palette commands', () => {
   it('the View tab keeps NO line-numbers control (placeholder group restored)', () => {
     render(<ShowGroup />);
     expect(document.querySelector('button[aria-label="Show Line Numbers"]')).toBeNull();
-    // M-RULER: Show Ruler is LIVE (the ruler bar ships); its button is
-    // a real toggle, the remaining placeholders stay disabled.
+    // M-RULER: Show Rulers is LIVE (both bars ship); its button is a
+    // real toggle, the remaining placeholders stay disabled.
     expect(document.querySelectorAll('button[disabled]').length).toBe(4);
-    const ruler = document.querySelector('button[aria-label="Show Ruler"]') as HTMLButtonElement;
-    expect(ruler.disabled).toBe(false);
+    const rulers = document.querySelector('button[aria-label="Show Rulers"]') as HTMLButtonElement;
+    expect(rulers.disabled).toBe(false);
   });
 
   it('the main icon button reflects and toggles the setting (default Per Page)', () => {

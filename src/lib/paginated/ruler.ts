@@ -27,6 +27,11 @@ import { currentIndentLeft, normalizeTabStops } from '@/lib/editor/ParagraphExte
  * vertically centered on a transparent background. */
 export const RULER_HEIGHT = 18;
 
+/** The VERTICAL ruler bar's width (Phase 5): a touch thinner than the
+ * horizontal bar's height — the rotated numbers + full-width majors
+ * read heavier at the same size, so the vertical trims 2px. */
+export const RULER_WIDTH = 16;
+
 /** Per-unit tick steps in POINTS. Ratios major/minor are integers by
  * construction (pinned by ruler.test.ts) so tick generation walks the
  * minor step and hits every medium/major exactly. */

@@ -11,6 +11,7 @@ import {
   TICK_SPECS,
   MIN_CONTENT_WIDTH_PT,
   RULER_HEIGHT,
+  RULER_WIDTH,
 } from '@/lib/paginated/ruler';
 import { ptToPx } from '@/lib/document/pageSetup';
 import { useConfigStore } from '@/lib/config/store';
@@ -22,7 +23,7 @@ import { GEOMETRY, renderTensor, settleLayout } from './harness';
 // The module-level config/document stores leak across suites (the
 // ARCHITECTURE.md gotcha) — restore the defaults before every test.
 beforeEach(() => {
-  useConfigStore.getState().setShowRuler(true);
+  useConfigStore.getState().setBothRulers(true);
   useDocumentStore.setState({
     pageSetup: {
       pageSize: 'Letter',
@@ -264,7 +265,7 @@ describe('Ruler (integration, FakeMetrics geometry)', () => {
   });
 
   it('respects the Show Ruler toggle (off → no ruler at all)', async () => {
-    useConfigStore.getState().setShowRuler(false);
+    useConfigStore.getState().setBothRulers(false);
     renderTensor();
     await settleLayout();
     expect(document.querySelector('[data-testid="ruler"]')).toBeNull();
@@ -279,10 +280,10 @@ describe('Ruler (integration, FakeMetrics geometry)', () => {
     ops.length = 0;
     // Force a repaint by cycling the ruler off and back on.
     act(() => {
-      useConfigStore.getState().setShowRuler(false);
+      useConfigStore.getState().setBothRulers(false);
     });
     act(() => {
-      useConfigStore.getState().setShowRuler(true);
+      useConfigStore.getState().setBothRulers(true);
     });
     await settleLayout();
     const texts = ops.filter((o) => o.op === 'fillText').map((o) => o.args[0]);
@@ -738,5 +739,137 @@ describe('tab stops', () => {
     await settleLayout();
     expect(editor.state.doc.child(0).attrs.tabStops).toEqual([leftStop(96)]);
     expect(editor.state.doc.child(1).attrs.tabStops).toEqual([leftStop(96)]);
+  });
+});
+// ─── Phase 5: the vertical ruler ──────────────────────────────────────
+
+describe('vertical ruler', () => {
+  beforeEach(() => {
+    // The drag pins PREVIEW mode (the Reduce Motion ruling).
+    useConfigStore.getState().setReduceMotion('on');
+  });
+
+  it('mounts INSIDE the paginated root as page-attached chrome (scrolls with the doc)', async () => {
+    renderTensor('<p>hello world</p>');
+    await settleLayout();
+    const bar = document.querySelector('[data-testid="ruler-vertical"]') as HTMLElement;
+    expect(bar).not.toBeNull();
+    // Wrapper-FIXED law: the bar is viewport chrome in the desk wrapper
+    // (the same overlay the horizontal portals into) — inset-y-0, so
+    // the background spans the container at every scroll position.
+    expect(bar.closest('[data-desk-wrapper]')).not.toBeNull();
+    expect(bar.className).toContain('inset-y-0');
+    expect(bar.style.width).toBe(`${RULER_WIDTH}px`);
+    // Window-anchored left edge (scrollLeft 0 in jsdom).
+    expect(bar.style.left).toBe('0px');
+  });
+
+  it('the scale translates with scroll (viewport-fixed bar, page-attached ticks)', async () => {
+    // Two page-filling paragraphs → 2 pages (the interaction suite's
+    // fixture shape).
+    const fill = GEOMETRY.charsPerLine * GEOMETRY.linesPerPage;
+    renderTensor(`<p>${'a'.repeat(fill)}</p><p>${'b'.repeat(fill)}</p>`);
+    await settleLayout();
+    const ops = (globalThis as unknown as {
+      __paintOps: Array<{ op: string; args: unknown[] }>;
+    }).__paintOps;
+    ops.length = 0;
+    // jsdom has no layout: pin the scroll position the listener reads,
+    // then dispatch the scroll the scroller would emit.
+    const scroller = document.querySelector('[data-desk-scroll]') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollTop', { value: 500, configurable: true });
+    act(() => {
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    await settleLayout();
+    // Page 1's top rail (stack y 1088 + content 96) paints at
+    // padTop(0) + 1184 − 500 = 684 — the tick field moved WITH the
+    // pages while the bar stayed fixed.
+    const rail = ops.find(
+      (o) => o.op === 'fillRect' && o.args[1] === 684 && o.args[3] === 1,
+    );
+    expect(rail).toBeTruthy();
+  });
+
+  it('renders per-page margin handles at the real content box', async () => {
+    renderTensor('<p>hello world</p>');
+    await settleLayout();
+    const top = document.querySelector('[data-testid="ruler-vertical-top"]') as HTMLElement;
+    const bottom = document.querySelector('[data-testid="ruler-vertical-bottom"]') as HTMLElement;
+    // contentY 96 / contentB 960 (canvas-relative == page-relative).
+    expect(top.style.top).toBe('96px');
+    expect(bottom.style.top).toBe(`${GEOMETRY.contentY + GEOMETRY.contentHeight}px`);
+  });
+
+  it('paints the vertical rails on the canvas (recorded ops)', async () => {
+    renderTensor('<p>hello world</p>');
+    await settleLayout();
+    const ops = (globalThis as unknown as {
+      __paintOps: Array<{ op: string; args: unknown[] }>;
+    }).__paintOps;
+    ops.length = 0;
+    act(() => {
+      useConfigStore.getState().setBothRulers(false);
+    });
+    act(() => {
+      useConfigStore.getState().setBothRulers(true);
+    });
+    await settleLayout();
+    // The top rail: a 1px-tall full-width line at the content edge (96).
+    const rail = ops.find(
+      (o) => o.op === 'fillRect' && o.args[1] === 96 && o.args[3] === 1,
+    );
+    expect(rail).toBeTruthy();
+    // The number knockouts: 12px-tall bar-background boxes behind the
+    // upright labels (the horizontal's treatment).
+    expect(ops.some((o) => o.op === 'fillRect' && o.args[3] === 12)).toBe(true);
+  });
+
+  it('drags the top margin with snapping and commits on release', async () => {
+    renderTensor('<p>hello world</p>');
+    await settleLayout();
+    let writes = 0;
+    let prev = useDocumentStore.getState().pageSetup;
+    const unsub = useDocumentStore.subscribe((s) => {
+      if (s.pageSetup !== prev) {
+        writes++;
+        prev = s.pageSetup;
+      }
+    });
+    const handle = document.querySelector('[data-testid="ruler-vertical-top"]') as HTMLElement;
+    act(() => {
+      fireEvent.pointerDown(handle, { clientY: 200, button: 0 });
+      fireEvent.pointerMove(handle, { clientY: 248 }); // +48px = 4 minor steps
+    });
+    // PREVIEW: no store write mid-gesture; the handle rides the draft.
+    expect(useDocumentStore.getState().pageSetup.margins.top).toBe(72);
+    expect(writes).toBe(0);
+    expect(handle.style.top).toBe('144px'); // 96 + 48
+    act(() => {
+      fireEvent.pointerUp(handle, { clientY: 248 });
+    });
+    expect(writes).toBe(1);
+    expect(useDocumentStore.getState().pageSetup.margins.top).toBe(108); // 144px = 108pt
+    expect(useDocumentStore.getState().pageSetup.margins.bottom).toBe(72); // untouched
+    unsub();
+    await settleLayout();
+    expect(
+      (document.querySelector('[data-testid="ruler-vertical-top"]') as HTMLElement).style.top,
+    ).toBe('144px');
+  });
+
+  it('reflects dialog-driven top-margin changes', async () => {
+    renderTensor('<p>hello world</p>');
+    await settleLayout();
+    act(() => {
+      const ps = useDocumentStore.getState().pageSetup;
+      useDocumentStore.getState().setPageSetup({
+        ...ps,
+        margins: { ...ps.margins, top: 144 }, // 2"
+      });
+    });
+    await settleLayout();
+    const top = document.querySelector('[data-testid="ruler-vertical-top"]') as HTMLElement;
+    expect(top.style.top).toBe(`${ptToPx(144)}px`);
   });
 });

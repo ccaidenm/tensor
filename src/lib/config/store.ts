@@ -18,7 +18,9 @@ interface ConfigStore {
   setPasteOnMiddleClick: (value: boolean) => void;
   setShowNonPrintingChars: (value: boolean) => void;
   setShowCaptions: (value: boolean) => void;
-  setShowRuler: (value: boolean) => void;
+  setShowHorizontalRuler: (value: boolean) => void;
+  setShowVerticalRuler: (value: boolean) => void;
+  setBothRulers: (value: boolean) => void;
   /** Zoom law: clamp to [50, 200] (ZOOM_MIN/ZOOM_MAX — ZoomGroup's
    *  constants, now the single spelling of the range). */
   setZoomLevel: (value: number) => void;
@@ -127,11 +129,31 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       },
     })),
 
-  setShowRuler: (value) =>
+setShowHorizontalRuler: (value) =>
     set((state) => ({
       config: {
         ...state.config,
-        editor: { ...state.config.editor, showRuler: value },
+        editor: { ...state.config.editor, showHorizontalRuler: value },
+      },
+    })),
+
+  setShowVerticalRuler: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, showVerticalRuler: value },
+      },
+    })),
+
+  setBothRulers: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: {
+          ...state.config.editor,
+          showHorizontalRuler: value,
+          showVerticalRuler: value,
+        },
       },
     })),
 
