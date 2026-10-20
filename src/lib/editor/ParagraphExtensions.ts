@@ -12,6 +12,7 @@ declare module '@tiptap/core' {
       decreaseIndent: () => ReturnType;
       clearFormatting: () => ReturnType;
       setTabStops: (stops: TabStop[]) => ReturnType;
+      setIndents: (indents: { indentLeft?: number; indentRight?: number; firstLineIndent?: number }) => ReturnType;
     };
   }
 }
@@ -304,6 +305,43 @@ export const ParagraphExtraCommands = Extension.create({
             if (dispatch) {
               tr.setNodeMarkup(pos, undefined, { ...node.attrs, tabStops: normalized });
             }
+            changed = true;
+          }
+          return changed;
+        },
+
+      // INDENT DRAG WRITER (M-RULER: the indent markers' handles): the
+      // same targeting contract as setTabStops — the CARET's block for
+      // an empty selection, every top-level paragraph overlapped by a
+      // range selection (Word semantics). Absolute px values (the
+      // dragged marker's final position), skipped when nothing changes
+      // so gestures stay idempotent and one-undo-step-per-gesture.
+      setIndents:
+        (indents: { indentLeft?: number; indentRight?: number; firstLineIndent?: number }) =>
+        ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
+          const { empty, from, to, $from } = tr.selection;
+          const targets: Array<{ pos: number; node: any }> = [];
+          if (empty) {
+            const pos = $from.before(1);
+            const node = state.doc.nodeAt(pos);
+            if (node?.type.name === 'paragraph') targets.push({ pos, node });
+          } else {
+            state.doc.forEach((node: any, offset: number) => {
+              if (node.type.name !== 'paragraph') return;
+              if (offset >= to || offset + node.nodeSize <= from) return;
+              targets.push({ pos: offset, node });
+            });
+          }
+          if (targets.length === 0) return false;
+          let changed = false;
+          for (const { pos, node } of targets) {
+            const next = { ...node.attrs, ...indents };
+            const same =
+              (next.indentLeft ?? 0) === (node.attrs.indentLeft ?? 0) &&
+              (next.indentRight ?? 0) === (node.attrs.indentRight ?? 0) &&
+              (next.firstLineIndent ?? null) === (node.attrs.firstLineIndent ?? null);
+            if (same) continue;
+            if (dispatch) tr.setNodeMarkup(pos, undefined, next);
             changed = true;
           }
           return changed;

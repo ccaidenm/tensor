@@ -6,10 +6,11 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { MoveHorizontal, MoveLeft, MoveRight } from 'lucide-react';
 import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
-import { pxToPt } from '@/lib/document/pageSetup';
+import { pxToPt, ptToPx } from '@/lib/document/pageSetup';
 import {
   RULER_HEIGHT,
   RULER_WIDTH,
+  MIN_CONTENT_WIDTH_PT,
   clampMarginSpan,
   formatPxAsUnit,
   generateTicks,
@@ -697,21 +698,121 @@ export function Ruler({
   const fmtVal = (px: number): string =>
     `${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
 
-  // Indent marker positions (engine px → CSS px). The first-line apex
-  // sits at indentLeft + firstLineIndent (the engine's line-0 left
-  // edge); the box's LEFT edge at indentLeft (Word's convention). All
-  // ride the PREVIEW edges so a margin drag carries them along.
-  const firstLineX =
-    model != null
-      ? (dragContentL + model.indentLeft + model.firstLineIndent) * zoom
-      : 0;
-  const leftIndentX =
-    model != null ? (dragContentL + model.indentLeft) * zoom : 0;
-  const rightIndentX =
-    model != null ? (dragContentR - model.indentRight) * zoom : 0;
-
   // The drag badge (shared by margin and tab drags): the live value at
   // the draft edge/stop, in the user's measurement unit.
+  // ── M-RULER: indent dragging (the markers' handles) ──
+  // Preview on the bar, ONE undoable PM transaction at release
+  // (setIndents — the tab-stop ruling: PM attrs never write per-frame,
+  // which would flood the undo stack; the Reduce Motion split is a
+  // margin-only concern). Word's marker semantics: the first-line
+  // triangle moves the first-line offset independently; the left box
+  // moves indentLeft (the triangle rides along — line 0's edge is
+  // indentLeft + firstLineIndent); the right marker moves indentRight
+  // (grows leftward from the content's right edge — its delta
+  // inverts). Clamps: the engine's negative-left-edge guard
+  // (indentLeft + firstLineIndent ≥ 0) and the shared 0.5" content
+  // floor. Page-anchored tick snapping (Alt = free).
+  interface IndentDrag {
+    which: 'first' | 'left' | 'right';
+    startClientX: number;
+    startValuePx: number;
+    draftPx: number;
+  }
+  const indentDragRef = useRef<IndentDrag | null>(null);
+  const [indentDrag, setIndentDrag] = useState<IndentDrag | null>(null);
+
+  function startIndentDrag(which: 'first' | 'left' | 'right') {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0 || !editor || !model) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      const startValuePx =
+        which === 'first'
+          ? model.firstLineIndent
+          : which === 'left'
+            ? model.indentLeft
+            : model.indentRight;
+      const d: IndentDrag = {
+        which,
+        startClientX: e.clientX,
+        startValuePx,
+        draftPx: startValuePx,
+      };
+      indentDragRef.current = d;
+      setIndentDrag(d);
+    };
+  }
+
+    function moveIndentDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = indentDragRef.current;
+    if (!d || !model) return;
+    // The MARKER follows the pointer exactly (both directions); the
+    // value derives afterwards — inverted for the right marker (it
+    // grows leftward from the content's right edge).
+    const delta = (e.clientX - d.startClientX) / zoom;
+    const startMarkerPageX =
+      d.which === 'first'
+        ? contentX + model.indentLeft + d.startValuePx
+        : d.which === 'left'
+          ? contentX + d.startValuePx
+          : contentR - d.startValuePx;
+    const rawMarkerX = startMarkerPageX + delta;
+    const markerPageX = e.altKey ? rawMarkerX : snapToMinor(rawMarkerX, unit);
+    let value =
+      d.which === 'right'
+        ? contentR - markerPageX
+        : d.which === 'first'
+          ? markerPageX - (contentX + model.indentLeft)
+          : markerPageX - contentX;
+    // Clamps: the engine's negative-left-edge guard + the content floor.
+    const floor = ptToPx(MIN_CONTENT_WIDTH_PT);
+    if (d.which === 'first') {
+      value = Math.max(-model.indentLeft, value);
+      value = Math.min(contentW - model.indentLeft - model.indentRight - floor, value);
+    } else if (d.which === 'left') {
+      value = Math.max(Math.max(0, -model.firstLineIndent), value);
+      value = Math.min(contentW - model.indentRight - floor, value);
+    } else {
+      value = Math.max(0, value);
+      value = Math.min(contentW - model.indentLeft - floor, value);
+    }
+    // Math.max(-0, …) yields NEGATIVE zero — Object.is(−0, 0) is false,
+    // so the stored attr must be normalized (the hang-clamp pin).
+    if (value === 0) value = 0;
+    if (value === d.draftPx) return;
+    const next = { ...d, draftPx: value };
+    indentDragRef.current = next;
+    setIndentDrag(next);
+  }
+
+    function endIndentDrag(commit: boolean) {
+    return () => {
+      const d = indentDragRef.current;
+      indentDragRef.current = null;
+      setIndentDrag(null);
+      if (!d || !commit || !editor) return;
+      editor.commands.setIndents(
+        d.which === 'first'
+          ? { firstLineIndent: d.draftPx }
+          : d.which === 'left'
+            ? { indentLeft: d.draftPx }
+            : { indentRight: d.draftPx },
+      );
+    };
+  }
+
+  // Indent marker positions (engine px → CSS px), live with any indent
+  // drag preview. The first-line apex sits at indentLeft +
+  // firstLineIndent (the engine's line-0 left edge); the box's LEFT
+  // edge at indentLeft (Word's convention). All ride the PREVIEW
+  // left/right edges, so a margin drag carries them along.
+  const liveFli = indentDrag?.which === 'first' ? indentDrag.draftPx : (model?.firstLineIndent ?? 0);
+  const liveLeft = indentDrag?.which === 'left' ? indentDrag.draftPx : (model?.indentLeft ?? 0);
+  const liveRight = indentDrag?.which === 'right' ? indentDrag.draftPx : (model?.indentRight ?? 0);
+  const firstLineX = model != null ? (dragContentL + liveLeft + liveFli) * zoom : 0;
+  const leftIndentX = model != null ? (dragContentL + liveLeft) * zoom : 0;
+  const rightIndentX = model != null ? (dragContentR - liveRight) * zoom : 0;
+
   const dragBadge = marginDrag
     ? {
         x: pageLeft + marginDrag.draftPx * zoom,
@@ -725,7 +826,19 @@ export function Ruler({
           x: pageLeft + (dragContentL + tabDrag.draftPx) * zoom,
           text: fmtVal(tabDrag.draftPx),
         }
-      : null;
+      : indentDrag
+        ? {
+            x:
+              pageLeft +
+              (indentDrag.which === 'first'
+                ? contentX + (model?.indentLeft ?? 0) + indentDrag.draftPx
+                : indentDrag.which === 'left'
+                  ? contentX + indentDrag.draftPx
+                  : contentR - indentDrag.draftPx) *
+                zoom,
+            text: fmtVal(indentDrag.draftPx),
+          }
+        : null;
 
   return (
     <TooltipProvider>
@@ -838,7 +951,11 @@ export function Ruler({
               <Marker
                 x={firstLineX - 6}
                 testId="ruler-indent-first"
-                label={fmt(model.firstLineIndent, 'First-line indent')}
+                label={fmt(liveFli, 'First-line indent')}
+                onPointerDown={startIndentDrag('first')}
+                onPointerMove={moveIndentDrag}
+                onPointerUp={endIndentDrag(true)}
+                onPointerCancel={endIndentDrag(false)}
               >
                 <div
                   className="border-x-transparent border-t-foreground"
@@ -853,14 +970,22 @@ export function Ruler({
               <Marker
                 x={leftIndentX}
                 testId="ruler-indent-left"
-                label={fmt(model.indentLeft, 'Left indent')}
+                label={fmt(liveLeft, 'Left indent')}
+                onPointerDown={startIndentDrag('left')}
+                onPointerMove={moveIndentDrag}
+                onPointerUp={endIndentDrag(true)}
+                onPointerCancel={endIndentDrag(false)}
               >
                 <div className="h-[7px] w-[10px] rounded-[2px] bg-foreground" />
               </Marker>
               <Marker
                 x={rightIndentX - 6}
                 testId="ruler-indent-right"
-                label={fmt(model.indentRight, 'Right indent')}
+                label={fmt(liveRight, 'Right indent')}
+                onPointerDown={startIndentDrag('right')}
+                onPointerMove={moveIndentDrag}
+                onPointerUp={endIndentDrag(true)}
+                onPointerCancel={endIndentDrag(false)}
               >
                 <div
                   className="border-x-transparent border-b-foreground"

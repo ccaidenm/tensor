@@ -8,7 +8,6 @@ import {
   CaseSensitive,
   ClipboardPaste,
   Copy,
-  EyeOff,
   FileSearchCorner,
   FileStack,
   FolderOpen,
@@ -33,8 +32,6 @@ import {
   Redo2,
   RemoveFormatting,
   Ruler,
-  RulerDimensionLine,
-  RectangleVertical,
   Save,
   SaveAll,
   Scissors,
@@ -337,40 +334,20 @@ export const COMMANDS: CommandAction[] = [
       setTheme(config.theme === 'dark' ? 'light' : 'dark');
     },
   },
-  // M-RULER: the per-axis ruler display commands (the config's
-  // showHorizontalRuler/showVerticalRuler flags — Pages mode only; the
-  // bars unmount themselves outside it).
+    // M-RULER: ONE toggle for both ruler bars (the config's
+  // showHorizontalRuler/showVerticalRuler flags — either visible → hide
+  // both; else show both — mirroring the ribbon button). Pages mode
+  // only; the bars unmount themselves outside it.
   {
-    id: 'showHorizontalRuler',
-    title: 'Show Horizontal Ruler',
+    id: 'toggleRulers',
+    title: 'Toggle Rulers',
     icon: Ruler,
     group: 'actions',
-    keywords: ['ruler', 'horizontal', 'margins', 'tabs', 'show'],
-    run: () => cfg().setShowHorizontalRuler(true),
-  },
-  {
-    id: 'showVerticalRuler',
-    title: 'Show Vertical Ruler',
-    icon: RectangleVertical,
-    group: 'actions',
-    keywords: ['ruler', 'vertical', 'margins', 'show'],
-    run: () => cfg().setShowVerticalRuler(true),
-  },
-  {
-    id: 'showAllRulers',
-    title: 'Show All Rulers',
-    icon: RulerDimensionLine,
-    group: 'actions',
-    keywords: ['ruler', 'rulers', 'show', 'all', 'both'],
-    run: () => cfg().setBothRulers(true),
-  },
-  {
-    id: 'hideAllRulers',
-    title: 'Hide All Rulers',
-    icon: EyeOff,
-    group: 'actions',
-    keywords: ['ruler', 'rulers', 'hide', 'all', 'both'],
-    run: () => cfg().setBothRulers(false),
+    keywords: ['ruler', 'rulers', 'show', 'hide', 'toggle', 'margins', 'tabs'],
+    run: () => {
+      const c = cfg().config.editor;
+      cfg().setBothRulers(!(c.showHorizontalRuler || c.showVerticalRuler));
+    },
   },
   {
     id: 'quit',

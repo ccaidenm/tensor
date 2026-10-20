@@ -873,3 +873,104 @@ describe('vertical ruler', () => {
     expect(top.style.top).toBe(`${ptToPx(144)}px`);
   });
 });
+
+// ─── indent dragging (the markers' handles) ───────────────────────────
+
+describe('indent dragging', () => {
+  beforeEach(() => {
+    // PM attrs: ALWAYS preview + commit (the tab-stop ruling).
+  });
+
+  function indentMarker(which: 'first' | 'left' | 'right'): HTMLElement {
+    const el = document.querySelector(
+      `[data-testid="ruler-indent-${which}"]`,
+    ) as HTMLElement;
+    if (!el) throw new Error(`missing ruler-indent-${which}`);
+    return el;
+  }
+
+  it('drags the left box +48 → indentLeft (undoable, one step)', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+    editor.commands.setTextSelection(1);
+    await new Promise((resolve) => setTimeout(resolve, 550)); // undoBarrier
+    const el = indentMarker('left');
+    act(() => {
+      fireEvent.pointerDown(el, { clientX: 100, button: 0 });
+      fireEvent.pointerMove(el, { clientX: 148 }); // +48 → marker at 144
+    });
+    // PREVIEW: the attr is untouched mid-gesture; the marker rides the draft.
+    expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
+    expect(el.style.left).toBe(`${GEOMETRY.contentX + 48}px`);
+    act(() => {
+      fireEvent.pointerUp(el, { clientX: 148 });
+    });
+    await settleLayout();
+    expect(editor.getAttributes('paragraph').indentLeft).toBe(48);
+    act(() => {
+      editor.commands.undo();
+    });
+    await settleLayout();
+    expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
+  });
+
+  it('drags the first-line triangle; the hanging limit clamps at \u2212indentLeft', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+    editor.commands.setTextSelection(1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const el = indentMarker('first');
+    // +36 lands on the tick grid (96 + 36 = 132 = 11 × 12).
+    act(() => {
+      fireEvent.pointerDown(el, { clientX: 100, button: 0 });
+      fireEvent.pointerMove(el, { clientX: 136 });
+      fireEvent.pointerUp(el, { clientX: 136 });
+    });
+    await settleLayout();
+    expect(editor.getAttributes('paragraph').firstLineIndent).toBe(36);
+    // Now drag LEFT far past the content edge: the hanging limit is
+    // −indentLeft (0) — the engine's negative-left-edge guard.
+    act(() => {
+      fireEvent.pointerDown(el, { clientX: 100, button: 0 });
+      fireEvent.pointerMove(el, { clientX: -500 });
+      fireEvent.pointerUp(el, { clientX: -500 });
+    });
+    await settleLayout();
+    expect(editor.getAttributes('paragraph').firstLineIndent).toBe(0);
+  });
+
+  it('drags the right marker symmetrically (inverted delta)', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+    editor.commands.setTextSelection(1);
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    const el = indentMarker('right');
+    // The marker sits at contentR (720) — dragging LEFT by 48 grows
+    // indentRight to 48 (the delta inverts).
+    act(() => {
+      fireEvent.pointerDown(el, { clientX: 100, button: 0 });
+      fireEvent.pointerMove(el, { clientX: 52 });
+      fireEvent.pointerUp(el, { clientX: 52 });
+    });
+    await settleLayout();
+    expect(editor.getAttributes('paragraph').indentRight).toBe(48);
+    expect(editor.getAttributes('paragraph').indentLeft).toBe(0); // untouched
+  });
+
+  it('applies to every selected paragraph (Word semantics)', async () => {
+    const { editor } = renderTensor('<p>A</p><p>B</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: editor.state.doc.content.size - 1 });
+    });
+    const el = indentMarker('left');
+    act(() => {
+      fireEvent.pointerDown(el, { clientX: 100, button: 0 });
+      fireEvent.pointerMove(el, { clientX: 148 });
+      fireEvent.pointerUp(el, { clientX: 148 });
+    });
+    await settleLayout();
+    expect(editor.state.doc.child(0).attrs.indentLeft).toBe(48);
+    expect(editor.state.doc.child(1).attrs.indentLeft).toBe(48);
+  });
+});
