@@ -147,8 +147,8 @@ export function MarginsDialog() {
         </div>
 
         <DialogFooter>
-          <Button size="sm" onClick={apply}>Apply</Button>
-          <Button size="sm" variant="ghost" onClick={closeMargins}>Done</Button>
+          <Button size="sm" variant="ghost" onClick={closeMargins}>Cancel</Button>
+          <Button size="sm" onClick={apply}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

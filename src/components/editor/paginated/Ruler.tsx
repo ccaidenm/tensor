@@ -1,10 +1,16 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { PageGeometry } from '@tensor-editor/engine';
 import { useConfigStore } from '@/lib/config/store';
+import { useDocumentStore } from '@/lib/document/store';
+import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
+import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
+import { pxToPt } from '@/lib/document/pageSetup';
 import {
   RULER_HEIGHT,
+  clampMarginSpan,
   formatPxAsUnit,
   generateTicks,
+  snapToMinor,
   unitSuffix,
   type RulerModel,
 } from '@/lib/paginated/ruler';
@@ -85,35 +91,98 @@ const LABEL_BOX_PAD = 3;
  * there and the bar's background shows through. */
 const LABEL_PAD = 12;
 
-interface MarkerProps {
+/** A marker: an absolutely-positioned hit target wrapped in the app's
+ * tooltip (value shown in the user's measurement unit). Straddles the
+ * bar's bottom edge — half on / half off — via the 50% own-height
+ * translateY, so any marker shape hangs right at the boundary. The
+ * wrapper div (not the tooltip trigger) owns positioning and pointer
+ * handling — plain DOM, so drag logic never routes through the tooltip
+ * machinery. */
+function Marker({
+  x,
+  testId,
+  label,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  children,
+}: {
   /** CSS px within the ruler's inner (page-width) container. */
   x: number;
   testId: string;
   label: string;
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerCancel?: (e: ReactPointerEvent<HTMLDivElement>) => void;
   children: ReactNode;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      aria-label={label}
+      className="absolute bottom-0 cursor-ew-resize touch-none"
+      style={{ left: `${x}px`, transform: 'translateY(50%)' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
+      <Tooltip>
+        <TooltipTrigger render={<span className="block">{children}</span>} />
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
 }
 
-/** A marker: an absolutely-positioned hit target wrapped in the app's
- * tooltip (value shown in the user's measurement unit). Straddles the
- * bar's bottom edge — half on / half off — via the 50% own-height
- * translateY, so any marker shape hangs right at the boundary. */
-function Marker({ x, testId, label, children }: MarkerProps) {
+/** The margin drag handle: the ENTIRE bar-height column at a content
+ * edge is grabbable (the thin-bar ruling made a small tab too hard a
+ * target — the grab region is now the full vertical height of the
+ * ruler, Word-style), while the little arrows stay reserved as the
+ * indent markers' handles. The tab below the boundary is the visual
+ * affordance only. Zones render BEFORE the indent markers in the inner
+ * container, so an arrow's sliver wins its own overlap, by design. */
+function MarginHandle({
+  x,
+  testId,
+  label,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: {
+  /** Screen px (inner-container-relative) of the content edge. */
+  x: number;
+  testId: string;
+  label: string;
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerCancel?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <div
-            data-testid={testId}
-            aria-label={label}
-            className="absolute bottom-0 cursor-ew-resize"
-            style={{ left: `${x}px`, transform: 'translateY(50%)' }}
-          >
-            {children}
-          </div>
-        }
-      />
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <div
+      data-testid={testId}
+      aria-label={label}
+      className="absolute top-0 z-0 h-full w-[16px] -translate-x-1/2 cursor-ew-resize touch-none"
+      style={{ left: `${x}px` }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+    >
+      <Tooltip>
+        <TooltipTrigger render={<span className="absolute inset-0 block" />} />
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+      {/* The grabber tab — decorative now, straddling the bar's bottom
+          edge; the full-height column above it is the hit target. */}
+      <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
+        <div className="h-[11px] w-[9px] rounded-[2px] border border-foreground/40 bg-card" />
+      </div>
+    </div>
   );
 }
 
@@ -134,6 +203,10 @@ export function Ruler({
   // Canvas colors are computed-style READS at paint time, not live CSS —
   // subscribing to the theme is what makes a light/dark flip repaint.
   const theme = useConfigStore((s) => s.config.theme);
+  // The a11y Reduce Motion setting splits the margin-drag write modes:
+  // reduced → preview + commit-on-release; not reduced → live reflow
+  // under the drag (the user's walk-back of the preview-only ruling).
+  const reducedMotion = useReducedMotion();
   const [deskW, setDeskW] = useState(0);
   const [deskScrollLeft, setDeskScrollLeft] = useState(0);
   const barRef = useRef<HTMLDivElement>(null);
@@ -173,6 +246,136 @@ export function Ruler({
     };
   }, []);
 
+  // ── M-RULER PHASE 2: margin dragging (two write modes) ──
+  // Split on the a11y Reduce Motion setting (the user's walk-back of the
+  // original preview-only ruling):
+  //  • Reduce Motion ON (or the system preference): PREVIEW + COMMIT-ON-
+  //    RELEASE — the bar shows the draft (canvas regions, rails, the
+  //    dragged handle, the badge) while the document reflows exactly
+  //    ONCE, at release.
+  //  • Reduce Motion OFF: LIVE — drag frames commit through the single
+  //    setPageSetup writer, rAF-coalesced to ≤ one store write per
+  //    frame, so the document reflows under the drag in real time.
+  // Both modes never write before the first move, and both commit the
+  // final draft at release — the equality guard makes that idempotent in
+  // live mode (a redundant write would churn isDirty for nothing).
+  interface MarginDrag {
+    side: 'left' | 'right';
+    /** Client X at pointerdown — the drag is DELTA-based, so the math
+     *  never depends on the handle's own hit-box position. */
+    startClientX: number;
+    /** The dragged edge's engine-px position at pointerdown. */
+    startEdgePx: number;
+    /** Current draft engine px (snapped + clamped). */
+    draftPx: number;
+  }
+
+  const marginDragRef = useRef<MarginDrag | null>(null);
+  const [marginDrag, setMarginDrag] = useState<MarginDrag | null>(null);
+  const pendingWriteRef = useRef<number | null>(null);
+
+  /** ONE margin write, through the ONE writer. Reads the store FRESH
+ *  (L4); margins in POINTS — the store's canonical unit — via the
+ *  shared pxToPt; skips redundant writes (live mode's last frame may
+ *  already hold the value, and a no-move gesture must not dirty the
+ *  document). Takes the drag EXPLICITLY: the release path nulls the
+ *  ref before committing, so the ref is never the source of truth. */
+  function commitMargin(drag: MarginDrag, px: number) {
+    const ps = useDocumentStore.getState().pageSetup;
+    const margins = { ...ps.margins };
+    if (drag.side === 'left') margins.left = pxToPt(px);
+    else margins.right = pxToPt(pageW - px);
+    if (margins.left === ps.margins.left && margins.right === ps.margins.right) {
+      return;
+    }
+    useDocumentStore.getState().setPageSetup({ ...ps, margins });
+  }
+
+  function startMarginDrag(side: 'left' | 'right') {
+    return (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      // Chrome, not document: never steal focus from the editor.
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      const startEdgePx = side === 'left' ? contentX : contentR;
+      const drag: MarginDrag = {
+        side,
+        startClientX: e.clientX,
+        startEdgePx,
+        draftPx: startEdgePx,
+      };
+      marginDragRef.current = drag;
+      setMarginDrag(drag);
+    };
+  }
+
+  function moveMarginDrag(e: ReactPointerEvent<HTMLDivElement>) {
+    const drag = marginDragRef.current;
+    if (!drag) return;
+    const raw = drag.startEdgePx + (e.clientX - drag.startClientX) / zoom;
+    const snapped = e.altKey ? raw : snapToMinor(raw, unit);
+    const [left, right] = clampMarginSpan(
+      drag.side === 'left' ? snapped : contentX,
+      drag.side === 'right' ? snapped : contentR,
+      pageW,
+    );
+    const draftPx = drag.side === 'left' ? left : right;
+    if (draftPx === drag.draftPx) return;
+    const next = { ...drag, draftPx };
+    marginDragRef.current = next;
+    setMarginDrag(next);
+    // LIVE MODE (Reduce Motion off): the document reflows under the
+    // drag — one write per frame, always carrying the NEWEST draft
+    // (each move cancels the prior pending frame). No rAF in the
+    // environment → synchronous; release stays idempotent either way.
+    if (!reducedMotion) {
+      if (pendingWriteRef.current != null) {
+        cancelAnimationFrame(pendingWriteRef.current);
+      }
+      if (typeof requestAnimationFrame === 'function') {
+        pendingWriteRef.current = requestAnimationFrame(() => {
+          pendingWriteRef.current = null;
+          commitMargin(next, next.draftPx);
+        });
+      } else {
+        commitMargin(next, next.draftPx);
+      }
+    }
+  }
+
+  function endMarginDrag(commit: boolean) {
+    return () => {
+      if (pendingWriteRef.current != null) {
+        cancelAnimationFrame(pendingWriteRef.current);
+        pendingWriteRef.current = null;
+      }
+      const drag = marginDragRef.current;
+      marginDragRef.current = null;
+      setMarginDrag(null);
+      // The release commit: preview mode's ONLY write; live mode's final
+      // frame (idempotent when the last rAF already landed).
+      if (drag && commit) commitMargin(drag, drag.draftPx);
+    };
+  }
+
+  // Word's convention: double-click the ruler OVER a margin region to
+  // open page setup — the commit-gated MarginsDialog (one writer, the
+  // same store path this drag commits through).
+  function handleBarDoubleClick(e: ReactMouseEvent<HTMLDivElement>) {
+    const rectLeft = barRef.current?.getBoundingClientRect().left ?? 0;
+    const x = (e.clientX - rectLeft - pageLeft) / zoom;
+    if (x < contentX || x > contentR) {
+      useDocumentPropertiesStore.getState().openMargins();
+    }
+  }
+
+  // The PREVIEW edges: the dragged side follows the draft, the other
+  // stays at its committed geometry. Everything bar-level (canvas
+  // regions, rails, grabbers, indent markers) reads these, so the
+  // preview is complete without touching the document.
+  const dragContentL = marginDrag?.side === 'left' ? marginDrag.draftPx : contentX;
+  const dragContentR = marginDrag?.side === 'right' ? marginDrag.draftPx : contentR;
+
   // Deps are the PAINT INPUTS as primitives, deliberately NOT the
   // geometry object: relayout issues a new PageGeometry per call even
   // when values are identical (zero-copy contract covers LineBoxes, not
@@ -208,8 +411,8 @@ export function Ruler({
     // and the final tick unclipped. Applying pageLeft in here TOO would
     // double the offset — the exact bug behind "0 renders at inch ~6.5"
     // (ticks at 2×pageLeft + tick.x).
-    const contentLs = LABEL_PAD + contentX * zoom;
-    const contentRs = LABEL_PAD + contentR * zoom;
+    const contentLs = LABEL_PAD + dragContentL * zoom;
+    const contentRs = LABEL_PAD + dragContentR * zoom;
 
     // Numbered majors ride full-height ticks — set the text state once.
     ctx.font = '500 9px system-ui, sans-serif';
@@ -281,30 +484,34 @@ export function Ruler({
     ctx.fillRect(Math.round(contentLs), 0, 1, RULER_HEIGHT);
     ctx.fillRect(Math.round(contentRs), 0, 1, RULER_HEIGHT);
     ctx.globalAlpha = 1;
-  }, [canvasW, contentR, contentX, pageW, pageWz, theme, unit, zoom]);
+  }, [canvasW, dragContentL, dragContentR, pageW, pageWz, theme, unit, zoom]);
 
   const fmt = (px: number, what: string): string =>
     `${what}: ${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
+  const fmtVal = (px: number): string =>
+    `${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
 
   // Indent marker positions (engine px → CSS px). The first-line apex
   // sits at indentLeft + firstLineIndent (the engine's line-0 left
-  // edge); the box's LEFT edge at indentLeft (Word's convention).
+  // edge); the box's LEFT edge at indentLeft (Word's convention). All
+  // ride the PREVIEW edges so a margin drag carries them along.
   const firstLineX =
     model != null
-      ? (contentX + model.indentLeft + model.firstLineIndent) * zoom
+      ? (dragContentL + model.indentLeft + model.firstLineIndent) * zoom
       : 0;
   const leftIndentX =
-    model != null ? (contentX + model.indentLeft) * zoom : 0;
+    model != null ? (dragContentL + model.indentLeft) * zoom : 0;
   const rightIndentX =
-    model != null ? (contentX + contentW - model.indentRight) * zoom : 0;
+    model != null ? (dragContentR - model.indentRight) * zoom : 0;
 
   return (
     <TooltipProvider>
       <div
         ref={barRef}
         data-testid="ruler"
-        className="absolute inset-x-0 top-0 z-30 select-none border-b border-border/60 bg-card"
+        className={`absolute inset-x-0 top-0 z-30 select-none border-b border-border/60 bg-card${marginDrag ? ' cursor-ew-resize' : ''}`}
         style={{ height: `${RULER_HEIGHT}px` }}
+        onDoubleClick={handleBarDoubleClick}
       >
         {/* Ink probes: the canvas can't resolve Tailwind tokens, so this
             invisible span's computed color feeds the muted margin ink. */}
@@ -329,23 +536,28 @@ export function Ruler({
           className="absolute top-0 h-full"
           style={{ left: `${pageLeft}px`, width: `${pageWz}px` }}
         >
-          {/* Margin grabbers (drag wiring: Phase 2). The style.left is
-              the content edge; the tab straddles it — and the bar's
-              bottom edge (Marker's half-on/half-off law). */}
-          <Marker
-            x={contentX * zoom - 4.5}
+          {/* Margin handles — the PHASE 2 drag targets: the full bar-height
+              column at each content edge (preview-aware `x`; the little
+              tab is decorative). The indent markers' arrows keep their
+              own slivers — they are the indentation handles. */}
+          <MarginHandle
+            x={dragContentL * zoom}
             testId="ruler-margin-left"
-            label={fmt(contentX, 'Left margin')}
-          >
-            <div className="h-[11px] w-[9px] rounded-[2px] border border-foreground/40 bg-card" />
-          </Marker>
-          <Marker
-            x={contentR * zoom - 4.5}
+            label={fmt(dragContentL, 'Left margin')}
+            onPointerDown={startMarginDrag('left')}
+            onPointerMove={moveMarginDrag}
+            onPointerUp={endMarginDrag(true)}
+            onPointerCancel={endMarginDrag(false)}
+          />
+          <MarginHandle
+            x={dragContentR * zoom}
             testId="ruler-margin-right"
-            label={fmt(pageW - contentR, 'Right margin')}
-          >
-            <div className="h-[11px] w-[9px] rounded-[2px] border border-foreground/40 bg-card" />
-          </Marker>
+            label={fmt(pageW - dragContentR, 'Right margin')}
+            onPointerDown={startMarginDrag('right')}
+            onPointerMove={moveMarginDrag}
+            onPointerUp={endMarginDrag(true)}
+            onPointerCancel={endMarginDrag(false)}
+          />
           {/* Indent markers (drag wiring: Phase 2) — hidden when the
               caret block carries no indent attrs (headings, code
               blocks, lists: structural indents are not attr edits). */}
@@ -391,6 +603,20 @@ export function Ruler({
             </>
           )}
         </div>
+        {/* The drag badge: the live value at the draft edge, in the
+            user's measurement unit — the "current length shown in real
+            time" criterion. Pointer-transparent; hangs below the bar. */}
+        {marginDrag && (
+          <div
+            data-testid="ruler-drag-badge"
+            className="pointer-events-none absolute top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground shadow-sm"
+            style={{ left: `${pageLeft + marginDrag.draftPx * zoom}px` }}
+          >
+            {marginDrag.side === 'left'
+              ? fmtVal(marginDrag.draftPx)
+              : fmtVal(pageW - marginDrag.draftPx)}
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );
