@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Editor } from './components/editor/Editor';
 import { SearchPanel } from './components/editor/SearchPanel';
+import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
@@ -10,6 +11,7 @@ import { CustomPageSizeDialog } from './components/dialogs/CustomPageSizeDialog'
 import { StyleDialog } from './components/dialogs/StyleDialog';
 import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
 import { AltTextDialog } from './components/dialogs/ImageDialogs';
+import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
@@ -37,6 +39,18 @@ function App() {
   // file (hyperlink custom, builtins.ts). Doc layers apply on open.
   useEffect(() => {
     void useStyleRegistryStore.getState().loadGlobal();
+  }, []);
+
+  // M-T4 — the app-wide native-menu REPLACEMENT: the WebView's own
+  // right-click menu dies everywhere (document surface, chrome, desk);
+  // the custom DocumentContextMenu (Editor.tsx's routing wrap) is the
+  // document surface's menu, and the ruler's band menus bring their
+  // own handlers. Suppression is inert for both (preventDefault is
+  // idempotent).
+  useEffect(() => {
+    const suppress = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener('contextmenu', suppress);
+    return () => window.removeEventListener('contextmenu', suppress);
   }, []);
 
   // M-FONTS-A: re-register uploaded fonts from appDataDir()/fonts/
@@ -153,6 +167,12 @@ function App() {
           <SidebarHost id="search" anchor="right">
             <SearchResultsSidebar />
           </SidebarHost>
+          {/* M-T3c — the Table side panel: the same docked-panel
+              infrastructure as Find/Replace (the draggable/resizable
+              panel future upgrades once for every panel). */}
+          <SidebarHost id="table" anchor="right">
+            <TablePanel />
+          </SidebarHost>
         </div>
         <StatusBar />
       </main>
@@ -161,6 +181,7 @@ function App() {
       <StyleDialog state={styleDialog} onClose={styleDialog.close} />
       <FontBrowserDialog />
       <AltTextDialog />
+      <InsertTableDialog />
       <DocumentPropertiesDialog />
       <Toaster />
       <DocumentStatisticsDialog />

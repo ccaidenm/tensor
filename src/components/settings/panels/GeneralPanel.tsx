@@ -1,11 +1,19 @@
-import type { ReactNode } from 'react';
-import { Moon, Type, Paintbrush, User, Accessibility as AccessibilityIcon, Mouse } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { Moon, Type, Paintbrush, User, Accessibility as AccessibilityIcon, Mouse, Terminal } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
@@ -16,6 +24,7 @@ export const GENERAL_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'editor', label: 'Editor' },
   { id: 'behavior', label: 'Behavior' },
   { id: 'accessibility', label: 'Accessibility' },
+  { id: 'advanced', label: 'Advanced' },
 ];
 
 function Row({ icon, label, description, children }: { icon: ReactNode; label: string; description?: ReactNode; children: ReactNode }) {
@@ -105,6 +114,11 @@ export function GeneralPanel() {
   const setReduceMotion = useConfigStore((s) => s.setReduceMotion);
   const pasteOnMiddleClick = useConfigStore((s) => s.config.editor.pasteOnMiddleClick);
   const setPasteOnMiddleClick = useConfigStore((s) => s.setPasteOnMiddleClick);
+  const developerMode = useConfigStore((s) => s.config.developerMode);
+  const setDeveloperMode = useConfigStore((s) => s.setDeveloperMode);
+  // The enabling warning: turning Developer Mode ON must be ACCEPTED,
+  // never incidental (devtools can inspect and mutate anything).
+  const [developerWarningOpen, setDeveloperWarningOpen] = useState(false);
 
   return (
     <div className="flex flex-col">
@@ -162,6 +176,58 @@ export function GeneralPanel() {
           </div>
         </Row>
       </SettingsSection>
+
+      <SettingsSection id="advanced" title="Advanced">
+        <Row
+          icon={<Terminal className="h-4 w-4" />}
+          label="Developer Mode"
+          description="Adds Reload and Inspect Element to the right-click menu"
+        >
+          <Switch
+            checked={developerMode}
+            onCheckedChange={(checked: boolean) => {
+              if (checked) setDeveloperWarningOpen(true);
+              else setDeveloperMode(false);
+            }}
+          />
+        </Row>
+      </SettingsSection>
+
+      <Dialog open={developerWarningOpen} onOpenChange={setDeveloperWarningOpen}>
+        <DialogContent
+          // The POPUP must clear its OWN raised overlay (z-[100]) and
+          // everything below it — including the already-open Settings
+          // dialog's z-50 popup — so the frosted layer dims/blurs the
+          // app, never the card itself.
+          className="sm:max-w-sm z-[110]"
+          overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+        >
+          <DialogHeader>
+            <DialogTitle>Enable Developer Mode?</DialogTitle>
+            <DialogDescription>
+              This exposes browser-style developer tools (Reload, Inspect Element) in the
+              right-click menu. Inspecting and editing the app's internals can break it —
+              documents may need reopening and the app may misbehave until reloaded. Only
+              enable this if you know what you're doing.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeveloperWarningOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              data-testid="developer-mode-accept"
+              variant="destructive"
+              onClick={() => {
+                setDeveloperMode(true);
+                setDeveloperWarningOpen(false);
+              }}
+            >
+              I understand, enable
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

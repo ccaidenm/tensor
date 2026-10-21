@@ -557,9 +557,13 @@ describe('caption', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // REACHABILITY (STEP 2): the toolbar button — not the command —
-    // is the instrument; it dispatches through the registry.
-    const captionButton = document.querySelector('[data-testid="toolbar-add-caption"]') as HTMLElement;
+    // REACHABILITY (STEP 2): the document context menu — the
+    // M-T4 surface — is the instrument; it dispatches through the
+    // registry (right-click anywhere on the painted surface).
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    const captionButton = document.querySelector('[data-testid="ctx-image-caption"]') as HTMLElement;
     expect(captionButton).not.toBeNull();
     act(() => {
       fireEvent.click(captionButton);
@@ -669,9 +673,12 @@ describe('alt text', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // REACHABILITY: the floating toolbar shows the image group; its
-    // Alt Text button dispatches through the command registry.
-    const altButton = document.querySelector('[data-testid="toolbar-alt-text"]') as HTMLButtonElement;
+    // REACHABILITY: the document context menu's Alt Text item (the
+    // M-T4 surface) dispatches through the command registry.
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    const altButton = document.querySelector('[data-testid="ctx-image-alt"]') as HTMLButtonElement;
     expect(altButton).not.toBeNull();
     act(() => {
       fireEvent.click(altButton);
@@ -700,10 +707,25 @@ describe('alt text', () => {
   });
 });
 
+/** M-T4 — hover-opens the context menu's Corner Radius submenu (its
+ *  items mount on open; base-ui's hover detection wants BOTH the
+ *  pointer and mouse event pairs, then a rest beat). */
+async function openRadiusSubmenu() {
+  const trigger = document.querySelector('[data-testid="ctx-radius-menu"]') as HTMLElement | null;
+  if (!trigger) throw new Error('radius submenu trigger not found');
+  await act(async () => {
+    fireEvent.pointerOver(trigger);
+    fireEvent.pointerMove(trigger, { clientX: 10, clientY: 10 });
+    fireEvent.mouseOver(trigger);
+    fireEvent.mouseMove(trigger, { clientX: 10, clientY: 10 });
+    await new Promise((r) => setTimeout(r, 350));
+  });
+}
+
 // ─── M-IMAGES-1.5: corner radius (paint-only) ──────────────────────────
 
 describe('corner radius', () => {
-  it('toolbar stepper → attr written; BOTH render paths receive it (canvas clip / CSS)', async () => {
+  it('M-T4: the context menu radius presets → attr written; BOTH render paths receive it (canvas clip / CSS)', async () => {
     const { editor } = renderTensor('<p>r</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 120), 'png');
@@ -716,32 +738,19 @@ describe('corner radius', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // M-IMAGES-1.5.5: the radius control is the RibbonIconInput (the
-    // FontSize/Spacing pattern — consistent UI): one number input with
-    // embedded steppers. Step via the input's ArrowUp (its stepper
-    // key path; the registry's shared clamp law under it):
-    const value = document.querySelector(
-      '[data-floating-toolbar] input[type="number"]'
-    ) as HTMLInputElement;
-    expect(value).not.toBeNull();
+    // M-T4: the radius surface is the document context menu's presets
+    // (the toolbar's RibbonIconInput moved out with the image strip).
+    // Submenu items mount on hover — open the submenu first.
     act(() => {
-      fireEvent.keyDown(value, { key: 'ArrowUp' });
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
-    expect(editor.state.doc.nodeAt(imagePos)?.attrs.radius).toBe(4); // +4 step
-    // One step per act — RibbonIconInput's stepper reads its
-    // (just-synced) local value; batched keyDowns step from a stale
-    // closure. Real clicks are discrete.
+    await openRadiusSubmenu();
+    const preset = document.querySelector('[data-testid="ctx-radius-12"]') as HTMLElement;
+    expect(preset).not.toBeNull();
     act(() => {
-      fireEvent.keyDown(value, { key: 'ArrowUp' });
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    act(() => {
-      fireEvent.keyDown(value, { key: 'ArrowUp' });
+      fireEvent.click(preset);
     });
     expect(editor.state.doc.nodeAt(imagePos)?.attrs.radius).toBe(12);
-    expect(value.value).toBe('12');
     // Paginated: the clip op carries the radius (roundRect recorded —
     // the feature-detect path in jsdom picks the stub's roundRect).
     await settleLayout();
@@ -749,13 +758,15 @@ describe('corner radius', () => {
     expect(clipOps.length).toBeGreaterThan(0);
     const roundRectArgs = clipOps[clipOps.length - 1]!.args as number[];
     expect(roundRectArgs[4]).toBe(12); // the radius arg
-    // Direct entry (Enter commits — RibbonIconInput's law) — while
-    // the toolbar is live (paginated mode):
+    // A different preset — the menu re-opens cleanly.
     act(() => {
-      fireEvent.change(value, { target: { value: '7' } });
-      fireEvent.keyDown(value, { key: 'Enter' });
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
-    expect(editor.state.doc.nodeAt(imagePos)?.attrs.radius).toBe(7);
+    await openRadiusSubmenu();
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="ctx-radius-8"]')!);
+    });
+    expect(editor.state.doc.nodeAt(imagePos)?.attrs.radius).toBe(8);
     // Pageless: the node view renders the CSS border-radius.
     act(() => {
       useConfigStore.setState((state) => ({
@@ -769,7 +780,7 @@ describe('corner radius', () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     const img = document.querySelector('.ProseMirror img') as HTMLElement;
-    expect(img.style.borderRadius).toBe('7px');
+    expect(img.style.borderRadius).toBe('8px');
   });
 
   it('extreme radius clamps to half the min dim (the circle-ish pill)', async () => {

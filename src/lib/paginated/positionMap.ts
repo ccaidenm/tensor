@@ -37,6 +37,41 @@ export interface BlockOffset {
   offset: number;
 }
 
+/**
+ * M-TABLES — the table block's text is the CANONICAL cell-paragraph
+ * concatenation; a PM pos inside a cell maps through the block's
+ * cell-paragraph map (each entry: relStart = the paragraph's first
+ * text position relative to the TABLE node — pmStart = from +
+ * relStart — and its text slice). Structural positions (row/cell
+ * boundaries — a CellSelection's anchor points live here) clamp to
+ * the nearest preceding slice's end: text selections can never sit
+ * there (cells are isolating), and the cell-selection overlay has its
+ * own path. The slices tile the block text exactly.
+ */
+function tablePosToOffset(block: AdapterBlock, pos: number): number {
+  const paras = block.table!.paragraphs;
+  let found = null as (typeof paras)[number] | null;
+  for (const p of paras) {
+    if (block.from + p.relStart <= pos) found = p;
+    else break;
+  }
+  if (!found) return paras[0]?.textStart ?? 0;
+  const rel = pos - (block.from + found.relStart);
+  return Math.min(found.textStart + rel, found.textStart + found.textLen);
+}
+
+function tableOffsetToPmPos(block: AdapterBlock, offset: number): number {
+  const paras = block.table!.paragraphs;
+  let found = null as (typeof paras)[number] | null;
+  for (const p of paras) {
+    if (p.textStart <= offset) found = p;
+    else break;
+  }
+  if (!found) return block.from + 1;
+  const delta = Math.min(Math.max(offset - found.textStart, 0), found.textLen);
+  return block.from + found.relStart + delta;
+}
+
 /** PM pos -> (block, text offset). Boundaries: pos at a block's start
  * maps to offset 0; pos at/after a block's end clamps to its text end
  * (a selection ending at the next block's start projects onto this
@@ -53,6 +88,8 @@ export function pmPosToBlockOffset(
     const mid = (lo + hi) >> 1;
     const b = blocks[mid];
     if (pos > b.from && pos <= b.to) {
+      // M-TABLES: a table's pos resolves through the cell-paragraph map.
+      if (b.table) return { block: b, offset: tablePosToOffset(b, pos) };
       return { block: b, offset: Math.min(pos - (b.from + 1), b.text.length) };
     }
     if (pos <= b.from) hi = mid - 1;
@@ -62,19 +99,42 @@ export function pmPosToBlockOffset(
 }
 
 export function blockOffsetToPmPos(block: AdapterBlock, offset: number): number {
+  // M-TABLES: through the cell-paragraph map.
+  if (block.table) return tableOffsetToPmPos(block, offset);
   return block.from + 1 + offset;
 }
 
-/** The LineBox containing a text offset. Boundary offsets (== a line's
- * rangeStart) belong to the later line; end-of-text belongs to the last. */
+/**
+ * The LineBox containing a text offset. Boundary offsets (== a line's
+ * rangeStart) belong to the later line; end-of-text belongs to the last.
+ * M-TABLES: a TABLE cell's lines can be EMPTY-ranged (an empty cell's
+ * slice [k, k) — the separator law gives each a distinct k); those
+ * match on rangeStart EXACTLY (inclusive end), so the caret routes to
+ * the clicked empty cell instead of falling to the last line.
+ */
 export function lineForOffset(lines: readonly LineBox[], offset: number): LineBox | null {
   const first = lines[0];
   const last = lines[lines.length - 1];
   if (!first || !last) return null;
   if (offset < first.rangeStart) return first;
+  // M-TABLES rule 1 — an EMPTY-ranged cell line (an empty cell's slice
+  // [k, k); the separator law gives each a distinct k) matches on
+  // rangeStart exactly, so the caret routes to the clicked cell.
+  for (const l of lines) {
+    if (l.rangeStart === l.rangeEnd && offset === l.rangeStart) return l;
+  }
   if (offset >= last.rangeEnd) return last;
+  // Rule 2 — the half-open walk (the pinned prose boundary rule: an
+  // offset shared by a line's end and the next line's start belongs to
+  // the LATER line).
   for (const l of lines) {
     if (offset >= l.rangeStart && offset < l.rangeEnd) return l;
+  }
+  // Rule 3 — the caret at a line's END that is NOT any line's start
+  // (the SEPARATOR position between cell paragraphs): it belongs to
+  // the line it ends — the caret paints after that line's last glyph.
+  for (const l of lines) {
+    if (l.rangeEnd === offset) return l;
   }
   return last;
 }
@@ -242,11 +302,16 @@ export function textRangeLineRects(
     const wrap = blockWrapWidth(cb.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
     const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    // M-TABLES: a cell line's rects clamp to the LANE — a selection's
+    // middle lines must never stripe across the neighboring cells.
+    const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
+    const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
+    const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
     return {
       pageIndex: line.pageIndex,
-      left: cb.x + x1,
+      left: cb.x + cx1,
       top: stride * line.pageIndex + cb.y + line.rect.y,
-      width: x2 - x1,
+      width: cx2 - cx1,
       height: line.rect.height,
     };
   });
@@ -285,6 +350,10 @@ export function textRangeTextExtents(
     const wrap = blockWrapWidth(cb.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
     const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    // M-TABLES: the cell lane clamp (the selection rects' rule).
+    const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
+    const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
+    const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
 
     // The matched runs' ink extent on this line.
     let ascent = 0;
@@ -311,9 +380,9 @@ export function textRangeTextExtents(
     const top = stride * line.pageIndex + cb.y + line.rect.y + line.baseline - ascent;
     return {
       pageIndex: line.pageIndex,
-      left: cb.x + x1,
+      left: cb.x + cx1,
       top,
-      width: x2 - x1,
+      width: cx2 - cx1,
       height: ascent + descent,
     };
   });
@@ -448,6 +517,26 @@ export function blockRangeAround(doc: PMNode, pos: number): { from: number; to: 
   for (let i = $pos.depth; i >= 0; i--) {
     const node = $pos.node(i);
     if (node.inlineContent) return { from: $pos.start(i), to: $pos.start(i) + node.content.size };
+  }
+  return null;
+}
+
+/**
+ * M-TABLES — the CELL node's position containing `pos` (or null): the
+ * drag-select's cell-crossing probe and the cell-toolbar anchor's
+ * lookup.
+ */
+export function cellPosAt(doc: PMNode, pos: number): number | null {
+  try {
+    const $pos = doc.resolve(pos);
+    for (let d = $pos.depth; d >= 0; d--) {
+      const node = $pos.node(d);
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        return $pos.before(d);
+      }
+    }
+  } catch {
+    return null;
   }
   return null;
 }

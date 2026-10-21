@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
+import { TextSelection } from '@tiptap/pm/state';
+import { CellSelection } from '@tiptap/pm/tables';
 import type { LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import { pmDocToSemantic, UnsupportedDocError, type AdapterBlock } from '@/lib/paginated/adapter';
@@ -15,12 +17,18 @@ import {
   inlineObjectRect,
   paintedBounds,
   textRangeLineRects,
+  cellPosAt,
   textRangeTextExtents,
   wordRangeAround,
   type CaretGeometry,
   type PaintedRect,
 } from '@/lib/paginated/positionMap';
 import { hitTest } from '@/lib/paginated/hitTest';
+import { cellAround, findTable, TableMap } from '@tiptap/pm/tables';
+import type { CellSelection as CellSelectionType } from '@tiptap/pm/tables';
+import { TableCellLayer } from './paginated/TableCellLayer';
+import { TableHeaderPins, type TableHeaderPin } from './paginated/TableHeaderPins';
+import { TableResizeHandles } from './paginated/TableResizeHandles';
 import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
 import { setPaintedScrollHandler } from '@/lib/paginated/ScrollGuardExtension';
@@ -35,6 +43,7 @@ import { useStyleRegistryStore } from '@/lib/styles/registry';
 import { resolveNormalBase } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
+import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
 import { PageSheet } from './paginated/PageSheet';
 import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
@@ -388,17 +397,85 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // selection band would paint a full line-box stripe OVER the
     // image (and zero-width before the object-aware walk). The
     // caret is suppressed too: a NodeSelection has no text caret.
-    const rects = selection.empty || isInlineImageNodeSelection
-      ? []
-      : textRangeLineRects(
-          current.blocks,
-          current.result,
-          selection.from,
-          selection.to,
-          metricsRef.current!,
-          useDocumentStore.getState().pageSetup.pageGap
-        );
-    if (isInlineImageNodeSelection) setCaret(null);
+    const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
+    const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
+      pageIndex: pr.pageIndex,
+      left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
+      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
+      width: pr.rect.width,
+      height: pr.rect.height,
+    });
+    // M-TABLES: a CELL selection paints the selected cells' rect
+    // slices (every page slice — a split cell highlights across its
+    // page fragments), matched by grid identity through the
+    // cell-paragraph map's table (prosemirror-tables findCell — the
+    // SAME grid identity the engine's cell rects echo).
+    const isCellSelection = selection instanceof CellSelection;
+    let cellRects: PaintedRect[] | null = null;
+    if (isCellSelection) {
+      cellRects = [];
+      (selection as CellSelectionType).forEachCell((_node, pos) => {
+        // The projection NEVER crashes a relayout: a boundary position
+        // (a cell's end) can miss the map — skip that cell.
+        try {
+          // The CELL NODE's own offset is the map's key (not a position
+          // inside it — cellAround resolves to the cell's start, which
+          // sits inside the row, the depth findTable's map wants).
+          const cellPos = cellAround(editor.state.doc.resolve(pos + 1));
+          if (!cellPos) return;
+          const loc = findTable(cellPos);
+          if (!loc) return;
+          const blockId = loc.node.attrs?.blockId;
+          if (typeof blockId !== 'string') return;
+          const cellBox = TableMap.get(loc.node).findCell(cellPos.pos - loc.start);
+          for (const pr of current.result.placed) {
+            if (pr.kind !== 'tableCell' || pr.blockId !== blockId) continue;
+            if (pr.cell?.row !== cellBox.top || pr.cell?.col !== cellBox.left) continue;
+            cellRects!.push(stackRectOf(pr));
+          }
+        } catch {
+          return;
+        }
+      });
+    }
+    // M-TABLES: a caret parked inside a cell anchors the toolbar at
+    // the CELL's slice on the caret's page (Word's context bar).
+    let caretCellAnchor: PaintedRect | null = null;
+    if (selection.empty && !isCellSelection) {
+      try {
+        const cellPos = cellAround(editor.state.doc.resolve(selection.head));
+        const loc = cellPos ? findTable(cellPos) : null;
+        const blockId = loc?.node.attrs?.blockId;
+        if (cellPos && loc && typeof blockId === 'string') {
+          const cellBox = TableMap.get(loc.node).findCell(cellPos.pos - loc.start);
+          const pageIdx = geom?.pageIndex ?? 0;
+          const slice = current.result.placed.find(
+            (p) =>
+              p.kind === 'tableCell' &&
+              p.blockId === blockId &&
+              p.cell?.row === cellBox.top &&
+              p.cell?.col === cellBox.left &&
+              p.pageIndex === pageIdx,
+          );
+          if (slice) caretCellAnchor = stackRectOf(slice);
+        }
+      } catch {
+        caretCellAnchor = null; // a boundary position missed the map — no anchor
+      }
+    }
+    const rects = isCellSelection
+      ? cellRects!
+      : selection.empty || isInlineImageNodeSelection
+        ? []
+        : textRangeLineRects(
+            current.blocks,
+            current.result,
+            selection.from,
+            selection.to,
+            metricsRef.current!,
+            useDocumentStore.getState().pageSetup.pageGap
+          );
+    if (isInlineImageNodeSelection || isCellSelection) setCaret(null);
     setSelRects(rects);
     const imageNode = isBlockImageNodeSelection
       ? (selection as unknown as { node: { attrs: { blockId?: string } } }).node
@@ -413,14 +490,6 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     // page-top/center and 96px left of the image (the reported
     // "center, a little left"). The INLINE object rides its painted
     // rect (placed[] holds block images only — lines hold objects).
-    const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
-    const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
-      pageIndex: pr.pageIndex,
-      left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
-      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
-      width: pr.rect.width,
-      height: pr.rect.height,
-    });
     const imageToolbarRect: PaintedRect | null = imageRectForToolbar
       ? stackRectOf(imageRectForToolbar)
       : inlineObjRect
@@ -429,8 +498,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     setToolbarPos(
       !draggingRef.current &&
         useConfigStore.getState().config.useFloatingToolbar &&
-        (imageToolbarRect || !selection.empty)
-        ? computeToolbar(imageToolbarRect ? [imageToolbarRect] : rects)
+        (imageToolbarRect || caretCellAnchor || isCellSelection || !selection.empty)
+        ? computeToolbar(
+            imageToolbarRect
+              ? [imageToolbarRect]
+              : caretCellAnchor
+                ? [caretCellAnchor]
+                : isCellSelection
+                  ? cellRects!
+                  : rects,
+          )
         : null
     );
   }
@@ -597,7 +674,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       const point = pending;
       pending = null;
       const pos = pmPosAt(point);
-      if (pos != null) editor?.commands.setTextSelection({ from: anchor, to: pos });
+      if (pos != null) {
+        // M-TABLES: a drag crossing a cell wall becomes a CELL
+        // selection (prosemirror-tables' drag rule, shell-side — the
+        // painted surface owns the events; the hidden view never sees
+        // the mouse). Same cell → the plain text selection.
+        const anchorCell = editor ? cellPosAt(editor.state.doc, anchor) : null;
+        const headCell = editor && pos != null ? cellPosAt(editor.state.doc, pos) : null;
+        if (anchorCell != null && headCell != null && anchorCell !== headCell) {
+          editor?.commands.setCellSelection({ anchorCell, headCell });
+        } else {
+          editor?.commands.setTextSelection({ from: anchor, to: pos });
+        }
+      }
     };
     const onMove = (ev: MouseEvent) => {
       pending = { clientX: ev.clientX, clientY: ev.clientY };
@@ -622,6 +711,84 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   // hold everywhere.
   function swallowMiddleClick(e: React.MouseEvent) {
     if (e.button === 1) e.preventDefault();
+  }
+
+  /** M-T4 — the image-at-click probe for the CONTEXTMENU arm: the
+   *  mousedown arm's image hit-test, spelled for the event that
+   *  survives menu dismissal. FRONT/in-flow images win; a behind float
+   *  only counts where no text line sits (the mousedown z-rules). */
+  function imageBlockAtClick(e: React.MouseEvent): number | null {
+    const stack = stackRef.current;
+    if (!stack || !layout) return null;
+    const z = useConfigStore.getState().config.editor.zoomLevel / 100;
+    const sr = stack.getBoundingClientRect();
+    const localX = (e.clientX - sr.left) / z;
+    const localY = (e.clientY - sr.top) / z;
+    const page0 = layout.result.pages[0]!;
+    const stride = page0.size.height + pageSetup.pageGap;
+    const pageIndex = Math.max(0, Math.min(layout.result.pages.length - 1, Math.floor(localY / stride)));
+    const page = layout.result.pages[pageIndex]!;
+    const inPageY = localY - pageIndex * stride - page.contentBox.y;
+    const inPageX = localX - page.contentBox.x;
+    const inside = (p: (typeof layout.result.placed)[number]) =>
+      inPageX >= p.rect.x &&
+      inPageX <= p.rect.x + p.rect.width &&
+      inPageY >= p.rect.y &&
+      inPageY <= p.rect.y + p.rect.height;
+    const front = layout.result.placed.filter(
+      (p) => p.kind === 'image' && p.pageIndex === pageIndex && p.z !== 'behind',
+    );
+    for (let i = front.length - 1; i >= 0; i--) {
+      const p = front[i]!;
+      if (!inside(p)) continue;
+      const block = layout.blocks.find((b) => b.id === p.blockId);
+      if (block) return block.from;
+    }
+    const textTrackHit = layout.result.lines.some(
+      (l) =>
+        l.pageIndex === pageIndex &&
+        inPageY >= l.rect.y &&
+        inPageY <= l.rect.y + l.rect.height,
+    );
+    if (!textTrackHit) {
+      const behind = layout.result.placed.filter(
+        (p) => p.kind === 'image' && p.pageIndex === pageIndex && p.z === 'behind',
+      );
+      for (let i = behind.length - 1; i >= 0; i--) {
+        const p = behind[i]!;
+        if (!inside(p)) continue;
+        const block = layout.blocks.find((b) => b.id === p.blockId);
+        if (block) return block.from;
+      }
+    }
+    return null;
+  }
+
+  /** M-T4 — the CONTEXTMENU arm of the right-click rule: the menu reads
+   *  the CLICK, never the stale selection. The mousedown arm
+   *  (handleMouseDown) resolves the click in the common case; this arm
+   *  covers the case its mousedown was CONSUMED — right-clicking
+   *  elsewhere while the menu is already open dismisses it and swallows
+   *  the mousedown, so the selection would stay wherever it was
+   *  ("selected an image, right-clicked in a table, still image
+   *  options"). The native contextmenu event still fires and reaches
+   *  the surface, BEFORE the menu trigger's own handler (DOM bubbling:
+   *  deeper first — base-ui's trigger then stopEvent's it), so the
+   *  re-opened menu reads the click-resolved selection. Idempotent
+   *  with the mousedown arm (same rule, same coordinates). */
+  function handleContextMenu(e: React.MouseEvent) {
+    if (!editor || adapterError || !layout) return;
+    if (e.button !== 2) return;
+    // Coordinate-less dispatches (tests, keyboard-invoked menus) must
+    // not resolve against the nearest line — the selection stays
+    // wherever its owner put it.
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    const imageFrom = imageBlockAtClick(e);
+    if (imageFrom != null) {
+      editor.commands.setNodeSelection(imageFrom);
+      return;
+    }
+    applyRightClickSelection(editor, pmPosAt(e));
   }
 
   function handleMouseDown(e: React.MouseEvent) {
@@ -675,10 +842,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
         inPageX <= p.rect.x + p.rect.width &&
         inPageY >= p.rect.y &&
         inPageY <= p.rect.y + p.rect.height;
-      // 1. FRONT + in-flow (topmost wins):
+      // 1. FRONT + in-flow (topmost wins): IMAGES ONLY — the
+      //    tableCell rects are paint geometry; a click inside a cell
+      //    routes to the text hitTest (the caret/cell rules).
       for (let i = layout.result.placed.length - 1; i >= 0; i--) {
         const p = layout.result.placed[i]!;
-        if (p.pageIndex !== pageIndex || p.z === 'behind') continue;
+        if (p.kind !== 'image' || p.pageIndex !== pageIndex || p.z === 'behind') continue;
         if (inside(p)) {
           const block = layout.blocks.find((b) => b.id === p.blockId);
           if (block) {
@@ -699,7 +868,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       if (!textTrackHit) {
         for (let i = layout.result.placed.length - 1; i >= 0; i--) {
           const p = layout.result.placed[i]!;
-          if (p.pageIndex !== pageIndex || p.z !== 'behind') continue;
+          if (p.kind !== 'image' || p.pageIndex !== pageIndex || p.z !== 'behind') continue;
           if (inside(p)) {
             behindCandidate = p.blockId;
             break;
@@ -732,6 +901,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       }
     }
     if (pos == null) return;
+
+    // M-T4 — THE RIGHT-CLICK RULE (Word), the ONE shared spelling
+    // (rightClickSelection.ts): the image hit-test above has already
+    // returned for image clicks, so this is the keep-inside /
+    // collapse-outside arm — the context menu reads the selection AT
+    // THE CLICK. The old path ran the click-count logic for every
+    // button, so a right-click after recent lefts landed on count 2/3
+    // and silently re-selected the whole WORD or PARAGRAPH.
+    if (e.button === 2) {
+      applyRightClickSelection(editor, pos);
+      return;
+    }
 
     const now = Date.now();
     const prev = lastClickRef.current;
@@ -1063,6 +1244,55 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     return map;
   }, [layout]);
 
+  // M-T3 — the header-row pins: ONE per table, at the table's first
+  // band (the page where that band lands). Pinned state reads the PM
+  // doc (the table's first row's cells are all tableHeader); the y
+  // comes from the engine's placed rects (anchor row 0, col 0 — the
+  // band slice's top). The gutter is the user's spec'd home ("the
+  // gutter is where the lucide icon pin should be").
+  const headerPins = useMemo<TableHeaderPin[]>(() => {
+    if (!layout || !editor) return [];
+    const out: TableHeaderPin[] = [];
+    for (const block of layout.blocks) {
+      if (!block.table) continue;
+      const tableNode = editor.state.doc.nodeAt(block.from);
+      if (!tableNode || tableNode.childCount === 0) continue;
+      const firstRow = tableNode.child(0);
+      const pinned =
+        firstRow.childCount > 0 && firstRow.firstChild?.type.name === 'tableHeader';
+      let best: { pageIndex: number; y: number } | null = null;
+      for (const pr of layout.result.placed) {
+        if (pr.kind !== 'tableCell' || pr.blockId !== block.id || !pr.cell) continue;
+        if (pr.cell.row !== 0 || pr.cell.col !== 0) continue;
+        if (!best || pr.pageIndex < best.pageIndex || (pr.pageIndex === best.pageIndex && pr.rect.y < best.y)) {
+          best = { pageIndex: pr.pageIndex, y: pr.rect.y };
+        }
+      }
+      if (best) out.push({ blockId: block.id, pageIndex: best.pageIndex, y: best.y, pinned });
+    }
+    return out;
+  }, [layout, editor]);
+
+  // The pin's toggle: park the selection in the table's first cell
+  // (toggleHeaderRow operates on the selection's row), toggle, restore
+  // the user's selection — the caret never visibly jumps.
+  const toggleTableHeader = useCallback((blockId: string) => {
+    if (!editor) return;
+    const block = layoutRef.current?.blocks.find((b) => b.id === blockId);
+    if (!block) return;
+    const { from: selFrom, to: selTo } = editor.state.selection;
+    const anchor = block.from + 3; // table open + row open + cell open
+    editor
+      .chain()
+      .command(({ tr, dispatch }) => {
+        if (dispatch) tr.setSelection(TextSelection.create(tr.doc, anchor));
+        return true;
+      })
+      .toggleHeaderRow()
+      .setTextSelection({ from: selFrom, to: selTo })
+      .run();
+  }, [editor]);
+
   // Caret-follow registration: block PM's native
   // scroll-to-selection (L3) and decline only in the adapter fallback,
   // where the visible pageless DOM is the real content.
@@ -1141,9 +1371,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     return (
       <div className="relative" data-testid="paginated-fallback">
         <div className="mx-auto w-full max-w-3xl px-8 py-6">
-          <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            This document contains content the paginated engine does not handle yet (lists,
-            quotes, code blocks, rules). Rendering without pages — nothing is lost.
+          <div
+            className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            data-testid="paginated-fallback-banner"
+          >
+            This document contains content the paginated engine does not handle yet (tables,
+            lists, quotes, code blocks, rules). Rendering without pages — nothing is lost.
           </div>
           <EditorContent
             editor={editor}
@@ -1186,7 +1419,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     : null;
 
   return (
-    <div className="relative" data-testid="paginated-root" ref={rootRef}>
+    // M-T4: the CONTEXTMENU arm lives on the ROOT (not the zoom
+    // wrapper) — deeper than the menu trigger (so it runs before
+    // base-ui's stopEvent), above every painted surface (so every
+    // real right-click bubbles through), and level with where the
+    // menu tests dispatch.
+    <div
+      className="relative"
+      data-testid="paginated-root"
+      ref={rootRef}
+      onContextMenu={handleContextMenu}
+    >
       <HiddenInputView editor={editor} />
       {/* M-RULER Phase 5: the vertical ruler — a wrapper-FIXED viewport
           column (the background spans the container at every scroll
@@ -1254,9 +1497,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                   <ImageLayer
                     geometry={page}
                     placed={result.placed.filter(
-                      (p) => p.pageIndex === page.index && p.z === 'behind',
+                      (p) => p.pageIndex === page.index && p.z === 'behind' && p.kind === 'image',
                     )}
                     radii={imageRadii}
+                  />
+                )}
+                {/* M-TABLES: cell fills/borders paint UNDER the text
+                    tracks (above the sheet + behind-floats). */}
+                {(visiblePages === null || visiblePages.has(page.index)) && (
+                  <TableCellLayer
+                    geometry={page}
+                    cells={result.placed.filter(
+                      (p) => p.pageIndex === page.index && p.kind === 'tableCell',
+                    )}
                   />
                 )}
                 {(visiblePages === null || visiblePages.has(page.index)) &&
@@ -1296,6 +1549,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                       />
                     );
                   })}
+                {/* M-TABLES: the column drag handles (above the text
+                    canvases for pointer reach). */}
+                {(visiblePages === null || visiblePages.has(page.index)) && (
+                  <TableResizeHandles
+                    geometry={page}
+                    cells={result.placed.filter(
+                      (p) => p.pageIndex === page.index && p.kind === 'tableCell',
+                    )}
+                    editor={editor}
+                    tablePosOf={(blockId) => blocks.find((b) => b.id === blockId)?.from ?? null}
+                  />
+                )}
                 {lnNumbers &&
                   (() => {
                     const entries: { line: (typeof result.lines)[number]; number: number }[] = [];
@@ -1314,6 +1579,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                       />
                     ) : null;
                   })()}
+                {/* M-T3: the header-row pins (gutter chrome, click-to-toggle). */}
+                <TableHeaderPins geometry={page} pins={headerPins} onToggle={toggleTableHeader} />
 
                 {/* The selected image's border + resize handles. An
                     INLINE object gets no float drag (in-flow objects

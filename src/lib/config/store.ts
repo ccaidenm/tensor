@@ -12,6 +12,9 @@ interface ConfigStore {
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
+  /** M-T4: Developer Mode — gates Reload/Inspect Element in the context
+   *  menu; the General panel requires accepting a warning to enable. */
+  setDeveloperMode: (value: boolean) => void;
   setReduceMotion: (value: Config["accessibility"]["reduceMotion"]) => void;
   setSelectionColor: (value: string) => void;
   setMeasurementUnit: (value: Config["editor"]["measurementUnit"]) => void;
@@ -79,6 +82,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setUseFloatingToolbar: (value) =>
     set((state) => ({
       config: { ...state.config, useFloatingToolbar: value },
+    })),
+
+  setDeveloperMode: (value) =>
+    set((state) => ({
+      config: { ...state.config, developerMode: value },
     })),
 
   setReduceMotion: (value) =>

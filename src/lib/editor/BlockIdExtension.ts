@@ -29,7 +29,10 @@ import { nanoid } from 'nanoid';
  * plugin is the shell-side guarantee, not the enforcement.
  */
 
-const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image'];
+// M-TABLES: the table node joins the ID-bearing set — the paginated
+// adapter turns one table into ONE engine TableBlock, so the id lives
+// on the table node alone (rows/cells are positional inside it).
+const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'table'];
 
 /**
  * Mint ids for missing/duplicate ID-bearing blocks INTO `tr` (positions

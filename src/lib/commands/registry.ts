@@ -43,6 +43,8 @@ import {
   MessageSquareText,
   TextCursorInput,
   Squircle,
+  Table,
+  TableProperties,
   WrapText,
   BringToFront,
   SendToBack,
@@ -67,6 +69,7 @@ import { insertCaptionForImage } from '@/lib/media/caption';
 import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
+import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
 
 /**
  * M-PALETTE. The declarative app command registry — the single source
@@ -222,6 +225,21 @@ export const COMMANDS: CommandAction[] = [
     run: () => {
       const editor = doc().editor;
       if (editor) void insertImageFromPicker(editor);
+    },
+  },
+  {
+    // M-TABLES — Insert > Table through the palette: opens the same
+    // exact-dimension dialog the ribbon grid picker's "Insert Table…"
+    // opens. No keyboard shortcut — the palette IS the reach.
+    id: 'insertTable',
+    title: 'Insert Table…',
+    icon: Table,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'table', 'grid', 'rows', 'columns', 'cells'],
+    enablement: () => !!doc().editor,
+    run: () => {
+      useInsertTableStore.getState().open();
     },
   },
   {
@@ -431,6 +449,19 @@ export const COMMANDS: CommandAction[] = [
     shortcutId: 'find',
     keywords: ['find', 'search', 'replace', 'sidebar', 'advanced'],
     run: () => useSidebarStore.getState().open('search', 'right'),
+  },
+  {
+    // M-T3c — the Table side panel (the Find/Replace sidebar's twin):
+    // dimensions + flow fine-tuning, and the alternate route for the
+    // table ops when the floating toolbar is turned off.
+    id: 'tableSidebar',
+    title: 'Table Properties (Sidebar)',
+    icon: TableProperties,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['table', 'properties', 'sidebar', 'panel', 'dimensions', 'columns', 'rows', 'width', 'height', 'merge', 'shading'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('table', 'right'),
   },
   {
     id: 'toggleNPC',

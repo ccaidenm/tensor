@@ -1,8 +1,9 @@
-import { Table, Image as ImageIcon, PaintbrushVertical } from 'lucide-react';
+import { Image as ImageIcon, PaintbrushVertical } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { insertImageFromPicker } from '@/lib/media/insert';
+import { TableGridPicker } from '../TableGridPicker';
 
 export function IllustrationsGroup({ editor }: { editor: Editor }) {
   return (
@@ -14,12 +15,10 @@ export function IllustrationsGroup({ editor }: { editor: Editor }) {
         icon={<ImageIcon size={16} />}
         onClick={() => void insertImageFromPicker(editor)}
       />
-      <IconButton
-        label="Table"
-        icon={<Table size={16} />}
-        onClick={() => {}}
-        disabled
-      />
+      {/* M-TABLES: the grid picker replaces the disabled stub — hover to
+          size, click to insert; "Insert Table…" opens the exact-dimension
+          dialog. */}
+      <TableGridPicker />
       <IconButton
         label="Drawing"
         icon={<PaintbrushVertical size={16} />}

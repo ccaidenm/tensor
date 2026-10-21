@@ -78,9 +78,12 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
   );
 
   // Kick loads for any unresolved-but-stored media (startup pending).
+  // M-TABLES: only kind 'image' carries src — other placed kinds are
+  // filtered upstream; guarded here too.
   useEffect(() => {
     for (const p of placed) {
-      const sha = p.src.startsWith('media://') ? p.src.slice('media://'.length) : null;
+      if (p.kind !== 'image') continue;
+      const sha = p.src?.startsWith('media://') ? p.src.slice('media://'.length) : null;
       if (!sha || getBitmap(sha)) continue;
       const entry = useMediaStore.getState().entries.get(sha);
       if (entry) ensureBitmap(sha, entry.url);
@@ -100,6 +103,7 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     void radii;
     for (const p of placed) {
+      if (p.kind !== 'image') continue; // M-TABLES: cell rects paint in TableCellLayer
       const { x, y, width, height } = p.rect;
       const px = geometry.contentBox.x + x;
       const py = geometry.contentBox.y + y;
@@ -121,7 +125,7 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
           ctx.clip();
         }
       }
-      const sha = p.src.startsWith('media://') ? p.src.slice('media://'.length) : null;
+      const sha = p.src?.startsWith('media://') ? p.src.slice('media://'.length) : null;
       const bitmap = sha ? getBitmap(sha) : undefined;
       if (bitmap) {
         ctx.drawImage(bitmap, px, py, width, height);

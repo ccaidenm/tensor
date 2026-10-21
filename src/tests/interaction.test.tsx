@@ -511,6 +511,35 @@ describe('alignment symmetry + selection color + cursor', () => {
     });
     expect(useConfigStore.getState().config.editor.pasteOnMiddleClick).toBe(false);
   });
+
+  it('GeneralPanel > Advanced: the Developer Mode warning renders the heavy frosted overlay (its own classes, cascade-safe)', () => {
+    render(<GeneralPanel />);
+    expect(useConfigStore.getState().config.developerMode).toBe(false);
+    const row = document.querySelector('[data-section-id="advanced"]')!.querySelector('[role="switch"]') as HTMLElement;
+    act(() => {
+      row.click();
+    });
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]') as HTMLElement | null;
+    expect(overlay).not.toBeNull();
+    const classes = overlay!.className;
+    // The caller's treatment OWNS the overlay: the heavy frost applies,
+    // and the base's variant-qualified xs blur is ABSENT — it would win
+    // the CSS cascade over a plain backdrop-blur (variant rules emit
+    // after base ones) and render ~no blur.
+    expect(classes).toContain('backdrop-blur-lg');
+    expect(classes).not.toContain('backdrop-blur-xs');
+    expect(classes).toContain('z-[100]');
+    // The POPUP clears its own raised overlay — the frost dims the app,
+    // never the card.
+    const popup = document.querySelector('[data-slot="dialog-content"]') as HTMLElement;
+    expect(popup.className).toContain('z-[110]');
+    // Accepting flips the flag; the overlay unmounts.
+    act(() => {
+      (document.querySelector('[data-testid="developer-mode-accept"]') as HTMLElement).click();
+    });
+    expect(useConfigStore.getState().config.developerMode).toBe(true);
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull();
+  });
 });
 
 describe('a11y attrs + IME composition preview', () => {

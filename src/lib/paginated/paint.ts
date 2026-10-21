@@ -357,6 +357,14 @@ export function paintLines(
  * pre-2.1). FLOATS are excluded: placeFloat has ZERO flow presence
  * (the anchor block's space is never reserved — floats may overlap
  * text by design; z is paint order).
+ *
+ * M-TABLES RECIPT — the flow track is BAND-wise where tables are
+ * concerned. A table's cell LINES are parallel lanes INSIDE their band
+ * (inset by the cell padding, shared y) — they are lane content, not
+ * flow items, and are skipped. The tableCell rects ARE the bands'
+ * flow representatives (each covers [bandTop, bandTop + bandHeight)
+ * exactly — the walk's y advance per band) and participate in the
+ * tiling like any placed[] item.
  */
 export function assertContiguity(result: LayoutResult): void {
   if (!import.meta.env.DEV) return;
@@ -364,6 +372,9 @@ export function assertContiguity(result: LayoutResult): void {
     const items: { y: number; h: number; what: string }[] = [];
     for (const line of result.lines) {
       if (line.pageIndex !== p) continue;
+      // Table cell lines: lane content inside their band — the band's
+      // rects carry the flow accounting below.
+      if (line.tableCell) continue;
       items.push({ y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
     }
     for (const pr of result.placed) {

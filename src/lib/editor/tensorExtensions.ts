@@ -25,6 +25,7 @@ import { ScrollGuardExtension } from '@/lib/paginated/ScrollGuardExtension';
 import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
 import { ImageNode } from '@/lib/editor/ImageNode';
 import { InlineImageNode } from '@/lib/editor/InlineImageNode';
+import { TensorTableKit } from '@/lib/editor/TableExtensions';
 
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
@@ -73,6 +74,11 @@ export function tensorExtensions(): Extensions {
     PageBreakNode,
     ImageNode,
     InlineImageNode,
+    // M-TABLES: the TipTap table family (schema + commands + the
+    // built-in columnResizing plugin via `resizable`) plus Tensor's
+    // borderStyle/backgroundColor attrs. Pages mode falls back to the
+    // pageless render until the engine grows the TableBlock kind.
+    ...TensorTableKit,
     // Stable block ids (engine edit-survival contract) + the
     // paginated-mode scroll guard (L3).
     BlockIdExtension,

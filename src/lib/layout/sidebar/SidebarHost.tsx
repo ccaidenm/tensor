@@ -54,7 +54,12 @@ export function SidebarHost({ id, anchor, children }: SidebarHostProps) {
     <div
       ref={ref}
       className={cn(
-        'absolute z-30 flex flex-col bg-background border-border',
+        // M-T4 — z-40: docked panels are FLOATING chrome and must clear
+        // the M-RULER bar (a portal that mounts AFTER the SidebarHosts
+        // in the same stacking context at z-30 — DOM order made the
+        // ruler win, painting over the Find/Replace and Table panels).
+        // Panel-internal dropdowns (z-40) nest fine beneath this.
+        'absolute z-40 flex flex-col bg-background border-border',
         ANCHOR_POSITION_CLASS[anchor],
         !isOpen && 'pointer-events-none',
       )}
