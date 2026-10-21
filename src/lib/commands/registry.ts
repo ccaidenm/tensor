@@ -44,6 +44,7 @@ import {
   TextCursorInput,
   Squircle,
   Table,
+  TableProperties,
   WrapText,
   BringToFront,
   SendToBack,
@@ -448,6 +449,19 @@ export const COMMANDS: CommandAction[] = [
     shortcutId: 'find',
     keywords: ['find', 'search', 'replace', 'sidebar', 'advanced'],
     run: () => useSidebarStore.getState().open('search', 'right'),
+  },
+  {
+    // M-T3c — the Table side panel (the Find/Replace sidebar's twin):
+    // dimensions + flow fine-tuning, and the alternate route for the
+    // table ops when the floating toolbar is turned off.
+    id: 'tableSidebar',
+    title: 'Table Properties (Sidebar)',
+    icon: TableProperties,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['table', 'properties', 'sidebar', 'panel', 'dimensions', 'columns', 'rows', 'width', 'height', 'merge', 'shading'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('table', 'right'),
   },
   {
     id: 'toggleNPC',

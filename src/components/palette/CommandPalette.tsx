@@ -1,7 +1,11 @@
+import { useMemo, useState } from 'react';
+import { Table } from 'lucide-react';
 import { usePaletteStore } from '@/lib/palette/store';
 import { useAppCommands } from '@/lib/commands/useAppCommands';
 import type { CommandAction, CommandGroup as CommandGroupKind } from '@/lib/commands/registry';
 import { useShortcutDisplay } from '@/lib/useShortcutDisplay';
+import { insertTableAtSelection, parseTableDims } from '@/lib/editor/tableInsert';
+import { useDocumentStore } from '@/lib/document/store';
 import { formatShortcutParts } from '@/lib/shortcuts';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
@@ -67,6 +71,15 @@ export function CommandPalette() {
   const editorContext = usePaletteStore((s) => s.editorContext);
   const commands = useAppCommands(editorContext);
 
+  // M-T3b — the typed table spec: "4x4" (also "4 x 4", "4×4",
+  // "table 4x4", "4x4 table") parses to a table-create command with
+  // dimensions BEYOND the grid picker's 8×8 hover grid. The item's
+  // value embeds the "create N×M table" text so cmdk's own filter
+  // matches the search; dims=null renders nothing.
+  const [search, setSearch] = useState('');
+  const tableDims = useMemo(() => parseTableDims(search), [search]);
+  const tableEditor = useDocumentStore((s) => s.editor);
+
   // Close FIRST, then run: close() refocuses the editor while the
   // selection is still intact (editor commands apply to it), and any
   // dialog the command opens (settings, properties...) takes focus
@@ -87,9 +100,37 @@ export function CommandPalette() {
       className="sm:max-w-lg"
     >
       <Command>
-        <CommandInput data-testid="palette-input" placeholder="Type a command or search…" />
+        <CommandInput
+          data-testid="palette-input"
+          placeholder="Type a command or search…"
+          onValueChange={setSearch}
+        />
         <CommandList>
           <CommandEmpty>No matching commands.</CommandEmpty>
+          {tableDims && tableEditor && editorContext ? (
+            <CommandGroup heading="Create table">
+              <CommandItem
+                value={`create ${tableDims.rows}x${tableDims.cols} table insert`}
+                data-testid="palette-table-dims"
+                onSelect={() => {
+                  const editor = useDocumentStore.getState().editor;
+                  if (!editor) return;
+                  usePaletteStore.getState().close();
+                  insertTableAtSelection(editor, {
+                    rows: tableDims.rows,
+                    cols: tableDims.cols,
+                    withHeaderRow: true,
+                  });
+                }}
+              >
+                <Table size={16} className="text-muted-foreground" />
+                Create {tableDims.rows}×{tableDims.cols} table
+                <span className="text-muted-foreground">
+                  — type N×M beyond the 8×8 grid
+                </span>
+              </CommandItem>
+            </CommandGroup>
+          ) : null}
           {GROUP_ORDER.map(({ group, heading }) => {
             const items = commands.filter((c) => c.group === group);
             if (items.length === 0) return null;

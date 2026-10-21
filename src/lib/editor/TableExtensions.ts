@@ -38,7 +38,47 @@ import { CellSelection, TableView as ResizableTableView } from '@tiptap/pm/table
 
 export type TableBorderPreset = 'all' | 'none' | 'outer';
 
+/** M-T4 — one side of a per-side edges attr (null = unset → inherit). */
+export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
+export interface BoxEdgesAttrs {
+  top: number | null;
+  right: number | null;
+  bottom: number | null;
+  left: number | null;
+}
+
 const BORDER_ATTR = 'data-table-border';
+
+/** BoxEdges parse: JSON data marker → the nullable-sides record. */
+function edgesFromElement(element: HTMLElement, marker: string): BoxEdgesAttrs | null {
+  const raw = element.getAttribute(marker);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<BoxEdgesAttrs>;
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+    return {
+      top: num(parsed.top),
+      right: num(parsed.right),
+      bottom: num(parsed.bottom),
+      left: num(parsed.left),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** BoxEdges attr spelling: JSON data marker (the float precedent). */
+function edgesAttr(marker: string, attrName: string) {
+  return {
+    default: null as BoxEdgesAttrs | null,
+    parseHTML: (element: HTMLElement) => edgesFromElement(element, marker),
+    renderHTML: (attributes: Record<string, unknown>) => {
+      const edges = attributes[attrName] as BoxEdgesAttrs | null;
+      return edges ? { [marker]: JSON.stringify(edges) } : {};
+    },
+  };
+}
 
 function borderMarker(node: PMNode): string {
   const v = node.attrs.borderStyle;
@@ -69,12 +109,44 @@ class TensorTableView extends ResizableTableView {
       }
     }
     this.table.setAttribute(BORDER_ATTR, borderMarker(node));
+    this.applySpacingVars(node);
   }
 
   update(node: PMNode): boolean {
     const ok = super.update(node);
-    if (ok) this.table.setAttribute(BORDER_ATTR, borderMarker(node));
+    if (ok) {
+      this.table.setAttribute(BORDER_ATTR, borderMarker(node));
+      this.applySpacingVars(node);
+    }
     return ok;
+  }
+
+  /**
+   * M-T4 — the pageless spacing surface: outer margins + the default
+   * cell padding as CSS VARS (index.css consumes them with the engine
+   * constants as fallbacks — the same per-side resolution the engine
+   * performs). The stock TableView never re-applies node attrs on
+   * update; the vars ride the same re-stamp as the border marker.
+   */
+  private applySpacingVars(node: PMNode): void {
+    const margin = node.attrs.margin as BoxEdgesAttrs | null;
+    for (const side of ['mt', 'mr', 'mb', 'ml'] as const) {
+      const attrSide = { mt: 'top', mr: 'right', mb: 'bottom', ml: 'left' }[side] as EdgeSide;
+      const v = margin?.[attrSide];
+      if (typeof v === 'number' && v > 0) {
+        this.table.style.setProperty(`--tensor-table-${side}`, `${v}px`);
+      } else {
+        this.table.style.removeProperty(`--tensor-table-${side}`);
+      }
+    }
+    const pad = node.attrs.cellPadding as BoxEdgesAttrs | null;
+    const fallback = { top: 4, right: 8, bottom: 4, left: 8 };
+    const pick = (side: EdgeSide): number =>
+      typeof pad?.[side] === 'number' && pad[side]! >= 0 ? pad[side]! : fallback[side];
+    this.table.style.setProperty(
+      '--tensor-cell-pad',
+      `${pick('top')}px ${pick('right')}px ${pick('bottom')}px ${pick('left')}px`,
+    );
   }
 }
 
@@ -90,6 +162,27 @@ export const TensorTable = TableBase.extend({
         },
         renderHTML: (attributes) => ({ [BORDER_ATTR]: attributes.borderStyle }),
       },
+      // M-T3c — TABLE FLOW: horizontal placement of the table within
+      // the content box (Word's table alignment). The engine's
+      // TableBlock.align consumes it (alignOffset over the tracks'
+      // total); pageless CSS mirrors it (a fully-fixed-width table
+      // is the case where it visibly moves).
+      align: {
+        default: 'left',
+        parseHTML: (element) => {
+          const v = element.getAttribute('data-table-align');
+          return v === 'center' || v === 'right' ? v : 'left';
+        },
+        renderHTML: (attributes) => ({
+          'data-table-align': attributes.align === 'center' || attributes.align === 'right' ? attributes.align : 'left',
+        }),
+      },
+      // M-T4 — outer margins (t/b/l/r): top/bottom ride the engine's
+      // block spacing via the adapter; left/right narrow the engine's
+      // table box. Pageless renders them through CSS vars (the view).
+      margin: edgesAttr('data-table-margin', 'margin'),
+      // M-T4 — default cell padding (per-side; cells override).
+      cellPadding: edgesAttr('data-table-cell-padding', 'cellPadding'),
     };
   },
 }).configure({
@@ -99,7 +192,33 @@ export const TensorTable = TableBase.extend({
   View: TensorTableView,
 });
 
-export const TensorTableRow = TableRowBase;
+/**
+ * M-T3c — the ROW's minimum height (Word's Row Height "At least"):
+ * null = pure content height; a number floors the row at that px.
+ * The engine's TableRowData.minHeight consumes it verbatim ("never a
+ * MAXIMUM: rows grow" — the engine's documented contract; exact
+ * heights are a tracked follow-up). Rendered as a data marker for the
+ * clipboard round-trip.
+ */
+export const TensorTableRow = TableRowBase.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      minHeight: {
+        default: null,
+        parseHTML: (element) => {
+          const v = element.getAttribute('data-row-min-height');
+          const n = v == null ? NaN : Number(v);
+          return Number.isFinite(n) && n > 0 ? n : null;
+        },
+        renderHTML: (attributes) =>
+          typeof attributes.minHeight === 'number' && attributes.minHeight > 0
+            ? { 'data-row-min-height': String(attributes.minHeight) }
+            : {},
+      },
+    };
+  },
+});
 
 export const TensorTableCell = TableCellBase.extend({
   addAttributes() {
@@ -110,13 +229,14 @@ export const TensorTableCell = TableCellBase.extend({
         parseHTML: (element) =>
           element.getAttribute('data-cell-background') ??
           (element.style?.backgroundColor || null),
-        renderHTML: (attributes) =>
-          attributes.backgroundColor
-            ? {
-                'data-cell-background': attributes.backgroundColor,
-                style: `background-color: ${attributes.backgroundColor}`,
-              }
-            : {},
+        renderHTML: cellRenderHTML,
+      },
+      // M-T4 — per-cell padding override; null sides inherit the table
+      // default, then the engine constants.
+      padding: {
+        default: null as BoxEdgesAttrs | null,
+        parseHTML: (element) => edgesFromElement(element, 'data-cell-padding'),
+        renderHTML: cellRenderHTML,
       },
     };
   },
@@ -131,13 +251,14 @@ export const TensorTableHeader = TableHeaderBase.extend({
         parseHTML: (element) =>
           element.getAttribute('data-cell-background') ??
           (element.style?.backgroundColor || null),
-        renderHTML: (attributes) =>
-          attributes.backgroundColor
-            ? {
-                'data-cell-background': attributes.backgroundColor,
-                style: `background-color: ${attributes.backgroundColor}`,
-              }
-            : {},
+        renderHTML: cellRenderHTML,
+      },
+      // M-T4 — per-cell padding override (the header's own; null sides
+      // inherit the table default).
+      padding: {
+        default: null as BoxEdgesAttrs | null,
+        parseHTML: (element) => edgesFromElement(element, 'data-cell-padding'),
+        renderHTML: cellRenderHTML,
       },
     };
   },
@@ -155,8 +276,82 @@ declare module '@tiptap/core' {
       setCellBackground: (color: string | null) => ReturnType;
       /** Apply a table-level border preset to the table the selection is in. */
       setTableBorderPreset: (preset: TableBorderPreset) => ReturnType;
+      /** Set the table's horizontal placement (left/center/right) within the content box. */
+      setTableAlign: (align: 'left' | 'center' | 'right') => ReturnType;
+      /** M-T4 — set one side of the table's OUTER margin (null = 0). */
+      setTableMargin: (side: EdgeSide, value: number | null) => ReturnType;
+      /** M-T4 — set one side of the table's DEFAULT cell padding (null = engine default). */
+      setTableCellPadding: (side: EdgeSide, value: number | null) => ReturnType;
+      /**
+       * M-T4 — set one side of the CURRENT cell(s)' padding override
+       * (null = inherit the table default). A CellSelection merges EACH
+       * cell's own attr (per-cell state, not one shared value).
+       */
+      setCellPadding: (side: EdgeSide, value: number | null) => ReturnType;
     };
   }
+}
+
+/** The all-unset edges record (the merge base for attr writes). */
+function nullEdges(): BoxEdgesAttrs {
+  return { top: null, right: null, bottom: null, left: null };
+}
+
+/** One side's merged write: clamp positives, null = unset (inherit). */
+function mergeEdge(edges: BoxEdgesAttrs, side: EdgeSide, value: number | null): BoxEdgesAttrs {
+  const v =
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+  return { ...edges, [side]: v };
+}
+
+/** True when ANY side carries a value (all-null reads as "never set"). */
+function edgesAreSet(edges: BoxEdgesAttrs): boolean {
+  return edges.top != null || edges.right != null || edges.bottom != null || edges.left != null;
+}
+
+/**
+ * M-T4 — the CELL's combined render: the shading marker + the per-cell
+ * padding override. The padding renders as SET-SIDE LONGHANDS
+ * (`padding-left: 40px`) — an inline longhand beats the stylesheet's
+ * table-level `padding: var(--tensor-cell-pad, ...)` for JUST that
+ * side, while unset sides keep the table default (the per-side
+ * inheritance the engine resolves, mirrored by the CSS cascade).
+ */
+function cellRenderHTML(attributes: Record<string, unknown>) {
+  const bg = attributes.backgroundColor as string | null;
+  const pad = attributes.padding as BoxEdgesAttrs | null;
+  const styleParts: string[] = [];
+  if (bg) styleParts.push(`background-color: ${bg}`);
+  if (pad) {
+    const sides: [EdgeSide, string][] = [
+      ['top', 'padding-top'],
+      ['right', 'padding-right'],
+      ['bottom', 'padding-bottom'],
+      ['left', 'padding-left'],
+    ];
+    for (const [side, cssProp] of sides) {
+      if (typeof pad[side] === 'number' && pad[side]! >= 0) {
+        styleParts.push(`${cssProp}: ${pad[side]}px`);
+      }
+    }
+  }
+  return {
+    ...(bg ? { 'data-cell-background': bg } : {}),
+    ...(pad ? { 'data-cell-padding': JSON.stringify(pad) } : {}),
+    ...(styleParts.length ? { style: styleParts.join('; ') } : {}),
+  };
+}
+
+/** The cell node containing the (non-Cell) selection, or null. */
+function cellAroundSelection(selection: EditorState['selection']): { node: PMNode; pos: number } | null {
+  const { $from } = selection;
+  for (let depth = $from.depth; depth >= 0; depth--) {
+    const node = $from.node(depth);
+    if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+      return { node, pos: $from.before(depth) };
+    }
+  }
+  return null;
 }
 
 /** The nearest table ancestor of the selection, by position. */
@@ -216,6 +411,95 @@ export const TensorTableCommands = Extension.create({
             dispatch(
               state.tr.setNodeMarkup(table.pos, undefined, { ...table.node.attrs, borderStyle: preset }),
             );
+          }
+          return true;
+        },
+
+      setTableAlign:
+        (align) =>
+        ({ state, dispatch }) => {
+          const table = findTableUnderSelection(state);
+          if (!table) return false;
+          if (dispatch) {
+            dispatch(
+              state.tr.setNodeMarkup(table.pos, undefined, { ...table.node.attrs, align }),
+            );
+          }
+          return true;
+        },
+
+      setTableMargin:
+        (side, value) =>
+        ({ state, dispatch }) => {
+          const table = findTableUnderSelection(state);
+          if (!table) return false;
+          if (dispatch) {
+            const edges = mergeEdge(
+              (table.node.attrs.margin as BoxEdgesAttrs | null) ?? nullEdges(),
+              side,
+              value
+            );
+            dispatch(
+              state.tr.setNodeMarkup(table.pos, undefined, {
+                ...table.node.attrs,
+                // All-null edges read as "never set" (absent ≡ unset).
+                margin: edgesAreSet(edges) ? edges : null,
+              }),
+            );
+          }
+          return true;
+        },
+
+      setTableCellPadding:
+        (side, value) =>
+        ({ state, dispatch }) => {
+          const table = findTableUnderSelection(state);
+          if (!table) return false;
+          if (dispatch) {
+            const edges = mergeEdge(
+              (table.node.attrs.cellPadding as BoxEdgesAttrs | null) ?? nullEdges(),
+              side,
+              value
+            );
+            dispatch(
+              state.tr.setNodeMarkup(table.pos, undefined, {
+                ...table.node.attrs,
+                cellPadding: edgesAreSet(edges) ? edges : null,
+              }),
+            );
+          }
+          return true;
+        },
+
+      setCellPadding:
+        (side, value) =>
+        ({ state, dispatch }) => {
+          const { selection } = state;
+          if (dispatch) {
+            const tr = state.tr;
+            let touched = false;
+            const write = (node: PMNode, pos: number): void => {
+              const edges = mergeEdge(
+                (node.attrs.padding as BoxEdgesAttrs | null) ?? nullEdges(),
+                side,
+                value
+              );
+              tr.setNodeMarkup(pos, undefined, {
+                ...node.attrs,
+                padding: edgesAreSet(edges) ? edges : null,
+              });
+              touched = true;
+            };
+            if (selection instanceof CellSelection) {
+              // Per-CELL merge: every selected cell's own attr (Word's
+              // selection semantics — not one shared value).
+              selection.forEachCell((node, pos) => write(node, pos));
+            } else {
+              const cell = cellAroundSelection(selection);
+              if (cell) write(cell.node, cell.pos);
+            }
+            if (!touched) return false;
+            dispatch(tr);
           }
           return true;
         },

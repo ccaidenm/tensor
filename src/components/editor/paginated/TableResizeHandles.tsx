@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import type { PageGeometry, PlacedRect } from '@tensor-editor/engine';
+import { CELL_MIN_TRACK } from '@tensor-editor/engine';
 import type { Editor } from '@tiptap/core';
 import { useConfigStore } from '@/lib/config/store';
-import { setColumnWidth } from '@/lib/editor/tableResize';
+import { setColumnWidthWord, setTableTracks } from '@/lib/editor/tableResize';
 
 /**
  * M-TABLES — the column drag handles (Pages mode). The PM DOM is
@@ -11,10 +12,19 @@ import { setColumnWidth } from '@/lib/editor/tableResize';
  * from the engine's placed cell rects (the boundary EDGES of the
  * page's rects — every column boundary is some cell's edge in a
  * well-formed grid, so the sorted distinct edges ARE the track edges;
- * the widths are their diffs). Dragging boundary i (the right edge of
- * column i) live-dispatches the column's new colwidth; the flexible
- * columns re-absorb engine-side on the next layout — the SAME
- * semantics as the pageless drag (one extension family).
+ * the widths are their diffs).
+ *
+ * M-T4 — WORD DRAG SEMANTICS:
+ *  - An INTERIOR boundary keeps the table's total width constant: the
+ *    dragged column takes the new width, its right neighbor pays the
+ *    delta (a fixed neighbor is written back, clamped at the track
+ *    floor; a flexible neighbor re-absorbs engine-side).
+ *  - The RIGHTMOST edge is the TABLE border, not a column boundary:
+ *    dragging it scales EVERY track proportionally (setTableTracks),
+ *    clamped to [cols × CELL_MIN_TRACK, the table box]. The old
+ *    behavior set only the last column's width — the still-flexible
+ *    columns re-inflated to fill the content box, so the table could
+ *    never shrink ("backwards spacing").
  *
  * The slice height = the table's span on THIS page (a page-split
  * table's handles ride each page's slice). Stack-local px inside the
@@ -41,7 +51,23 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       list.push(p);
       byTable.set(p.blockId, list);
     }
-    const out: { blockId: string; col: number; x: number; top: number; height: number }[] = [];
+    const out: {
+      blockId: string;
+      col: number;
+      x: number;
+      top: number;
+      height: number;
+      /** The dragged column's left edge (its width's other bound). */
+      colLeft: number;
+      /** The dragged column's current effective width. */
+      oldWidth: number;
+      /** The table's rightmost edge? (scale-all behavior) */
+      rightmost: boolean;
+      /** Effective track widths (rightmost scaling input). */
+      widths: number[];
+      /** The table's current total width. */
+      total: number;
+    }[] = [];
     for (const [blockId, rects] of byTable) {
       // The track edges: sorted distinct left+right edges.
       const edges = new Set<number>();
@@ -55,6 +81,8 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       }
       const sorted = [...edges].sort((a, b) => a - b);
       if (sorted.length < 2) continue;
+      const widths = sorted.slice(1).map((x, i) => x - sorted[i]!);
+      const total = sorted[sorted.length - 1]! - sorted[0]!;
       // Skip the table's LEFT edge (the first): the table's own left
       // boundary is not a column handle. Each remaining edge is the
       // RIGHT edge of the column whose index = its position among the
@@ -66,22 +94,37 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
           x: sorted[i]!,
           top,
           height: bottom - top,
+          colLeft: sorted[i - 1]!,
+          oldWidth: widths[i - 1]!,
+          rightmost: i === sorted.length - 1,
+          widths,
+          total,
         });
       }
     }
     return out;
   }, [cells]);
 
-  function startDrag(e: React.PointerEvent, blockId: string, col: number, boundaryX: number, colLeft: number) {
+  function startDrag(e: React.PointerEvent, h: (typeof handles)[number]) {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const z = useConfigStore.getState().config.editor.zoomLevel / 100;
     const onMove = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startX) / z;
-      const tablePos = tablePosOf(blockId);
+      const tablePos = tablePosOf(h.blockId);
       if (tablePos == null) return;
-      setColumnWidth(editor, tablePos, col, boundaryX + dx - colLeft);
+      const dx = (ev.clientX - startX) / z;
+      if (h.rightmost) {
+        // The TABLE border: scale every track to the new total.
+        const min = h.widths.length * CELL_MIN_TRACK;
+        const max = geometry.contentBox.width;
+        const newTotal = Math.min(max, Math.max(min, h.total + dx));
+        const scale = newTotal / h.total;
+        setTableTracks(editor, tablePos, h.widths.map((w) => w * scale));
+      } else {
+        // Interior: the neighbor pays — the total stays constant.
+        setColumnWidthWord(editor, tablePos, h.col, h.x + dx - h.colLeft, h.oldWidth);
+      }
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
@@ -101,6 +144,7 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
           key={`${h.blockId}:${i}`}
           data-testid="table-col-handle"
           data-col={h.col}
+          data-rightmost={h.rightmost ? 'true' : 'false'}
           className="pointer-events-auto absolute cursor-col-resize"
           style={{
             left: `${cbx + h.x - HANDLE_HIT_PX / 2}px`,
@@ -108,24 +152,7 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
             width: `${HANDLE_HIT_PX}px`,
             height: `${h.height}px`,
           }}
-          onPointerDown={(e) => {
-            // The column's left edge = the boundary below this one (the
-            // previous track edge — recomputed from the SAME edges list
-            // via the handle's data at drag start).
-            const boundaryX = h.x;
-            // The column's left edge: the previous edge of this table —
-            // recompute here (handles know only their own edge).
-            const edges = new Set<number>();
-            for (const p of cells) {
-              if (p.blockId !== h.blockId || p.kind !== 'tableCell') continue;
-              edges.add(p.rect.x);
-              edges.add(p.rect.x + p.rect.width);
-            }
-            const sorted = [...edges].sort((a, b) => a - b);
-            const idx = sorted.indexOf(h.x);
-            const colLeft = idx > 0 ? sorted[idx - 1]! : h.x;
-            startDrag(e, h.blockId, h.col, boundaryX, colLeft);
-          }}
+          onPointerDown={(e) => startDrag(e, h)}
         />
       ))}
     </>

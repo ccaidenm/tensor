@@ -774,6 +774,15 @@ function convertNode(
           cursor += para.nodeSize;
         });
         cursor = cellPos + cell.nodeSize;
+        // M-T4 — per-cell padding override (per-side; null inherits).
+        const cellPad = cell.attrs.padding as
+          | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
+          | null
+          | undefined;
+        const cellPadSide = (side: 'top' | 'right' | 'bottom' | 'left'): number | null => {
+          const v = cellPad?.[side];
+          return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+        };
         cells.push({
           colspan: typeof cell.attrs.colspan === 'number' ? cell.attrs.colspan : 1,
           rowspan: typeof cell.attrs.rowspan === 'number' ? cell.attrs.rowspan : 1,
@@ -785,19 +794,76 @@ function convertNode(
             typeof cell.attrs.backgroundColor === 'string' && cell.attrs.backgroundColor
               ? cell.attrs.backgroundColor
               : null,
+          ...(cellPad != null
+            ? {
+                padding: {
+                  top: cellPadSide('top'),
+                  right: cellPadSide('right'),
+                  bottom: cellPadSide('bottom'),
+                  left: cellPadSide('left'),
+                },
+              }
+            : {}),
           content,
         });
       });
       cursor = rowPos + row.nodeSize;
-      rows.push({ isHeader: allHeader, cells });
+      // M-T3c: the row's minimum height (Word's "at least") — null =
+      // pure content height; the engine's TableRowData.minHeight
+      // consumes it verbatim.
+      const rowMin = row.attrs?.minHeight;
+      rows.push({
+        isHeader: allHeader,
+        minHeight: typeof rowMin === 'number' && rowMin > 0 ? rowMin : null,
+        cells,
+      });
     });
 
     const borderStyle = node.attrs?.borderStyle;
+    const alignAttr = node.attrs?.align;
+    // M-T4 — outer margins: top/bottom ride the block tier's spacing
+    // (the engine's once-at-entry rule — a table margin above/below IS
+    // block spacing); left/right narrow the engine's table box. Sides
+    // clamp ≥ 0 (the panel clamps too; this is the backstop).
+    const marginAttr = node.attrs?.margin as
+      | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
+      | null
+      | undefined;
+    const marginSide = (side: 'top' | 'right' | 'bottom' | 'left'): number | null => {
+      const v = marginAttr?.[side];
+      return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+    };
+    const spaceBefore = marginSide('top') ?? undefined;
+    const spaceAfter = marginSide('bottom') ?? undefined;
+    const marginLR =
+      marginSide('left') != null || marginSide('right') != null
+        ? { left: marginSide('left') ?? 0, right: marginSide('right') ?? 0 }
+        : null;
+    // M-T4 — the table's default cell padding (per-side; null sides
+    // inherit the engine constants).
+    const cellPaddingAttr = node.attrs?.cellPadding as
+      | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
+      | null
+      | undefined;
+    const padSide = (side: 'top' | 'right' | 'bottom' | 'left'): number | null => {
+      const v = cellPaddingAttr?.[side];
+      return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+    };
+    const cellPadding =
+      cellPaddingAttr != null
+        ? { top: padSide('top'), right: padSide('right'), bottom: padSide('bottom'), left: padSide('left') }
+        : null;
     const semantic: TableBlock = {
       id: blockId,
       kind: 'table',
       rows,
       borderStyle: borderStyle === 'none' || borderStyle === 'outer' ? borderStyle : 'all',
+      // M-T3c — table flow: horizontal placement within the content box.
+      align: alignAttr === 'center' || alignAttr === 'right' ? alignAttr : 'left',
+      ...(spaceBefore != null ? { spaceBefore } : {}),
+      ...(spaceAfter != null ? { spaceAfter } : {}),
+      ...(marginLR ? { margin: marginLR } : {}),
+      ...(cellPadding ? { cellPadding } : {}),
     };
     return {
       gen: cacheGeneration,

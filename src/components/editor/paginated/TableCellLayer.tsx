@@ -59,6 +59,16 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
     //    interrupted by a merged cell keeps its gap: the merged cell's
     //    edges don't reach the interrupted x/y, so the segments stay
     //    disjoint and the gap survives (the "truly merged" look).
+    //
+    //    ROWSPAN INTERNALS (M-T3): a rowspan>1 cell emits one rect PER
+    //    BAND SLICE — vertically adjacent slices of the SAME cell.
+    //    Their touching top/bottom edges are NOT table boundaries (the
+    //    merged cell is one region), so slices are grouped by anchor
+    //    identity (blockId + row + col) and only the group's first
+    //    slice contributes a top edge and its last a bottom edge. The
+    //    NEIGHBORING cells' edges at the same y are unaffected (they
+    //    are real boundaries between those cells) — the border survives
+    //    beside the merge and vanishes through it.
     const border = cells[0]?.cell?.border ?? 'all';
     if (border === 'none') return;
     interface Seg {
@@ -66,14 +76,39 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
       a: number;
       b: number;
     }
+    // Group the slices by cell anchor identity, y-ordered within each.
+    // isTop/isBottom default TRUE (a single-slice cell shows both
+    // edges); a multi-slice group demotes every slice that isn't the
+    // group's first/last — its shared edges are internal to the merge.
+    const cellGroups = new Map<string, { rects: { p: (typeof cells)[number]; isTop: boolean; isBottom: boolean }[] }>();
+    for (const p of cells) {
+      if (!p.cell) continue;
+      const key = `${p.blockId}:${p.cell.row}:${p.cell.col}`;
+      const group = cellGroups.get(key);
+      if (group) group.rects.push({ p, isTop: true, isBottom: true });
+      else cellGroups.set(key, { rects: [{ p, isTop: true, isBottom: true }] });
+    }
+    for (const group of cellGroups.values()) {
+      if (group.rects.length <= 1) continue;
+      group.rects.sort((a, b) => a.p.rect.y - b.p.rect.y);
+      group.rects.forEach((r, i) => {
+        r.isTop = i === 0;
+        r.isBottom = i === group.rects.length - 1;
+      });
+    }
     const vSegs: Seg[] = [];
     const hSegs: Seg[] = [];
     for (const p of cells) {
       const { x, y, width, height } = p.rect;
       vSegs.push({ at: x, a: y, b: y + height });
       vSegs.push({ at: x + width, a: y, b: y + height });
-      hSegs.push({ at: y, a: x, b: x + width });
-      hSegs.push({ at: y + height, a: x, b: x + width });
+      // Horizontal edges: a rowspan cell's INTERNAL slice boundaries
+      // (top of a non-first slice, bottom of a non-last slice) are
+      // skipped — the merged cell reads as one region.
+      const group = cellGroups.get(`${p.blockId}:${p.cell?.row}:${p.cell?.col}`);
+      const slice = group?.rects.find((r) => r.p === p);
+      if (!slice || slice.isTop) hSegs.push({ at: y, a: x, b: x + width });
+      if (!slice || slice.isBottom) hSegs.push({ at: y + height, a: x, b: x + width });
     }
     // Group by the line's position; merge touching/overlapping spans
     // (the tolerance absorbs the band-boundary's exact shared y).
@@ -85,7 +120,7 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
         else byAt.set(s.at, [s]);
       }
       const out: Seg[] = [];
-      for (const [at, list] of byAt) {
+      for (const list of byAt.values()) {
         list.sort((p, q) => p.a - q.a);
         let cur = { ...list[0]! };
         for (let i = 1; i < list.length; i++) {

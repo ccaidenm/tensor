@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { act, fireEvent } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { CellSelection } from '@tiptap/pm/tables';
 import { createLayoutEngine } from '@tensor-editor/engine';
@@ -7,12 +7,15 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
 import { renderTensor, settleLayout, GEOMETRY } from './harness';
 import { FakeMetrics } from './fakeMetrics';
+import { CommandPalette } from '@/components/palette/CommandPalette';
+import { usePaletteStore } from '@/lib/palette/store';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import { resolveNormalBase } from '@/lib/styles/resolve';
 import { useStyleRegistryStore } from '@/lib/styles/registry';
 import { assembleDocumentFile } from '@/lib/document/fileOperations';
 import { DocumentFileSchema, CURRENT_DOCUMENT_VERSION } from '@/lib/document/schema';
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
+import { parseTableDims, TABLE_DIM_CAP } from '@/lib/editor/tableInsert';
 
 /**
  * M-TABLES — the pageless-mode table layer. The document model is the
@@ -335,6 +338,81 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(afterA.every((w, i) => (beforeA[i] ?? 312) + 50 === w)).toBe(true);
   });
 
+  it('M-T4: dragging the table\'s RIGHT border scales the whole table inward (Word parity — the table can finally shrink)', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>');
+    });
+    await settleLayout();
+    // The RIGHTMOST handle (data-rightmost): the table border.
+    const rightmost = document.querySelector(
+      '[data-testid="table-col-handle"][data-rightmost="true"]',
+    ) as HTMLElement;
+    expect(rightmost).toBeTruthy();
+    act(() => {
+      fireEvent.pointerDown(rightmost, { clientX: 500, button: 0 });
+    });
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 400 }));
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 400 }));
+    await settleLayout();
+    // dx −100 on a full-width 624 table → total 524, every track scaled
+    // (312 → 262): BOTH columns' cells carry fixed colwidths now.
+    const widths: number[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        widths.push((node.attrs.colwidth as number[] | null)?.[0] ?? -1);
+      }
+    });
+    expect(widths).toEqual([262, 262, 262, 262]);
+    // The engine: the table no longer fills the box — the union of the
+    // placed rects is 524 wide, not 624.
+    const rect0 = cellRect(editor, 0, 0).rect;
+    const rect1 = cellRect(editor, 0, 1).rect;
+    expect(rect0.width).toBe(262);
+    expect(rect1.x + rect1.width).toBe(524);
+  });
+
+  it('M-T4: an interior drag against a FIXED neighbor keeps the total constant (the neighbor pays)', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent(
+        '<table><tr><td colwidth="200">a</td><td colwidth="100">b</td></tr></table>',
+      );
+    });
+    await settleLayout();
+    const interior = document.querySelector(
+      '[data-testid="table-col-handle"][data-rightmost="false"]',
+    ) as HTMLElement;
+    expect(interior).toBeTruthy();
+    act(() => {
+      fireEvent.pointerDown(interior, { clientX: 500, button: 0 });
+    });
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 550 }));
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 550 }));
+    await settleLayout();
+    // Drag right +50: col 0 grows 200→250, the FIXED neighbor pays
+    // 100→50 — the total stays 300 (never re-inflated).
+    const cells: number[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        cells.push(...((node.attrs.colwidth as number[]) ?? []));
+      }
+    });
+    expect(cells).toEqual([250, 50]);
+    const r0 = cellRect(editor, 0, 0).rect;
+    const r1 = cellRect(editor, 0, 1).rect;
+    expect(r0.width).toBe(250);
+    expect(r1.x + r1.width).toBe(300);
+  });
+
   it('M-T2 fixes: a click in an EMPTY cell routes the caret to THAT cell (the separator-law round trip)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
@@ -467,6 +545,49 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(new Set(h.map((o) => `${o.args[0]},${o.args[2]}`)).size).toBe(1);
   });
 
+  it('M-T3: merging cells VERTICALLY (rowspan) drops the internal border across the merged region', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>');
+    });
+    await settleLayout();
+    // Clear the PRE-merge paint run's ops (the accumulated harness
+    // keeps every run; run 1's full-width inner boundary would pollute
+    // the post-merge assertion).
+    ((globalThis as { __paintOps?: unknown[] }).__paintOps as unknown as { length: number }[]).length = 0;
+    // Merge column 0's two cells vertically: (0,0) + (1,0) → rowspan 2.
+    const positions = cellPositions(editor);
+    await act(async () => {
+      editor.commands.setCellSelection({ anchorCell: positions[0], headCell: positions[2] });
+      editor.commands.mergeCells();
+    });
+    await settleLayout();
+    // The merge: row 0 = [merged(rowspan 2), 'b'], row 1 = ['d'].
+    const row0 = looseJSON(editor).content![0].content![0].content!;
+    expect(row0).toHaveLength(2);
+    expect(row0[0].attrs!.rowspan).toBe(2);
+    // The canvas: the inner horizontal boundary only spans COLUMN 1's
+    // lane — the merged column 0's slice boundary is suppressed (the
+    // band-slice internal edge), so the merged cell reads as one region.
+    const ops = ((globalThis as { __paintOps?: { op: string; args: unknown[]; fillStyle?: string }[] }).__paintOps ?? []);
+    const strokes = ops.filter(
+      (o) => o.op === 'fillRect' && o.fillStyle === '#d4d4d8' && (o.args[3] as number) === 1,
+    );
+    const unique = new Map<string, { args: unknown[] }>();
+    for (const o of strokes) unique.set(o.args.join(','), o);
+    // Top (full width) + inner (column 1 only) + bottom (full width).
+    expect(unique.size).toBe(3);
+    const inner = [...unique.values()].filter((o) => (o.args[2] as number) !== GEOMETRY.contentWidth);
+    expect(inner).toHaveLength(1);
+    const [x, , w] = inner[0]!.args as [number, number, number];
+    expect(x).toBe(GEOMETRY.contentX + GEOMETRY.contentWidth / 2);
+    expect(w).toBe(GEOMETRY.contentWidth / 2);
+  });
+
   it('inserting a table while the caret is inside a table exits and inserts AFTER it (no nesting)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
@@ -529,6 +650,102 @@ describe('M-TABLES: Pages mode interactions', () => {
     });
     await settleLayout();
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('M-T3a: the gutter pin toggles the header row and restores the caret', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent(
+        '<p>before</p><table><tr><th>h</th></tr><tr><td>b</td></tr></table>',
+      );
+    });
+    await settleLayout();
+    // The pin: FILLED — the table's first row is a header row (th).
+    const pinOn = document.querySelector('[data-testid="table-header-pin-on"]') as HTMLElement | null;
+    expect(pinOn).toBeTruthy();
+    // Park the caret in the 'before' paragraph — the toggle must restore it.
+    await act(async () => {
+      editor.commands.setTextSelection(1);
+    });
+    const headBefore = editor.state.selection.head;
+    await act(async () => {
+      fireEvent.click(pinOn!);
+    });
+    await settleLayout();
+    // Row 0's cell flipped to a body cell; the pin flipped to outline.
+    const row0 = looseJSON(editor).content![1].content![0].content!;
+    expect(row0[0].type).toBe('tableCell');
+    const pinOff = document.querySelector('[data-testid="table-header-pin-off"]') as HTMLElement | null;
+    expect(pinOff).toBeTruthy();
+    expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeNull();
+    // The caret never visibly jumped.
+    expect(editor.state.selection.head).toBe(headBefore);
+    // Toggle back on.
+    await act(async () => {
+      fireEvent.click(pinOff!);
+    });
+    await settleLayout();
+    const row0Again = looseJSON(editor).content![1].content![0].content!;
+    expect(row0Again[0].type).toBe('tableHeader');
+    expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeTruthy();
+  });
+});
+
+describe('M-T3b: palette typed table specs', () => {
+  it('parses N×M in every accepted spelling and rejects non-specs', () => {
+    expect(parseTableDims('4x4')).toEqual({ rows: 4, cols: 4 });
+    expect(parseTableDims('4 x 4')).toEqual({ rows: 4, cols: 4 });
+    expect(parseTableDims('4×4')).toEqual({ rows: 4, cols: 4 });
+    expect(parseTableDims('TABLE 3X5')).toEqual({ rows: 3, cols: 5 });
+    expect(parseTableDims('4x4 table')).toEqual({ rows: 4, cols: 4 });
+    expect(parseTableDims('12x30')).toEqual({ rows: 12, cols: 30 });
+    expect(parseTableDims('0x4')).toEqual({ rows: 1, cols: 4 });
+    expect(parseTableDims('999x4')).toEqual({ rows: TABLE_DIM_CAP, cols: 4 });
+    expect(parseTableDims('insert table')).toBeNull();
+    expect(parseTableDims('4x')).toBeNull();
+    expect(parseTableDims('x4')).toBeNull();
+    expect(parseTableDims('4x4x4')).toBeNull();
+    expect(parseTableDims('4-4')).toBeNull();
+    expect(parseTableDims('')).toBeNull();
+  });
+
+  it('types 6x9 into the palette and creates a 6 by 9 table', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent('<p>seed</p>');
+    });
+    // The palette is NOT part of the Editor harness (App mounts it) —
+    // mount it alongside, then open via the store with editorContext
+    // (the synthetic dims item requires the editor-context guard).
+    render(<CommandPalette />);
+    act(() => {
+      usePaletteStore.setState({ isOpen: true, editorContext: true });
+    });
+    const palette = document.querySelector('[data-testid="palette-input"]') as HTMLInputElement;
+    expect(palette).toBeTruthy();
+    await act(async () => {
+      fireEvent.change(palette, { target: { value: '6x9' } });
+    });
+    const item = document.querySelector('[data-testid="palette-table-dims"]') as HTMLElement | null;
+    expect(item).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(item!);
+    });
+    await settleLayout();
+    const table = looseJSON(editor).content!.find((b) => b.type === 'table');
+    expect(table).toBeTruthy();
+    expect(table!.content).toHaveLength(6);
+    for (const row of table!.content!) {
+      expect(row.content).toHaveLength(9);
+    }
   });
 });
 

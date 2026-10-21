@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom';
 import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
+import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import type { LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
@@ -26,6 +27,7 @@ import { hitTest } from '@/lib/paginated/hitTest';
 import { cellAround, findTable, TableMap } from '@tiptap/pm/tables';
 import type { CellSelection as CellSelectionType } from '@tiptap/pm/tables';
 import { TableCellLayer } from './paginated/TableCellLayer';
+import { TableHeaderPins, type TableHeaderPin } from './paginated/TableHeaderPins';
 import { TableResizeHandles } from './paginated/TableResizeHandles';
 import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
@@ -1151,6 +1153,55 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     return map;
   }, [layout]);
 
+  // M-T3 — the header-row pins: ONE per table, at the table's first
+  // band (the page where that band lands). Pinned state reads the PM
+  // doc (the table's first row's cells are all tableHeader); the y
+  // comes from the engine's placed rects (anchor row 0, col 0 — the
+  // band slice's top). The gutter is the user's spec'd home ("the
+  // gutter is where the lucide icon pin should be").
+  const headerPins = useMemo<TableHeaderPin[]>(() => {
+    if (!layout || !editor) return [];
+    const out: TableHeaderPin[] = [];
+    for (const block of layout.blocks) {
+      if (!block.table) continue;
+      const tableNode = editor.state.doc.nodeAt(block.from);
+      if (!tableNode || tableNode.childCount === 0) continue;
+      const firstRow = tableNode.child(0);
+      const pinned =
+        firstRow.childCount > 0 && firstRow.firstChild?.type.name === 'tableHeader';
+      let best: { pageIndex: number; y: number } | null = null;
+      for (const pr of layout.result.placed) {
+        if (pr.kind !== 'tableCell' || pr.blockId !== block.id || !pr.cell) continue;
+        if (pr.cell.row !== 0 || pr.cell.col !== 0) continue;
+        if (!best || pr.pageIndex < best.pageIndex || (pr.pageIndex === best.pageIndex && pr.rect.y < best.y)) {
+          best = { pageIndex: pr.pageIndex, y: pr.rect.y };
+        }
+      }
+      if (best) out.push({ blockId: block.id, pageIndex: best.pageIndex, y: best.y, pinned });
+    }
+    return out;
+  }, [layout, editor]);
+
+  // The pin's toggle: park the selection in the table's first cell
+  // (toggleHeaderRow operates on the selection's row), toggle, restore
+  // the user's selection — the caret never visibly jumps.
+  const toggleTableHeader = useCallback((blockId: string) => {
+    if (!editor) return;
+    const block = layoutRef.current?.blocks.find((b) => b.id === blockId);
+    if (!block) return;
+    const { from: selFrom, to: selTo } = editor.state.selection;
+    const anchor = block.from + 3; // table open + row open + cell open
+    editor
+      .chain()
+      .command(({ tr, dispatch }) => {
+        if (dispatch) tr.setSelection(TextSelection.create(tr.doc, anchor));
+        return true;
+      })
+      .toggleHeaderRow()
+      .setTextSelection({ from: selFrom, to: selTo })
+      .run();
+  }, [editor]);
+
   // Caret-follow registration: block PM's native
   // scroll-to-selection (L3) and decline only in the adapter fallback,
   // where the visible pageless DOM is the real content.
@@ -1427,6 +1478,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                       />
                     ) : null;
                   })()}
+                {/* M-T3: the header-row pins (gutter chrome, click-to-toggle). */}
+                <TableHeaderPins geometry={page} pins={headerPins} onToggle={toggleTableHeader} />
 
                 {/* The selected image's border + resize handles. An
                     INLINE object gets no float drag (in-flow objects

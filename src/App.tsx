@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Editor } from './components/editor/Editor';
 import { SearchPanel } from './components/editor/SearchPanel';
+import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
@@ -153,6 +154,12 @@ function App() {
           <SearchPanel />
           <SidebarHost id="search" anchor="right">
             <SearchResultsSidebar />
+          </SidebarHost>
+          {/* M-T3c — the Table side panel: the same docked-panel
+              infrastructure as Find/Replace (the draggable/resizable
+              panel future upgrades once for every panel). */}
+          <SidebarHost id="table" anchor="right">
+            <TablePanel />
           </SidebarHost>
         </div>
         <StatusBar />

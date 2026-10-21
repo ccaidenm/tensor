@@ -112,14 +112,19 @@ body {
 .ProseMirror table {
   border-collapse: collapse;
   table-layout: fixed;
-  width: 100%;
-  margin: 8px 0;
+  /* M-T4 — outer margins + the narrowed width ride the view's CSS vars
+     (unset = the stock 8px 0 look; the engine mirrors the geometry). */
+  margin: var(--tensor-table-mt, 8px) var(--tensor-table-mr, 0px) var(--tensor-table-mb, 8px) var(--tensor-table-ml, 0px);
+  width: calc(100% - var(--tensor-table-ml, 0px) - var(--tensor-table-mr, 0px));
   position: relative;
 }
 .ProseMirror td,
 .ProseMirror th {
   border: 1px solid var(--border);
-  padding: 4px 8px;
+  /* M-T4 — the table's default cell padding (the view's var; the
+     engine's per-side constants are the fallback). A cell's own
+     padding attr renders as an inline style that beats this. */
+  padding: var(--tensor-cell-pad, 4px 8px);
   position: relative;
   vertical-align: top;
   min-width: 25px;
@@ -139,6 +144,16 @@ body {
 .ProseMirror table[data-table-border='outer'] td,
 .ProseMirror table[data-table-border='outer'] th {
   border: none;
+}
+/* M-T3c — table FLOW on the pageless surface: a fully-fixed-width
+   table shorter than the content box honors its alignment marker
+   (the engine's alignOffset mirror). */
+.ProseMirror table[data-table-align='center'] {
+  margin-left: auto;
+  margin-right: auto;
+}
+.ProseMirror table[data-table-align='right'] {
+  margin-left: auto;
 }
 /* Cell selection (prosemirror-tables .selectedCell) — a quiet primary
    wash under multi-cell selections, over any cell shading. */

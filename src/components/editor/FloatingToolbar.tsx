@@ -20,6 +20,7 @@ import {
   BetweenVerticalEnd,
   TableCellsMerge,
   TableCellsSplit,
+  TableProperties,
   Rows3,
   PaintBucket,
   Frame,
@@ -33,6 +34,7 @@ import { Separator } from '@/components/ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
 import { selectionHasMergedCells, type TableBorderPreset } from '@/lib/editor/TableExtensions';
+import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { ColorPickerButton } from '../layout/ribbon/ColorPickerButton';
 import { LinkButton } from '../layout/ribbon/LinkButton';
 import { ClearFormattingButton } from '../layout/ribbon/home/ClearFormattingButton';
@@ -271,6 +273,16 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
                 ))}
               </PopoverContent>
             </Popover>
+
+            {/* M-T3c — the side panel handoff: the power-user surface
+                over dimensions + flow (dimensions stay editable with
+                the toolbar off — this is also the alternate route). */}
+            <IconButton
+              label="Table Properties"
+              data-testid="toolbar-table-properties"
+              icon={<TableProperties size={14} />}
+              onClick={() => useSidebarStore.getState().open('table', 'right')}
+            />
 
             <Separator orientation="vertical" className="mx-1 h-6" />
           </>
