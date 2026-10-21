@@ -14,11 +14,12 @@ import {
   blockRangeAround,
   caretGeometry,
   caretStackRect,
+  cellPosAt,
   inlineObjectRect,
   paintedBounds,
   textRangeLineRects,
-  cellPosAt,
   textRangeTextExtents,
+  textRangeUnderlineRects,
   wordRangeAround,
   type CaretGeometry,
   type PaintedRect,
@@ -33,6 +34,8 @@ import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
 import { setPaintedScrollHandler } from '@/lib/paginated/ScrollGuardExtension';
 import { searchPluginKey } from '@/lib/editor/search/SearchExtension';
+import { getSpellErrors, spellErrorAt } from '@/lib/editor/spell/SpellExtension';
+import type { SpellError } from '@/lib/editor/spell/types';
 import { getScrollParent } from '@/lib/editor/domUtils';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
@@ -57,8 +60,10 @@ import { Ruler, VerticalRuler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
+import { SpellHighlights } from './paginated/SpellHighlights';
 import { FloatingToolbar } from './FloatingToolbar';
 import { LinkBubble } from './LinkBubble';
+import { SpellBubble } from './SpellBubble';
 import { useLinkBubble } from '@/lib/editor/useLinkBubble';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { bitmapVersionNow, getBitmapFailed, resolveMediaBitmap, subscribeBitmaps } from '@/lib/media/bitmapCache';
@@ -173,6 +178,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     inline: boolean;
   } | null>(null);
   const [searchPaint, setSearchPaint] = useState<SearchPaint | null>(null);
+  // Spell flags: the flat-line projection (see updateSpellProjection).
+  const [spellPaint, setSpellPaint] = useState<PaintedRect[]>([]);
+  // The suggestion bubble: set by a plain left-click on a flagged
+  // word (GDocs behavior); the anchor derives at render time from the
+  // error's painted extent (fresh through scrolls/zoom re-renders).
+  const [spellBubble, setSpellBubble] = useState<SpellError | null>(null);
   const [composing, setComposing] = useState<string | null>(null);
   const [adapterError, setAdapterError] = useState<Error | null>(null);
   /** Pages whose canvases mount: viewport-visible ∪ ±1 buffer.
@@ -189,9 +200,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const relayoutRef = useRef<() => void>(() => {});
   const selectionProjectionRef = useRef<() => void>(() => {});
   const searchProjectionRef = useRef<() => void>(() => {});
+  const spellProjectionRef = useRef<() => void>(() => {});
   const pendingScrollRef = useRef(false);
   const prevSearchIndexRef = useRef(-1);
   const prevSearchStateRef = useRef<unknown>(null);
+  const prevSpellErrorsRef = useRef<readonly unknown[] | null>(null);
   const draggingRef = useRef(false);
   const lastClickRef = useRef<{ t: number; x: number; y: number; c: number } | null>(null);
   // Virtualization: one observer watches every sheet; ratios drive the
@@ -331,6 +344,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     const current = layoutRef.current;
     if (!editor || !current) return;
     const { selection } = editor.state;
+    // Drag-select (any non-collapsed selection) dismisses the spell
+    // bubble — it anchors one word; a collapsed caret placement (our
+    // own opening click) keeps it open.
+    if (!selection.empty) setSpellBubble(null);
     const geom = caretGeometry(
       current.blocks,
       current.result,
@@ -549,6 +566,29 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     }
   }
 
+  /** The spell flags' projection — the search pattern, one word at a
+   *  time: PM plugin state (error ranges) mapped through positionMap
+   *  into flat underline bars. Recomputed on relayout (geometry moved)
+   *  and on spell-meta transactions (results arrived — those dispatch
+   *  WITHOUT doc changes, the same seam search's index metas ride).
+   *  Doc-changing transactions reach this through relayout()'s force. */
+  function updateSpellProjection(force = false) {
+    if (!editor) return;
+    const current = layoutRef.current;
+    if (!current) return;
+    const errors = getSpellErrors(editor.state);
+    if (!force && errors === prevSpellErrorsRef.current) return;
+    prevSpellErrorsRef.current = errors;
+    const gap = useDocumentStore.getState().pageSetup.pageGap;
+    const bars: PaintedRect[] = [];
+    for (const e of errors) {
+      bars.push(
+        ...textRangeUnderlineRects(current.blocks, current.result, e.from, e.to, metricsRef.current!, gap)
+      );
+    }
+    setSpellPaint(bars);
+  }
+
   function relayout() {
     if (!editor || !fontsReadyRef.current) return;
     // L4: read per call, never captured.
@@ -614,6 +654,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       adapterErrorRef.current = null;
       updateSelectionProjection();
       updateSearchProjection(true);
+      updateSpellProjection(true);
     } catch (err) {
       // FALLBACK AUDIT (M6.1, CONVENTIONS.md): the pageless fallback
       // catches ONLY the unsupported-kind sentinel — a document using
@@ -635,6 +676,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   relayoutRef.current = relayout;
   selectionProjectionRef.current = updateSelectionProjection;
   searchProjectionRef.current = updateSearchProjection;
+  spellProjectionRef.current = updateSpellProjection;
 
   function pmPosAt(e: { clientX: number; clientY: number }): number | null {
     const current = layoutRef.current;
@@ -952,6 +994,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       editor.commands.setTextSelection({ from: editor.state.selection.anchor, to: pos });
     } else {
       editor.commands.setTextSelection(pos);
+      // GDocs-style: a plain single click on a flagged word opens the
+      // suggestion bubble. The caret still places and drag-select
+      // still starts (a drag makes the selection non-empty, which
+      // dismisses the bubble again — only a real click keeps it).
+      const error = spellErrorAt(editor.state, pos);
+      if (error) setSpellBubble(error);
       startDrag(pos);
     }
   }
@@ -1004,12 +1052,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     };
 
     const onTransaction = ({ transaction }: { transaction: Transaction }) => {
-      // Search meta (query/index) arrives without doc changes; doc
-      // changes are covered by the relayout in 'update' below.
-      if (!transaction.docChanged) searchProjectionRef.current();
+      // Search/spell meta (query/index, error results) arrives without
+      // doc changes; doc changes are covered by the relayout in
+      // 'update' below.
+      if (!transaction.docChanged) {
+        searchProjectionRef.current();
+        spellProjectionRef.current();
+      }
       if (transaction.scrolledIntoView) pendingScrollRef.current = true;
     };
     const onDocUpdate = () => {
+      // Typing invalidates the anchored word (the recheck that
+      // follows will re-flag whatever survives the edit).
+      setSpellBubble(null);
       // Synchronous-first — adapter+engine+commit run in
       // the input event's own task; text paints in the input's frame.
       // Over SYNC_BUDGET_PER_FRAME per ~16ms window, the coalescer
@@ -1411,6 +1466,26 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   const stackW = pageW;
   const stackH = result.pages.length * pageH + (result.pages.length - 1) * gap;
   const rootRect = rootRef.current?.getBoundingClientRect();
+  // The spell bubble's anchor: the flagged word's painted text extent
+  // (stack-local pre-zoom) → viewport (the transform's scale applied —
+  // the bubble is chrome rendered at 100%, the toolbar law). Recomputed
+  // every render, so scrolls/zooms re-anchor it for free.
+  const spellBubbleAnchor = (() => {
+    if (!spellBubble || !layout) return null;
+    const exts = textRangeTextExtents(
+      layout.blocks,
+      layout.result,
+      spellBubble.from,
+      spellBubble.to,
+      metricsRef.current!,
+      gap
+    );
+    const bounds = paintedBounds(exts);
+    const stack = stackRef.current;
+    if (!bounds || !stack) return null;
+    const sr = stack.getBoundingClientRect();
+    return { left: sr.left + bounds.left * z, top: sr.top + bounds.bottom * z + 4 };
+  })();
   // M-LINENUMS: numbers are a pure function of the CURRENT layout —
   // recomputed every render, so a mid-document edit re-numbers in the
   // same commit (the no-debounce law; never memoized).
@@ -1612,6 +1687,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
               </PageSheet>
             );
           })}
+          {spellPaint.length > 0 && <SpellHighlights bars={spellPaint} />}
           {searchPaint && (
             <SearchHighlights matches={searchPaint.all} current={searchPaint.current} />
           )}
@@ -1685,6 +1761,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
             containerLeft={rootRect.left}
           />
         </TooltipProvider>
+      )}
+      {/* The spell suggestion bubble — same chrome law: outside the
+          transform, viewport-anchored, opened by a plain click on a
+          flagged word (the right-click menu stays spelling-free by
+          the user ruling). */}
+      {spellBubble && spellBubbleAnchor && rootRect && (
+        <SpellBubble
+          editor={editor}
+          error={spellBubble}
+          left={spellBubbleAnchor.left - rootRect.left}
+          top={spellBubbleAnchor.top - rootRect.top}
+          onClose={() => setSpellBubble(null)}
+        />
       )}
       {/* M-RULER: the ruler bar portals OUT of the scroll flow into the
           desk wrapper — static overlay chrome pinned to its top edge

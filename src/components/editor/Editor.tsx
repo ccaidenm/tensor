@@ -6,6 +6,7 @@ import { useConfigStore } from "../../lib/config/store";
 import { useStyleRegistryStore } from "@/lib/styles/registry";
 import { resolveNormalBase } from "@/lib/styles/resolve";
 import { tensorExtensions } from "@/lib/editor/tensorExtensions";
+import { useSpellCheck } from "@/lib/editor/spell/useSpellCheck";
 import { ensureBlockIds } from "@/lib/editor/BlockIdExtension";
 import { ensureStyleSync } from "@/lib/styles/styleExtensions";
 import { PaginatedView } from "./PaginatedView";
@@ -163,6 +164,10 @@ export function Editor({ metrics }: { metrics?: TextMetrics }) {
     setEditor(editor);
     return () => setEditor(null);
   }, [editor, setEditor]);
+
+  // The spell pipeline: debounce, block-diffed rechecks, dictionary
+  // filtering — all inside the controller; this is just its mount.
+  useSpellCheck(editor);
 
   // Mode routing seam: 'Pages' is Tensor's default and identity —
   // it renders the engine-driven PaginatedView; everything else renders

@@ -11,6 +11,7 @@ import {
 } from '@/lib/lists/listExtensions';
 import { HeadingWithExtras, ParagraphExtraCommands, ParagraphWithExtras } from '@/lib/editor/ParagraphExtensions';
 import { SearchExtension } from '@/lib/editor/search/SearchExtension';
+import { SpellExtension } from '@/lib/editor/spell/SpellExtension';
 import { DynamicShortcutsExtension } from '@/lib/editor/ShortcutsExtension';
 import {
   BoldNoShortcut,
@@ -67,6 +68,10 @@ export function tensorExtensions(): Extensions {
       HTMLAttributes: { target: null, rel: 'noopener noreferrer nofollow' },
     }),
     SearchExtension,
+    // Spell check state holder: error spans + decorations (the
+    // controller/store live app-side; this is the model layer both
+    // view modes project).
+    SpellExtension,
     DynamicShortcutsExtension,
     // Model node that survives from the legacy pipeline: the pageBreak
     // atom renders its marker, and the adapter translates it into the

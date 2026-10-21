@@ -1,6 +1,8 @@
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Emitter;
 
+mod spell;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -10,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(spell::SpellState::new())
         .setup(|app| {
             let handle = app.handle();
 
@@ -68,9 +71,29 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let _ = app.emit("menu-event", event.id().0.clone());
         })
-        .invoke_handler(tauri::generate_handler![fetch_link_metadata, fetch_url, package_document, unpackage_document, open_devtools])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .invoke_handler(tauri::generate_handler![
+            fetch_link_metadata,
+            fetch_url,
+            package_document,
+            unpackage_document,
+            open_devtools,
+            spell::spell_check,
+            spell::spell_server_status,
+            spell::spell_stop,
+            spell::spell_local_installed,
+            spell::spell_install_local,
+            spell::spell_uninstall_local
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // The LanguageTool sidecar must NEVER outlive the app — kill
+            // it on exit (the orphan-adoption in ensure_server covers
+            // the crash case).
+            if let tauri::RunEvent::Exit = event {
+                spell::shutdown(app);
+            }
+        });
 }
 
 #[derive(serde::Serialize)]

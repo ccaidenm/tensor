@@ -20,6 +20,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'palette', label: 'Command Palette', keys: 'ctrl+shift+p', context: 'app', category: 'General' },
   { id: 'undo', label: 'Undo', keys: 'ctrl+z', context: 'os', category: 'General' },
   { id: 'redo', label: 'Redo', keys: 'ctrl+y', context: 'os', category: 'General' },
+  // Word's spelling shortcut, kept as the convention (context 'app':
+  // the toggle is a document-wide setting, not a caret action).
+  { id: 'toggleSpellCheck', label: 'Toggle Spell Check', keys: 'f7', context: 'app', category: 'Review' },
 
   { id: 'find', label: 'Find & Replace', keys: 'ctrl+f', context: 'editor', category: 'Search' },
 

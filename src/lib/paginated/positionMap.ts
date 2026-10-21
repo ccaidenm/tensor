@@ -388,6 +388,78 @@ export function textRangeTextExtents(
   });
 }
 
+/**
+ * SPELL-CHECK LINE GEOMETRY: per-line FLAT underline bars for a PM
+ * range — the same span walk as the find-highlight extents, but SIGNAL
+ * geometry (the user's tuned ruling), deliberately a touch diverged
+ * from paint.ts's typographic underline so a flag never reads as real
+ * underlined text:
+ *
+ *  - LOWER: baseline + 0.12·fontSize (vs. 0.08 for real underlines);
+ *  - BOLDER: max(2px, fontSize/12) (vs. max(1, fontSize/16));
+ *  - SOFTER: the rendering surfaces add ~15% transparency
+ *    (SpellHighlights' opacity / the pageless color-mix).
+ *
+ * "Flat, not squiggly" is the explicit user ruling on the shape.
+ */
+const SPELL_LINE_OFFSET = 0.12;
+const SPELL_LINE_MIN_THICKNESS = 2;
+
+export function textRangeUnderlineRects(
+  blocks: readonly AdapterBlock[],
+  result: LayoutResult,
+  from: number,
+  to: number,
+  metrics: TextMetrics,
+  pageGap: number
+): PaintedRect[] {
+  void metrics; // (font-size comes from the runs' styles; kept for signature parity)
+  const spans = matchSpans(blocks, result, from, to);
+  const page0 = result.pages[0];
+  if (!page0 || spans.length === 0) return [];
+  const cb = page0.contentBox;
+  const stride = page0.size.height + pageGap;
+
+  return spans.map(({ line, s, e, block }, idx) => {
+    const first = idx === 0;
+    const last = idx === spans.length - 1;
+    const off =
+      first || last
+        ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
+        : 0;
+    const wrap = blockWrapWidth(cb.width, block);
+    const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
+    const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
+    const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
+
+    let fontSize = 0;
+    for (const seg of line.segments) {
+      const a = Math.max(s, seg.start);
+      const b = Math.min(e, seg.end);
+      if (a >= b) continue;
+      const run = block.runs[seg.runIndex];
+      if (!run || run.kind === 'inlineImage') continue;
+      fontSize = Math.max(fontSize, run.style.fontSize);
+    }
+    if (fontSize === 0) {
+      const style = (block.runs[0] as { style?: TextStyle } | undefined)?.style;
+      if (style) fontSize = style.fontSize;
+    }
+    const thickness = Math.max(SPELL_LINE_MIN_THICKNESS, Math.round(fontSize / 12));
+    const top =
+      stride * line.pageIndex + cb.y + line.rect.y + line.baseline + SPELL_LINE_OFFSET * fontSize;
+    return {
+      pageIndex: line.pageIndex,
+      left: cb.x + cx1,
+      top,
+      width: cx2 - cx1,
+      height: thickness,
+    };
+  });
+}
+
 export interface CaretGeometry {
   pageIndex: number;
   x: number;

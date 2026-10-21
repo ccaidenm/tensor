@@ -74,6 +74,26 @@ export const ConfigSchema = z.object({
     fetchLinkMetadata: true,
     allowFontCatalogs: false,
   }),
+  /** Spell check — the CONSENT posture (the fonts/privacy precedents,
+   *  hardened): OFF by default; enabling requires picking a provider
+   *  with an informed choice (Settings > Proofing / the setup dialog).
+   *  Online = text is sent to LanguageTool's servers; Local = the
+   *  sidecar, loopback-only after a one-time ≈250MB download. */
+  spellCheck: z.object({
+    enabled: z.boolean().default(false),
+    /** The informed choice has been MADE (the ribbon button toggles
+     *  outright once true; before that, it opens the setup dialog). */
+    configured: z.boolean().default(false),
+    provider: z.enum(['online', 'local']).default('local'),
+    /** LT language code; v1 ships en-US (the bundled dictionary file
+     *  and the runtime's languages follow it). */
+    language: z.string().default('en-US'),
+  }).default({
+    enabled: false,
+    configured: false,
+    provider: 'local',
+    language: 'en-US',
+  }),
   accessibility: z.object({
     reduceMotion: z.enum(['system', 'on', 'off']).default('system'),
   }).default({

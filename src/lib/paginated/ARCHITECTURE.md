@@ -54,9 +54,11 @@ These appear as comments atop `src/components/editor/PaginatedView.tsx`, and nea
  ┌─ PageSheet per PageGeometry                 .../paginated/PageSheet.tsx
  │    └─ BlockCanvas per block-per-page        .../paginated/BlockCanvas.tsx
  │         └─ paintLines() → canvas 2D         src/lib/paginated/paint.ts
- ├─ SelectionHighlights / SearchHighlights     overlays, same coordinate space
+ ├─ SelectionHighlights / SearchHighlights /   overlays, same coordinate space
+ │  SpellHighlights (the spell-check flags'    (spell ranges come from the
+ │  flat underline bars, positionMap-mapped)    spell PM plugin, like search)
  ├─ synthetic caret <div>, IME preview <div>
- └─ (outside the zoom transform) FloatingToolbar, LinkBubble
+ └─ (outside the zoom transform) FloatingToolbar, LinkBubble, SpellBubble
 ```
 
 Read top to bottom, that's the order data flows on every edit. The rest of this document walks it piece by piece:
@@ -381,6 +383,7 @@ export function alignOffset(align: TextAlign, lineWidth: number, contentWidth: n
 - **Selection rects**: `textRangeLineRects(blocks, result, from, to, metrics, pageGap)` produces partial x on the selection's first and last line and full content width on middle lines, returned as stack-local pre-zoom `PaintedRect`s. Consumed by `SelectionHighlights` and, as a bounding box, by the floating toolbar.
 - **Caret**: `caretGeometry(blocks, result, head, metrics)` resolves the line box for the selection head; x is `lineOffsetX + alignOffset`. `caretStackRect()` then adds the page stride and content box, the same arithmetic the [scroll follow](#scroll) reuses, never re-derived.
 - **Word / block ranges**: `wordRangeAround` / `blockRangeAround` for double- and triple-click. PM ships no word utilities, and since events land on the painted surface rather than PM's DOM, owning the derivation is required.
+- **Spell flags** (spell check — the search pattern, adapted to bars): the SpellExtension's PM plugin holds flagged spans in PM positions; `textRangeUnderlineRects` maps each through the same span walk into FLAT underline bars at paint.ts's own underline geometry (baseline + 0.08·fontSize, same thickness formula), rendered by `SpellHighlights` under the search layer. Results arrive ASYNC from the LanguageTool client, so between checks the plugin's ranges survive by MAPPING (unrelated edits) and die instantly on content edits (the unflag-as-typed law); the debounced controller re-flags whatever is still misspelled. The left-click suggestion bubble (`SpellBubble`) anchors at the flagged word's `textRangeTextExtents` box — chrome-style, outside the transform.
 
 The boundary contracts are covered exhaustively by `src/tests/positionMap.test.ts`: position-mapping edges, line resolution, partial-x measurement, "partial first/last, full-width middles", ranges across blocks and the page boundary, and caret parity with the selection math.
 
@@ -617,6 +620,8 @@ One gotcha worth knowing: `useDocumentStore` is a module-level singleton, so tes
 | `scroll.test.tsx` | The minimal-edge scroll policy, byte-identical regression pins |
 | `coalescing.test.tsx` | Sync-first budget behavior and caret phase |
 | `links.test.tsx` | Painted links: click-to-caret, Ctrl+click open, painted-coords bubble |
+| `spell.test.tsx` | The spell plugin contract (map/drop/replace/ignore), the flat-line projection's geometry, and the suggestion bubble (click-open, replace, the undo receipt, add-to-dictionary) |
+| `spell-controller.test.tsx` | The checking pipeline: debounce, block-diffed rechecks (the identity cache), LT offset→PM-position mapping, dictionary/session filtering, staleness guards, the consent-gated config flow |
 | `blockId.test.tsx` | Id minting and paste re-minting |
 | `images.test.tsx` / `images2.test.tsx` | The image suites: insert pipeline, placement, resize, caption/alt/radius, round-trip + GC, inline conversion, floats, z-order hit-testing |
 | `images3.test.tsx` | M-IMAGES-2.1/2.2: inline click surface (both halves), the inline selection overlay (painted rect + handles), commands on inline selections (align honestly block-only), extract-then-caption, exact conversion shapes, pending-vs-failed placeholder states, the clipboard-scoped round-trip |

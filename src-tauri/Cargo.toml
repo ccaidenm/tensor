@@ -25,6 +25,12 @@ reqwest = { version = "0.12", features = ["json"] }
 scraper = "0.20"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 base64 = "0.22"
+# Spell-check local runtime installer: Temurin ships tar.gz JREs on
+# linux/mac (zip on windows); LT is always a zip.
+tar = "0.4"
+flate2 = "1"
+# The sidecar health-wait loop (tokio::time::sleep).
+tokio = { version = "1", features = ["time"] }
 
 [profile.release]
 codegen-units = 1

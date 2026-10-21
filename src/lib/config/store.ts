@@ -40,6 +40,13 @@ interface ConfigStore {
   setAllowFontCatalogs: (value: boolean) => void;
   /** M-META: the user identity (the default author for new docs). */
   setIdentityAuthor: (value: string) => void;
+  /** Spell check: the master gate + the provider/language that were
+   *  chosen with informed consent (default off — see schema.ts). */
+  setSpellCheckEnabled: (value: boolean) => void;
+  /** Marks the provider choice as made (the setup flow's write). */
+  setSpellCheckConfigured: () => void;
+  setSpellCheckProvider: (value: Config["spellCheck"]["provider"]) => void;
+  setSpellCheckLanguage: (value: string) => void;
 
   loadConfig: (raw: unknown) => void;
 }
@@ -259,6 +266,38 @@ setShowHorizontalRuler: (value) =>
       config: {
         ...state.config,
         identity: { ...state.config.identity, author: value },
+      },
+    })),
+
+  setSpellCheckEnabled: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        spellCheck: { ...state.config.spellCheck, enabled: value },
+      },
+    })),
+
+  setSpellCheckConfigured: () =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        spellCheck: { ...state.config.spellCheck, configured: true },
+      },
+    })),
+
+  setSpellCheckProvider: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        spellCheck: { ...state.config.spellCheck, provider: value },
+      },
+    })),
+
+  setSpellCheckLanguage: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        spellCheck: { ...state.config.spellCheck, language: value },
       },
     })),
 }));
