@@ -3,6 +3,7 @@ import { SpellCheck, BookA, CloudOff, HardDriveDownload, Trash2, CircleAlert } f
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/lib/config/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
+import { InstallProgressBar, useSpellLocalInstall } from '@/lib/editor/spell/localInstall';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -67,6 +68,7 @@ export function ProofingPanel() {
   const openDictionary = useSpellStore((s) => s.openDictionary);
   const lastError = useSpellStore((s) => s.lastError);
   const { installed, status, probe } = useLocalRuntimeState();
+  const { progress, error: installError, installing, install } = useSpellLocalInstall();
 
   /** The consent gate — same rule as the ribbon button and F7. */
   function toggle() {
@@ -75,6 +77,15 @@ export function ProofingPanel() {
       return;
     }
     setSpellCheckEnabled(!enabled);
+  }
+
+  /** Download right here — the setup dialog is only for the FIRST
+   *  enable; by the time the user is in Settings, the Local runtime is
+   *  the thing they are acting on, so this installs inline (the shared
+   *  spelling: progress, config writes, success toast). */
+  async function downloadLocal() {
+    const ok = await install();
+    if (ok) await probe(); // refresh installed state + server status
   }
 
   async function uninstallLocal() {
@@ -123,6 +134,11 @@ export function ProofingPanel() {
                   device.
                 </span>
               )}
+              {installed === false && (
+                <span className="mt-0.5 block">
+                  Local needs its runtime first — download it below.
+                </span>
+              )}
             </>
           }
         >
@@ -147,6 +163,9 @@ export function ProofingPanel() {
                 setSpellCheckProvider('local');
                 setSpellCheckConfigured();
               }}
+              // The honest gate: Local is unusable until its runtime is
+              // downloaded (download inline below — never a dead end).
+              disabled={installed === false}
               data-testid="settings-spell-local"
             >
               Local
@@ -186,10 +205,12 @@ export function ProofingPanel() {
           description={
             installed
               ? 'LanguageTool 6.6 (English) + a Temurin 21 Java runtime — ≈270 MB on disk. Starts automatically on first use; never contacts the network.'
-              : 'Not downloaded. Choose “Local” above and use the download it offers, or enable via the ribbon button.'
+              : 'Not downloaded yet — LanguageTool 6.6 (English) + a Temurin 21 Java runtime. ≈290 MB over the wire once, ≈270 MB on disk, no network afterwards.'
           }
         >
-          {installed == null ? (
+          {installing ? (
+            <span className="text-xs text-muted-foreground">Installing…</span>
+          ) : installed == null ? (
             <Button
               size="sm"
               variant="outline"
@@ -209,11 +230,29 @@ export function ProofingPanel() {
               <Trash2 size={12} /> Remove (frees ≈270 MB)
             </Button>
           ) : (
-            <Button size="sm" className="h-7 px-2 text-xs" onClick={openSetup}>
-              Download…
+            <Button
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => void downloadLocal()}
+              data-testid="settings-spell-download"
+            >
+              Download
             </Button>
           )}
         </Row>
+        {(installing || progress) && (
+          <div className="pb-1">
+            <InstallProgressBar progress={progress} />
+          </div>
+        )}
+        {installError && (
+          <div
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            data-testid="settings-spell-install-error"
+          >
+            {installError}
+          </div>
+        )}
       </SettingsSection>
     </div>
   );

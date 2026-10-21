@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { CloudOff, HardDriveDownload, Languages } from 'lucide-react';
 import {
   Dialog,
@@ -8,12 +8,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { toast } from '@/components/ui/toast';
 import { useConfigStore } from '@/lib/config/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
-import type { SpellInstallProgress } from '@/lib/editor/spell/types';
+import { InstallProgressBar, useSpellLocalInstall } from '@/lib/editor/spell/localInstall';
 
 /**
  * SPELL CHECK SETUP — the consent surface (the fonts-catalog precedent,
@@ -27,60 +24,22 @@ import type { SpellInstallProgress } from '@/lib/editor/spell/types';
  *    21 JRE, pruned to English on extraction), ≈270 MB on disk, and
  *    zero network afterwards (loopback-only sidecar).
  *
- * Progress rides the Rust layer's `spell-install-progress` events.
+ * The install itself (progress events, config writes, the success
+ * toast) is the SHARED useSpellLocalInstall spelling — Settings →
+ * Proofing renders the same flow inline.
  */
-const STAGE_LABELS: Record<string, string> = {
-  'download-languagetool': 'Downloading LanguageTool…',
-  'download-jre': 'Downloading the Java runtime…',
-  extract: 'Extracting (English-only prune)…',
-  verify: 'Verifying…',
-  done: 'Done',
-};
-
-function mb(bytes: number): string {
-  return `${(bytes / 1e6).toFixed(0)} MB`;
-}
-
 export function SpellSetupDialog() {
   const open = useSpellStore((s) => s.setupOpen);
   const closeSetup = useSpellStore((s) => s.closeSetup);
   const setSpellCheckEnabled = useConfigStore((s) => s.setSpellCheckEnabled);
   const setSpellCheckProvider = useConfigStore((s) => s.setSpellCheckProvider);
   const setSpellCheckConfigured = useConfigStore((s) => s.setSpellCheckConfigured);
-
-  const [progress, setProgress] = useState<SpellInstallProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const { progress, error, installing, install, reset } = useSpellLocalInstall();
 
   // Fresh state each time the dialog opens.
   useEffect(() => {
-    if (open) {
-      setProgress(null);
-      setError(null);
-      setInstalling(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const fn = await listen<SpellInstallProgress>('spell-install-progress', (e) => {
-          setProgress(e.payload);
-        });
-        if (cancelled) fn();
-        else unlisten = fn;
-      } catch {
-        // Non-Tauri (tests, plain browser): events just never arrive.
-      }
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [open]);
+    if (open) reset();
+  }, [open, reset]);
 
   function chooseOnline() {
     setSpellCheckProvider('online');
@@ -90,26 +49,8 @@ export function SpellSetupDialog() {
   }
 
   async function chooseLocal() {
-    setInstalling(true);
-    setError(null);
-    setProgress({ stage: 'download-languagetool', received: 0, total: 0 });
-    try {
-      await invoke('spell_install_local');
-      setSpellCheckProvider('local');
-      setSpellCheckConfigured();
-      setSpellCheckEnabled(true);
-      toast.add({
-        title: 'Local spell check installed',
-        description:
-          'Checking now happens on this device — no network. The engine starts on first use, so the first flags may take a few seconds.',
-        type: 'success',
-      });
-      closeSetup();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setInstalling(false);
-      setProgress(null);
-    }
+    const ok = await install();
+    if (ok) closeSetup();
   }
 
   const busy = installing && !error;
@@ -163,26 +104,8 @@ export function SpellSetupDialog() {
               </div>
             </div>
             {busy ? (
-              <div className="mt-3" data-testid="spell-install-progress">
-                <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                  <span>{STAGE_LABELS[progress?.stage ?? ''] ?? 'Working…'}</span>
-                  {progress && progress.total > 0 && (
-                    <span>
-                      {mb(progress.received)} / {mb(progress.total)}
-                    </span>
-                  )}
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
-                  <div
-                    className="h-full bg-primary transition-[width]"
-                    style={{
-                      width:
-                        progress && progress.total > 0
-                          ? `${Math.min(100, (progress.received / progress.total) * 100)}%`
-                          : '8%',
-                    }}
-                  />
-                </div>
+              <div className="mt-3">
+                <InstallProgressBar progress={progress} />
               </div>
             ) : (
               <Button

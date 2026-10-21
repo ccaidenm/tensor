@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import { DEFAULT_CONFIG } from '@/lib/config/schema';
 import { useConfigStore } from '@/lib/config/store';
@@ -6,7 +6,20 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
 import { getCommand } from '@/lib/commands/registry';
 import { SpellSetupDialog } from '@/components/dialogs/SpellSetupDialog';
+import { ProofingPanel } from '@/components/settings/panels/ProofingPanel';
 import { renderTensor, settleLayout } from './harness';
+
+/** The Proofing panel probes the Rust layer on mount — the honest
+ *  answers for "runtime not installed yet". spell_check returns an
+ *  empty match set so any controller run stays quiet. */
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async (cmd: string): Promise<unknown> => {
+    if (cmd === 'spell_local_installed') return false;
+    if (cmd === 'spell_server_status') return { status: 'stopped', port: 0 };
+    if (cmd === 'spell_check') return [];
+    return undefined;
+  }),
+}));
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { getSpellErrors, spellErrorAt } from '@/lib/editor/spell/SpellExtension';
 import type { SpellBlockRange } from '@/lib/editor/spell/SpellExtension';
@@ -405,5 +418,54 @@ describe('spell setup: the consent gate', () => {
     });
     expect(useConfigStore.getState().config.spellCheck.enabled).toBe(false);
     expect(document.querySelector('[data-testid="spell-setup-dialog"]')).toBeNull();
+  });
+});
+
+describe('proofing settings: the local gate', () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: { ...DEFAULT_CONFIG } });
+    useDocumentStore.setState({
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
+      isDirty: false,
+      filePath: null,
+      lineNumbers: null,
+      coreProperties: {},
+    });
+    useSpellStore.setState({
+      serverStatus: 'stopped',
+      localInstalled: null,
+      dictionaryWords: [],
+      dictionaryLang: null,
+      sessionIgnored: new Set<string>(),
+      lastError: null,
+      setupOpen: false,
+      dictionaryOpen: false,
+    });
+  });
+
+  it('Local is disabled until the runtime exists; Download installs inline (no setup dialog) and enables', async () => {
+    render(<ProofingPanel />);
+    // Let the mount probe resolve (invoke: not installed).
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const localBtn = document.querySelector('[data-testid="settings-spell-local"]') as HTMLButtonElement;
+    expect(localBtn).not.toBeNull();
+    expect(localBtn.disabled).toBe(true);
+
+    // Download starts INLINE — the setup dialog never opens.
+    const download = document.querySelector('[data-testid="settings-spell-download"]') as HTMLElement;
+    expect(download).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(download);
+      // Flush the (mocked, instantly-resolving) install.
+      await act(async () => {});
+    });
+    expect(document.querySelector('[data-testid="spell-setup-dialog"]')).toBeNull();
+    expect(useConfigStore.getState().config.spellCheck).toMatchObject({
+      enabled: true,
+      configured: true,
+      provider: 'local',
+    });
   });
 });
