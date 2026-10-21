@@ -670,6 +670,23 @@ describe('tab stops', () => {
     expect(document.querySelector('[data-testid="ruler-tab-menu"]')).toBeNull();
   });
 
+  it('M-T4: the band context menu does NOT also open the app context menu (portal-bubble isolation)', async () => {
+    renderTensor('<p data-tab-stops="96">A</p>');
+    await settleLayout();
+    const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
+    act(() => {
+      fireEvent.contextMenu(inner, { clientX: 340, button: 2 });
+    });
+    // The ruler's own menu opened…
+    expect(document.querySelector('[data-testid="ruler-tab-menu"]')).not.toBeNull();
+    // …and the DOCUMENT context menu did NOT co-open (the ruler portals
+    // out of PaginatedView, so its synthetic contextmenu bubbles through
+    // the React tree into the app menu's trigger — the band handler's
+    // stopPropagation is the seam).
+    expect(document.querySelector('[data-testid="ctx-select-all"]')).toBeNull();
+    expect(document.querySelector('[data-testid="ctx-paste"]')).toBeNull();
+  });
+
   it('the stop context menu re-aligns and removes', async () => {
     const { editor } = renderTensor('<p data-tab-stops="96:left,192:right">A</p>');
     await settleLayout();

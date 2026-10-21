@@ -41,6 +41,18 @@ function App() {
     void useStyleRegistryStore.getState().loadGlobal();
   }, []);
 
+  // M-T4 — the app-wide native-menu REPLACEMENT: the WebView's own
+  // right-click menu dies everywhere (document surface, chrome, desk);
+  // the custom DocumentContextMenu (Editor.tsx's routing wrap) is the
+  // document surface's menu, and the ruler's band menus bring their
+  // own handlers. Suppression is inert for both (preventDefault is
+  // idempotent).
+  useEffect(() => {
+    const suppress = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener('contextmenu', suppress);
+    return () => window.removeEventListener('contextmenu', suppress);
+  }, []);
+
   // M-FONTS-A: re-register uploaded fonts from appDataDir()/fonts/
   // once at bootstrap (fonts.json is the entry list) — before the
   // paginated view's font gate settles its first layout.

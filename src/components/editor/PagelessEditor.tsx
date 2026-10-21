@@ -7,6 +7,7 @@ import { useConfigStore } from "@/lib/config/store";
 import { useDocumentStore } from "@/lib/document/store";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { useFloatingToolbar } from "@/lib/editor/useFloatingToolbar";
+import { applyRightClickSelection } from "@/lib/editor/rightClickSelection";
 
 interface PagelessEditorProps {
   editor: Editor | null;
@@ -27,6 +28,24 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // SURFACE alike. Absent ('') = no background style.
   const pageColor = useDocumentStore((s) => s.pageSetup.pageColor);
 
+  /** M-T4 — the pageless arm of the right-click rule
+   *  (rightClickSelection.ts), on the CONTEXTMENU event: PM ignores
+   *  non-primary buttons, so a right-click here never moved the caret
+   *  and the menu read the STALE selection — including the
+   *  menu-already-open case, where the dismissal swallows the mousedown
+   *  but the native contextmenu still fires. This handler sits DEEPER
+   *  than the menu trigger, so it runs before the trigger's own
+   *  handler (base-ui stopEvent's it) and the re-opened menu reads the
+   *  click-resolved selection. */
+  function handleContextMenu(e: React.MouseEvent) {
+    if (!editor || e.button !== 2) return;
+    // Coordinate-less dispatches (tests, keyboard-invoked menus): the
+    // selection stays wherever its owner put it.
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+    applyRightClickSelection(editor, coords ? coords.pos : null);
+  }
+
   return (
     <TooltipProvider>
       <div
@@ -36,6 +55,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           transform: `scale(${zoomLevel / 100})`,
           transformOrigin: 'top center',
         }}
+        onContextMenu={handleContextMenu}
       >
         <div
           data-testid="pageless-surface"

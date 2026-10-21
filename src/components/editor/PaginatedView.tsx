@@ -43,6 +43,7 @@ import { useStyleRegistryStore } from '@/lib/styles/registry';
 import { resolveNormalBase } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
+import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
 import { PageSheet } from './paginated/PageSheet';
 import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
@@ -712,6 +713,84 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     if (e.button === 1) e.preventDefault();
   }
 
+  /** M-T4 — the image-at-click probe for the CONTEXTMENU arm: the
+   *  mousedown arm's image hit-test, spelled for the event that
+   *  survives menu dismissal. FRONT/in-flow images win; a behind float
+   *  only counts where no text line sits (the mousedown z-rules). */
+  function imageBlockAtClick(e: React.MouseEvent): number | null {
+    const stack = stackRef.current;
+    if (!stack || !layout) return null;
+    const z = useConfigStore.getState().config.editor.zoomLevel / 100;
+    const sr = stack.getBoundingClientRect();
+    const localX = (e.clientX - sr.left) / z;
+    const localY = (e.clientY - sr.top) / z;
+    const page0 = layout.result.pages[0]!;
+    const stride = page0.size.height + pageSetup.pageGap;
+    const pageIndex = Math.max(0, Math.min(layout.result.pages.length - 1, Math.floor(localY / stride)));
+    const page = layout.result.pages[pageIndex]!;
+    const inPageY = localY - pageIndex * stride - page.contentBox.y;
+    const inPageX = localX - page.contentBox.x;
+    const inside = (p: (typeof layout.result.placed)[number]) =>
+      inPageX >= p.rect.x &&
+      inPageX <= p.rect.x + p.rect.width &&
+      inPageY >= p.rect.y &&
+      inPageY <= p.rect.y + p.rect.height;
+    const front = layout.result.placed.filter(
+      (p) => p.kind === 'image' && p.pageIndex === pageIndex && p.z !== 'behind',
+    );
+    for (let i = front.length - 1; i >= 0; i--) {
+      const p = front[i]!;
+      if (!inside(p)) continue;
+      const block = layout.blocks.find((b) => b.id === p.blockId);
+      if (block) return block.from;
+    }
+    const textTrackHit = layout.result.lines.some(
+      (l) =>
+        l.pageIndex === pageIndex &&
+        inPageY >= l.rect.y &&
+        inPageY <= l.rect.y + l.rect.height,
+    );
+    if (!textTrackHit) {
+      const behind = layout.result.placed.filter(
+        (p) => p.kind === 'image' && p.pageIndex === pageIndex && p.z === 'behind',
+      );
+      for (let i = behind.length - 1; i >= 0; i--) {
+        const p = behind[i]!;
+        if (!inside(p)) continue;
+        const block = layout.blocks.find((b) => b.id === p.blockId);
+        if (block) return block.from;
+      }
+    }
+    return null;
+  }
+
+  /** M-T4 — the CONTEXTMENU arm of the right-click rule: the menu reads
+   *  the CLICK, never the stale selection. The mousedown arm
+   *  (handleMouseDown) resolves the click in the common case; this arm
+   *  covers the case its mousedown was CONSUMED — right-clicking
+   *  elsewhere while the menu is already open dismisses it and swallows
+   *  the mousedown, so the selection would stay wherever it was
+   *  ("selected an image, right-clicked in a table, still image
+   *  options"). The native contextmenu event still fires and reaches
+   *  the surface, BEFORE the menu trigger's own handler (DOM bubbling:
+   *  deeper first — base-ui's trigger then stopEvent's it), so the
+   *  re-opened menu reads the click-resolved selection. Idempotent
+   *  with the mousedown arm (same rule, same coordinates). */
+  function handleContextMenu(e: React.MouseEvent) {
+    if (!editor || adapterError || !layout) return;
+    if (e.button !== 2) return;
+    // Coordinate-less dispatches (tests, keyboard-invoked menus) must
+    // not resolve against the nearest line — the selection stays
+    // wherever its owner put it.
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    const imageFrom = imageBlockAtClick(e);
+    if (imageFrom != null) {
+      editor.commands.setNodeSelection(imageFrom);
+      return;
+    }
+    applyRightClickSelection(editor, pmPosAt(e));
+  }
+
   function handleMouseDown(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
     // Middle button: paste-on-middle-click (settings > General >
@@ -822,6 +901,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       }
     }
     if (pos == null) return;
+
+    // M-T4 — THE RIGHT-CLICK RULE (Word), the ONE shared spelling
+    // (rightClickSelection.ts): the image hit-test above has already
+    // returned for image clicks, so this is the keep-inside /
+    // collapse-outside arm — the context menu reads the selection AT
+    // THE CLICK. The old path ran the click-count logic for every
+    // button, so a right-click after recent lefts landed on count 2/3
+    // and silently re-selected the whole WORD or PARAGRAPH.
+    if (e.button === 2) {
+      applyRightClickSelection(editor, pos);
+      return;
+    }
 
     const now = Date.now();
     const prev = lastClickRef.current;
@@ -1328,7 +1419,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     : null;
 
   return (
-    <div className="relative" data-testid="paginated-root" ref={rootRef}>
+    // M-T4: the CONTEXTMENU arm lives on the ROOT (not the zoom
+    // wrapper) — deeper than the menu trigger (so it runs before
+    // base-ui's stopEvent), above every painted surface (so every
+    // real right-click bubbles through), and level with where the
+    // menu tests dispatch.
+    <div
+      className="relative"
+      data-testid="paginated-root"
+      ref={rootRef}
+      onContextMenu={handleContextMenu}
+    >
       <HiddenInputView editor={editor} />
       {/* M-RULER Phase 5: the vertical ruler — a wrapper-FIXED viewport
           column (the background spans the container at every scroll

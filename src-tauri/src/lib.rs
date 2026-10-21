@@ -68,7 +68,7 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let _ = app.emit("menu-event", event.id().0.clone());
         })
-        .invoke_handler(tauri::generate_handler![fetch_link_metadata, fetch_url, package_document, unpackage_document])
+        .invoke_handler(tauri::generate_handler![fetch_link_metadata, fetch_url, package_document, unpackage_document, open_devtools])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -295,6 +295,19 @@ async fn package_document(
 #[tauri::command]
 async fn unpackage_document(path: String) -> Result<UnpackResult, String> {
     unpackage_wpdoc(&path).map_err(|e| e.to_string())
+}
+
+/// M-T4 — Developer Mode's "Inspect Element": opens the webview's
+/// devtools (WebKitGTK inspector / WebView2 devtools / macOS private
+/// APIs). Debug builds always allow it; RELEASE builds need the
+/// `devtools` feature flag on the tauri dependency — the JS side
+/// gates the menu item behind the Developer Mode setting either way.
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    // Returns () in this tauri version; failures surface as the
+    // webview's own console noise (release builds without the
+    // `devtools` feature simply no-op).
+    window.open_devtools();
 }
 
 #[cfg(test)]

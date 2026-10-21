@@ -547,6 +547,11 @@ export function Ruler({
   function handleBandContextMenu(e: ReactMouseEvent<HTMLDivElement>) {
     if (e.target !== e.currentTarget) return; // stops own their menus
     e.preventDefault();
+    // M-T4: stop the SYNTHETIC bubble too — the ruler portals out of
+    // PaginatedView, so its React-tree parents include the document
+    // context menu's trigger; without this, right-clicking a band
+    // opened BOTH the tab-stop menu and the app menu stacked.
+    e.stopPropagation();
     const pageX = bandPageX(e);
     if (pageX == null) return;
     const rawStop = pageX - contentX;

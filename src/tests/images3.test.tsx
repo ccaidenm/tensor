@@ -243,9 +243,12 @@ describe('inline selection overlay (M-IMAGES-2.1)', () => {
     // The text selection band is NOT painted over the object's line
     // (the overlay owns the visualization):
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBe(0);
-    // The toolbar is live with the image controls:
-    expect(document.querySelector('[data-floating-toolbar]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="toolbar-add-caption"]')).not.toBeNull();
+    // M-T4: the image ops surface is the document context menu —
+    // right-click carries the image variant live:
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    expect(document.querySelector('[data-testid="ctx-image-caption"]')).not.toBeNull();
   });
 
   it('the projection helper agrees with the paint: inlineObjectRect == the drawImage rect', async () => {
@@ -339,12 +342,16 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(block.editor.state.doc.nodeAt(imagePosOf(block.editor))!.attrs.align).toBe('center');
   });
 
-  it('alt text: the toolbar button opens the dialog for an INLINE selection and writes the attr (the a11y receipt)', async () => {
+  it('alt text: the context menu item opens the dialog for an INLINE selection and writes the attr (the a11y receipt)', async () => {
     render(<AltTextDialog />);
     const { editor, pos } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(pos); });
     await settleLayout();
-    const altButton = latest('[data-testid="toolbar-alt-text"]');
+    // M-T4: the image ops moved to the document context menu.
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    const altButton = latest('[data-testid="ctx-image-alt"]');
     expect(altButton).not.toBeUndefined();
     act(() => { fireEvent.click(altButton!); });
     await act(async () => { await Promise.resolve(); });
@@ -381,20 +388,29 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect((editor.state.selection as unknown as { from: number }).from).toBe(imgPos + imgSize + 1);
   });
 
-  it('the toolbar displays the INLINE node\'s attrs (not the block type\'s defaults): radius value + max', async () => {
+  it('M-T4: the context menu radius presets write the INLINE node\'s own attrs (both node kinds qualify)', async () => {
     const { editor } = await setupInlineOwnParagraph('<p>before</p>');
     const pos = imagePosOf(editor, 'inlineImage');
     act(() => { editor.commands.setNodeSelection(pos); });
     await settleLayout();
-    act(() => { setImageRadiusOnSelection(20); });
-    await settleLayout();
-    // The toolbar's radius input shows the inline node's radius and a
-    // max derived from ITS dims (45) — the pre-fix read fed the block
-    // type's DEFAULTS (radius 0, max 0 — a dead slider).
-    const input = latest('[data-floating-toolbar] input[type="number"]');
-    expect(input).not.toBeUndefined();
-    expect((input as HTMLInputElement).value).toBe('20');
-    expect((input as HTMLInputElement).max).toBe('45');
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    // Submenu items mount on hover — open the submenu first (base-ui's
+    // hover detection wants both the pointer and mouse event pairs).
+    const radiusTrigger = latest('[data-testid="ctx-radius-menu"]') as HTMLElement;
+    expect(radiusTrigger).not.toBeUndefined();
+    await act(async () => {
+      fireEvent.pointerOver(radiusTrigger);
+      fireEvent.pointerMove(radiusTrigger, { clientX: 10, clientY: 10 });
+      fireEvent.mouseOver(radiusTrigger);
+      fireEvent.mouseMove(radiusTrigger, { clientX: 10, clientY: 10 });
+      await new Promise((r) => setTimeout(r, 350));
+    });
+    const preset = latest('[data-testid="ctx-radius-8"]');
+    expect(preset).not.toBeUndefined();
+    act(() => { fireEvent.click(preset!); });
+    expect(editor.state.doc.nodeAt(pos)!.attrs.radius).toBe(8);
   });
 
   it('Insert Image is a palette command (the ONE insertion pipeline, no keyboard shortcut needed)', async () => {
@@ -410,31 +426,50 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(String(cmd!.keywords)).toContain('image');
   });
 
-  it('the align buttons RENDER only when usable: hidden for an inline selection (not disabled), present for a block image; Freeform is gone', async () => {
+  it('M-T4 polish: the floating toolbar on an image selection shows Link/Comment/Clear-Formatting ONLY', async () => {
     const { editor } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(imagePosOf(editor, 'inlineImage')); });
     await settleLayout();
-    // Inline selection: the toolbar is live, but the align cluster is
-    // ABSENT (hidden at the end of the group — not disabled-in-place)
-    // and the Freeform stub is gone entirely.
-    expect(latest('[data-floating-toolbar]')).not.toBeUndefined();
-    expect(latest('[data-floating-toolbar] [aria-label="Align Left"]')).toBeUndefined();
-    expect(latest('[data-floating-toolbar] [aria-label="Freeform"]')).toBeUndefined();
-    // Caption/Alt/Radius/Wrap still lead the group:
-    expect(latest('[data-floating-toolbar] [data-testid="toolbar-add-caption"]')).not.toBeUndefined();
+    const toolbar = latest('[data-floating-toolbar]') as HTMLElement;
+    expect(toolbar).not.toBeUndefined();
+    // The image strip: hyperlink + the comment placeholder + clear formatting.
+    expect(toolbar.querySelector('[aria-label="Hyperlink"]')).not.toBeNull();
+    expect(toolbar.querySelector('[aria-label="Insert Comment"]')).not.toBeNull();
+    expect(toolbar.querySelector('[aria-label="Clear Formatting"]')).not.toBeNull();
+    // Formatting does NOT ride for images (context menu owns image ops;
+    // text formatting is meaningless on an object selection).
+    expect(toolbar.querySelector('[aria-label="Bold"]')).toBeNull();
+    expect(toolbar.querySelector('[aria-label="Table Properties"]')).toBeNull();
+  });
+
+  it('M-T4: the menu\'s Alignment cluster RENDERS only when usable — hidden for an inline selection (not disabled), present for a block image', async () => {
+    const { editor } = await setupInlineOwnParagraph('<p>before</p>');
+    act(() => { editor.commands.setNodeSelection(imagePosOf(editor, 'inlineImage')); });
+    await settleLayout();
+    // Inline selection: the menu is live with the image variant, but
+    // the Alignment submenu is ABSENT (M-IMAGES-2.2's hide-don't-
+    // disable ruling, carried to the menu surface) while Caption/Alt/
+    // Radius/Wrap remain reachable.
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
+    });
+    expect(latest('[data-testid="ctx-image-caption"]')).not.toBeUndefined();
+    expect(latest('[data-testid="ctx-radius-menu"]')).not.toBeUndefined();
+    expect(latest('[data-testid="ctx-wrap-menu"]')).not.toBeUndefined();
+    expect(latest('[data-testid="ctx-align-menu"]')).toBeUndefined();
     // A BLOCK image selection brings the cluster back (the second
-    // editor mounts a second toolbar — query the LATEST one):
+    // editor mounts a second surface — right-click the LATEST root):
     const block = renderTensor('<p>block</p>');
     await settleLayout();
     await insertImageBytes(block.editor, fixturePng(150, 90), 'png');
     act(() => { block.editor.commands.setNodeSelection(imagePosOf(block.editor)); });
     await settleLayout();
-    const toolbars = document.querySelectorAll('[data-floating-toolbar]');
-    const last = toolbars[toolbars.length - 1] as HTMLElement;
-    expect(last.querySelector('[aria-label="Align Left"]')).not.toBeNull();
-    expect(last.querySelector('[aria-label="Align Center"]')).not.toBeNull();
-    expect(last.querySelector('[aria-label="Align Right"]')).not.toBeNull();
-    expect(last.querySelector('[aria-label="Freeform"]')).toBeNull();
+    const roots = document.querySelectorAll('[data-testid="paginated-root"]');
+    act(() => {
+      fireEvent.contextMenu(roots[roots.length - 1]!);
+    });
+    const alignMenus = document.querySelectorAll('[data-testid="ctx-align-menu"]');
+    expect(alignMenus.length).toBeGreaterThan(0);
   });
 
   it('the caption FOLLOWS the image through the split: appended right beneath the image (the bond stays adjacent)', async () => {

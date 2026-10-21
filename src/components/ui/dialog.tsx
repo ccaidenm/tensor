@@ -29,8 +29,17 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className
+        "fixed inset-0 isolate duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // The DEFAULT dim/blur applies only when the caller passes NO
+        // className (i.e. DialogContent's overlayClassName is absent).
+        // This is deliberate override semantics: tailwind-merge
+        // resolves same-variant conflicts but KEEPS variant-qualified
+        // utilities — a caller's plain `backdrop-blur-md` would lose
+        // the CSS cascade to the base's
+        // `supports-backdrop-filter:backdrop-blur-xs` (variant rules
+        // emit after base ones), silently rendering ~no blur. Owning
+        // the whole treatment sidesteps the variant-survival trap.
+        className ?? "z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs"
       )}
       {...props}
     />
@@ -41,13 +50,17 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlayClassName,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /** Extra classes for the dimmed backdrop — e.g. the heavy frosted treatment
+   * used by confirmation dialogs that interrupt an open dialog. */
+  overlayClassName?: string
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

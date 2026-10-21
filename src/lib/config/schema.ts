@@ -79,6 +79,12 @@ export const ConfigSchema = z.object({
   }).default({
     reduceMotion: 'system',
   }),
+  /** M-T4 — DEVELOPER MODE: exposes Reload + Inspect Element in the
+   *  document context menu. Default OFF; enabling requires accepting
+   *  an explicit warning (General > Advanced) — devtools can inspect
+   *  and mutate anything, and a careless edit can break the running
+   *  app. The toggle is the single gate; the menu reads it live. */
+  developerMode: z.boolean().default(false),
   /** M-META: the user's own identity — the default AUTHOR for new
    *  documents' metadata. Empty = unset: nothing is baked into files
    *  the user didn't explicitly save with their name (privacy-first;

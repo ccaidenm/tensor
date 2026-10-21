@@ -10,6 +10,7 @@ import { ensureBlockIds } from "@/lib/editor/BlockIdExtension";
 import { ensureStyleSync } from "@/lib/styles/styleExtensions";
 import { PaginatedView } from "./PaginatedView";
 import { PagelessEditor } from "./PagelessEditor";
+import { DocumentContextMenu } from "./DocumentContextMenu";
 import { StylesStylesheet } from "@/lib/styles/StylesStylesheet";
 import { insertImageBlob, isExternalImageUrl } from "@/lib/media/insert";
 import { toast } from "@/components/ui/toast";
@@ -172,15 +173,21 @@ export function Editor({ metrics }: { metrics?: TextMetrics }) {
   return (
     <>
       <StylesStylesheet />
-      {mode === 'Pages' ? (
-        <PaginatedView editor={editor} metrics={metrics} />
-      ) : (
-        <PagelessEditor
-          editor={editor}
-          fontFamily={normalBase.fontFamily}
-          fontSize={normalBase.fontSize}
-        />
-      )}
+      {/* M-T4 — the document context menu wraps BOTH modes at the
+          routing seam (one mount, every mode): right-click anywhere on
+          the editor surface opens the variant menu; App.tsx suppresses
+          the WebView's native menu globally. */}
+      <DocumentContextMenu editor={editor}>
+        {mode === 'Pages' ? (
+          <PaginatedView editor={editor} metrics={metrics} />
+        ) : (
+          <PagelessEditor
+            editor={editor}
+            fontFamily={normalBase.fontFamily}
+            fontSize={normalBase.fontSize}
+          />
+        )}
+      </DocumentContextMenu>
     </>
   );
 }

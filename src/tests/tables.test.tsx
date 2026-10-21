@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import type { Editor, JSONContent } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import { useDocumentStore } from '@/lib/document/store';
@@ -57,6 +58,17 @@ function cellPositions(editor: Editor, type?: string): number[] {
  *  walk the tree blindly — cast to the loose JSON shape. */
 function looseJSON(editor: Editor): JSONContent {
   return editor.getJSON() as unknown as JSONContent;
+}
+
+/** Parks the caret inside the table's first cell (toolbar anchoring). */
+function caretIntoFirstCell(editor: Editor) {
+  const positions: number[] = [];
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') positions.push(pos);
+  });
+  act(() => {
+    editor.commands.setTextSelection(positions[0]! + 2);
+  });
 }
 
 describe('M-TABLES: model + pageless', () => {
@@ -652,7 +664,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('M-T3a: the gutter pin toggles the header row and restores the caret', async () => {
+  it('M-T3a: the gutter pin is an indicator — pinned rows only; click unpins (caret restored), re-pin via the menu/panel paths', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -664,10 +676,10 @@ describe('M-TABLES: Pages mode interactions', () => {
       );
     });
     await settleLayout();
-    // The pin: FILLED — the table's first row is a header row (th).
+    // Pinned leading row → the FILLED pin shows.
     const pinOn = document.querySelector('[data-testid="table-header-pin-on"]') as HTMLElement | null;
     expect(pinOn).toBeTruthy();
-    // Park the caret in the 'before' paragraph — the toggle must restore it.
+    // Park the caret in the 'before' paragraph — the unpin must restore it.
     await act(async () => {
       editor.commands.setTextSelection(1);
     });
@@ -676,22 +688,157 @@ describe('M-TABLES: Pages mode interactions', () => {
       fireEvent.click(pinOn!);
     });
     await settleLayout();
-    // Row 0's cell flipped to a body cell; the pin flipped to outline.
+    // Row 0 flipped to a body cell — and the pin VANISHES (the M-T4
+    // indicator ruling: no outline pin on unpinned rows).
     const row0 = looseJSON(editor).content![1].content![0].content!;
     expect(row0[0].type).toBe('tableCell');
-    const pinOff = document.querySelector('[data-testid="table-header-pin-off"]') as HTMLElement | null;
-    expect(pinOff).toBeTruthy();
     expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeNull();
     // The caret never visibly jumped.
     expect(editor.state.selection.head).toBe(headBefore);
-    // Toggle back on.
+    // Re-pin through the context menu's spelling (the same command the
+    // panel runs): park the caret in row 0, toggleHeaderRow.
     await act(async () => {
-      fireEvent.click(pinOff!);
+      editor.commands.setTextSelection(1);
+      const positions: number[] = [];
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === 'tableCell') positions.push(pos);
+      });
+      editor.commands.setTextSelection(positions[0]! + 2);
+      editor.commands.toggleHeaderRow();
     });
     await settleLayout();
     const row0Again = looseJSON(editor).content![1].content![0].content!;
     expect(row0Again[0].type).toBe('tableHeader');
     expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeTruthy();
+  });
+
+  it('M-T4 polish: the toolbar\'s table group carries a separator to its right when a strip follows', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent('<table><tr><td>a</td><td>b</td></tr></table>');
+    });
+    await settleLayout();
+    caretIntoFirstCell(editor);
+    await settleLayout();
+    const toolbar = document.querySelector('[data-floating-toolbar]') as HTMLElement | null;
+    expect(toolbar).toBeTruthy();
+    // The caret-in-cell toolbar: [Table Properties][sep][Bold]… — the
+    // separator follows the table group because the text strip shows.
+    const properties = toolbar!.querySelector('[data-testid="toolbar-table-properties"]')!;
+    expect(properties).not.toBeNull();
+    const next = properties.parentElement!.nextElementSibling;
+    expect(next?.getAttribute('data-slot')).toBe('separator');
+    // A table-shaped selection (CellSelection) shows the table group
+    // ALONE — no dangling separator after it.
+    const positions: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'tableCell') positions.push(pos);
+    });
+    await act(async () => {
+      editor.commands.setCellSelection({ anchorCell: positions[0]!, headCell: positions[1]! });
+    });
+    await settleLayout();
+    const toolbar2 = document.querySelector('[data-floating-toolbar]') as HTMLElement;
+    const properties2 = toolbar2.querySelector('[data-testid="toolbar-table-properties"]')!;
+    expect(properties2).not.toBeNull();
+    expect(properties2.parentElement!.nextElementSibling).toBeNull();
+  });
+
+  it('M-T4 polish: the toolbar carries Merge⇄Split for a multi-cell CellSelection (and never for a bare caret)', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>');
+    });
+    await settleLayout();
+    // A bare caret in a cell: merge is meaningless on one cell — absent.
+    caretIntoFirstCell(editor);
+    await settleLayout();
+    expect(document.querySelector('[data-testid="toolbar-merge"]')).toBeNull();
+    expect(document.querySelector('[data-testid="toolbar-split"]')).toBeNull();
+    // A multi-cell selection: the toolbar rides with Merge.
+    const positions = cellPositions(editor);
+    await act(async () => {
+      editor.commands.setCellSelection({ anchorCell: positions[0]!, headCell: positions[1]! });
+    });
+    await settleLayout();
+    const merge = document.querySelector('[data-testid="toolbar-merge"]') as HTMLElement | null;
+    expect(merge).not.toBeNull();
+    act(() => {
+      fireEvent.click(merge!);
+    });
+    await settleLayout();
+    // Merged: one colspan-2 cell — and the toolbar flipped to Split.
+    const row0 = looseJSON(editor).content![0].content![0].content!;
+    expect(row0).toHaveLength(1);
+    expect(row0[0].attrs!.colspan).toBe(2);
+    const split = document.querySelector('[data-testid="toolbar-split"]') as HTMLElement | null;
+    expect(split).not.toBeNull();
+    expect(document.querySelector('[data-testid="toolbar-merge"]')).toBeNull();
+  });
+
+  it('M-T4: the context menu reads the CLICK, not the stale selection (image selected, right-click lands in the table → table variant)', async () => {
+    const state = useConfigStore.getState();
+    useConfigStore.setState({
+      config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
+    });
+    // An image, then a table — the repro doc.
+    const { editor } = renderTensor();
+    await act(async () => {
+      editor.commands.setContent(
+        '<p>lead</p>' +
+        '<div data-tensor-image="true" data-src="media://x" data-width="100" data-height="50"></div>' +
+        '<table><tr><td>a</td><td>b</td></tr></table>',
+      );
+    });
+    await settleLayout();
+    let imagePos = 0;
+    editor.state.doc.descendants((n, p) => {
+      if (n.type.name === 'image') { imagePos = p; return false; }
+      return true;
+    });
+    // The STALE state: the image is selected (e.g. its menu was open).
+    act(() => {
+      editor.commands.setNodeSelection(imagePos);
+    });
+    await settleLayout();
+    // Right-click INTO the table's first cell — the CONTEXTMENU arm
+    // (the menu-open spelling: no mousedown precedes the event).
+    const { rect, contentX, contentY } = cellRect(editor, 0, 0);
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!, {
+        button: 2,
+        clientX: contentX + rect.x + 30,
+        clientY: contentY + rect.y + 5,
+      });
+    });
+    // The menu re-opened on the CLICK: the table variant, not image.
+    expect(document.querySelector('[data-testid="ctx-insert-row-below"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-image-caption"]')).toBeNull();
+    // And the mirror: a stale caret in text, right-click ON the image
+    // (its placed rect: x [0,100), y [16,66) content-relative) → the
+    // image arm selects it and the menu shows the image variant.
+    act(() => {
+      editor.commands.setTextSelection(2);
+    });
+    await settleLayout();
+    act(() => {
+      fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!, {
+        button: 2,
+        clientX: GEOMETRY.contentX + 40,
+        clientY: GEOMETRY.contentY + 40,
+      });
+    });
+    expect(editor.state.selection instanceof NodeSelection).toBe(true);
+    expect(document.querySelector('[data-testid="ctx-image-caption"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="ctx-insert-row-below"]')).toBeNull();
   });
 });
 
