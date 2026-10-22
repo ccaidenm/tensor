@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
 import { getScrollParent } from './domUtils';
 
 export interface FloatingToolbarPosition {
@@ -52,6 +53,17 @@ export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
     function computeAndSetPosition() {
       const { state } = currentEditor;
       const { empty } = state.selection;
+
+      // M-EQ: an equation NodeSelection shows NO floating toolbar — the
+      // editor bubble is the equation's toolbar (it opens on the same
+      // selection; a text-format strip over an atom is noise).
+      if (
+        state.selection instanceof NodeSelection &&
+        state.selection.node.type.name === 'equation'
+      ) {
+        setPosition(null);
+        return;
+      }
 
       if (empty) {
         // A caret parked inside a table cell still surfaces the table

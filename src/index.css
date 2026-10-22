@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "katex/dist/katex.min.css";
 @plugin "@tailwindcss/typography";
 
 html,
@@ -392,3 +393,85 @@ body {
     @apply font-sans;
   }
 }
+
+/*
+ ---break---
+ */
+/* M-EQ — equations. The ONLY new global CSS this feature adds: the
+   katex.min.css import above (fonts bundled by Vite, never a CDN) and
+   this scoped block. Everything is under .tensor-equation — one
+   wrapper class shared by the node view, the paginated EquationLayer,
+   AND the measurement probe, so the measured box is the painted box by
+   construction (one CSS derivation). Theme tokens only; no new
+   styling system. */
+.tensor-equation {
+  display: flex;
+}
+/* KaTeX's display wrapper: zero its 1em vertical margins and make it
+   shrink-wrap — block spacing is the engine's (spaceBefore/After) and
+   horizontal positioning is the node's align attr / the engine's
+   alignOffset, never KaTeX's centering. */
+.tensor-equation .katex-display {
+  margin: 0;
+  width: fit-content;
+  max-width: 100%;
+}
+/* Word parity: the equation matches the SURROUNDING font size (the
+   engine's EquationMetrics fontSize key drives it in paginated mode;
+   pageless inherits the document container). KaTeX's default 1.21em
+   optical bump would make math float larger than its paragraph. */
+.tensor-equation .katex {
+  font-size: inherit;
+}
+/* The measurement probe (lib/equations/measure.ts): inline-block
+   shrink-wrap so the rect read off it is the math's natural box. */
+.tensor-equation-measure {
+  display: inline-block;
+}
+/* Empty (just-inserted) equation: the dashed placeholder — never a
+   blank block the caret can vanish into (the broken-glyph law). */
+.tensor-equation-placeholder {
+  width: 96px;
+  height: 1.4em;
+  border: 1.5px dashed var(--muted-foreground);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+/* Invalid LaTeX: the styled invalid face — the source stays visible
+   (the edit path is one click away), never KaTeX's red error text in
+   the document body. */
+.tensor-equation-invalid {
+  border: 1.5px dashed var(--destructive);
+  border-radius: 4px;
+  padding: 0 6px;
+  color: var(--destructive);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+/* Selection ring (pageless mode; the paginated overlay paints its own
+   via EquationSelection-style rects... v1: same class, theme token). */
+.tensor-equation-selected .tensor-equation-math,
+.tensor-equation-selected .tensor-equation-placeholder,
+.tensor-equation-selected .tensor-equation-invalid {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* M-EQ-2 — the WYSIWYG math-field editor surface (the bubble's
+   MathLiveField wrapper). The <math-field> custom element defaults to
+   inline; the wrapper gives it the document-truth face: block, full
+   width, the shared theme caret. Its INTERNAL styles are MathLive's
+   own (its math fonts are the same KaTeX_* faces the document
+   bundles — the loader sees them in document.fonts and never fetches
+   its own). */
+.tensor-equation-editor math-field {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  --caret-color: var(--primary);
+  --contains-highlight-background-color: var(--accent);
+}
+/* The placeholder glyphs inside the editor surface (the #? slots) get
+   MathLive's own prompt style — leave it; only the chrome above is
+   ours. */

@@ -17,6 +17,9 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   underline: (editor) => editor.commands.toggleUnderline(),
   strike: (editor) => editor.commands.toggleStrike(),
   insertPageBreak: (editor) => editor.commands.insertPageBreak(),
+  // M-EQ: inserts an empty display equation and NodeSelections it —
+  // the selection opens the editor bubble (useEquationEditor).
+  insertEquation: (editor) => editor.commands.insertEquation(),
   alignLeft: (editor) => editor.commands.setTextAlign('left'),
   alignCenter: (editor) => editor.commands.setTextAlign('center'),
   alignRight: (editor) => editor.commands.setTextAlign('right'),

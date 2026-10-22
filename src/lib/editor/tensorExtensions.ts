@@ -27,6 +27,7 @@ import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
 import { ImageNode } from '@/lib/editor/ImageNode';
 import { InlineImageNode } from '@/lib/editor/InlineImageNode';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
+import { EquationNode } from '@/lib/editor/EquationNode';
 
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
@@ -84,6 +85,11 @@ export function tensorExtensions(): Extensions {
     // borderStyle/backgroundColor attrs. Pages mode falls back to the
     // pageless render until the engine grows the TableBlock kind.
     ...TensorTableKit,
+    // M-EQ: display equations — a block atom (the ImageNode family);
+    // latex is the node's only document data, rendering is a
+    // projection (lib/equations), paginated layout rides the engine's
+    // EquationBlock + EquationMetrics port.
+    EquationNode,
     // Stable block ids (engine edit-survival contract) + the
     // paginated-mode scroll guard (L3).
     BlockIdExtension,

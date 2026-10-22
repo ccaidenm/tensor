@@ -4,9 +4,10 @@ import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
-import type { LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
+import type { EquationMetrics, LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import { pmDocToSemantic, UnsupportedDocError, type AdapterBlock } from '@/lib/paginated/adapter';
+import { EquationTooTallError } from '@tensor-editor/engine';
 import { getRealMetrics, fontString } from '@/lib/paginated/metrics';
 import { assertContiguity } from '@/lib/paginated/paint';
 import {
@@ -42,8 +43,8 @@ import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
 import { toLayoutOptions } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
-import { useStyleRegistryStore } from '@/lib/styles/registry';
-import { resolveNormalBase } from '@/lib/styles/resolve';
+import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
+import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
 import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
@@ -65,6 +66,10 @@ import { FloatingToolbar } from './FloatingToolbar';
 import { LinkBubble } from './LinkBubble';
 import { SpellBubble } from './SpellBubble';
 import { useLinkBubble } from '@/lib/editor/useLinkBubble';
+import { EquationLayer } from './paginated/EquationLayer';
+import { EquationEditorBubble } from './EquationEditorBubble';
+import { useEquationEditor } from '@/lib/editor/useEquationEditor';
+import { getEquationMetrics, katexFontEpochNow, subscribeKatexFonts } from '@/lib/equations/measure';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { bitmapVersionNow, getBitmapFailed, resolveMediaBitmap, subscribeBitmaps } from '@/lib/media/bitmapCache';
 import { TooltipProvider } from '../ui/tooltip';
@@ -114,6 +119,9 @@ interface PaginatedViewProps {
    * single RealMetrics (L2). The first injected instance wins for the
    * view's lifetime. */
   metrics?: TextMetrics;
+  /** M-EQ TEST SEAM: inject the equation dims port the same way (the
+   * real one is the KaTeX DOM measurer — jsdom cannot measure it). */
+  equationMetrics?: EquationMetrics;
 }
 
 interface LayoutState {
@@ -131,13 +139,24 @@ interface SearchPaint {
   current: PaintedRect[];
 }
 
-export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedViewProps) {
+export function PaginatedView({ editor, metrics: injectedMetrics, equationMetrics: injectedEquationMetrics }: PaginatedViewProps) {
   // L2: one engine + one metrics for the view's lifetime.
   const engineRef = useRef<LayoutEngine | null>(null);
   const metricsRef = useRef<TextMetrics | null>(null);
+  // M-EQ: the equation port ref — the SAME instance rides every engine
+  // creation (initial + both recreate paths), so an injected test
+  // double survives a recreate and the pairing law holds.
+  const equationMetricsRef = useRef<EquationMetrics | null>(null);
   if (!engineRef.current) {
     if (!metricsRef.current) metricsRef.current = injectedMetrics ?? getRealMetrics();
-    engineRef.current = createLayoutEngine({ metrics: metricsRef.current });
+    if (!equationMetricsRef.current) equationMetricsRef.current = injectedEquationMetrics ?? getEquationMetrics();
+    // M-EQ: the equation dims port rides the engine from birth — the
+    // same pairing law as TextMetrics (one warm ruler; the port's
+    // cache is module-level, so recreate is measurement-cheap).
+    engineRef.current = createLayoutEngine({
+      metrics: metricsRef.current,
+      equationMetrics: equationMetricsRef.current,
+    });
   }
 
   const [layout, setLayout] = useState<LayoutState | null>(null);
@@ -163,6 +182,21 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     editor?.state.doc.descendants((node) => {
       if (node.type.name === 'image' && typeof node.attrs.blockId === 'string') {
         map.set(node.attrs.blockId, Number(node.attrs.radius ?? 0));
+      }
+      return true;
+    });
+    return map;
+  }, [editor?.state.doc]);
+  // M-EQ-2: the equations' PAINT-ONLY color, per blockId (the
+  // imageRadii precedent — paint facts stay out of the engine, so a
+  // color edit repaints without any relayout). null = INHERIT (the
+  // docDefaultText color below — the same derivation the canvas text
+  // uses). Derived from the immutable PM doc at render time.
+  const equationColors = useMemo(() => {
+    const map = new Map<string, string | null>();
+    editor?.state.doc.descendants((node) => {
+      if (node.type.name === 'equation' && typeof node.attrs.blockId === 'string') {
+        map.set(node.attrs.blockId, (node.attrs.color as string | null) ?? null);
       }
       return true;
     });
@@ -313,6 +347,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     () => resolveNormalBase(defaultFontFamily, defaultFontSize, mergedStyles),
     [defaultFontFamily, defaultFontSize, mergedStyles]
   );
+  // M-EQ-2: the equations' DEFAULT text color — the resolved 'normal'
+  // run color (the same resolveRun the canvas painter consumes for
+  // every text run; baseline hardcodes #000000, the normal style's
+  // color property overrides). The DOM overlay must PAINT this
+  // explicitly or it inherits chrome's --foreground (the off-white
+  // mismatch the M-EQ-2 ruling fixes).
+  const docDefaultTextColor = useMemo(() => {
+    const normalDef = lookupStyle('normal', mergedStyles);
+    return resolveRun({
+      base: baselineRunStyle({ fontFamily: defaultFontFamily, fontSize: defaultFontSize }),
+      para: normalDef,
+    }).color;
+  }, [defaultFontFamily, defaultFontSize, mergedStyles]);
 
   function computeToolbar(rects: readonly PaintedRect[]): FloatingToolbarPosition | null {
     const stack = stackRef.current;
@@ -374,6 +421,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     const selName = selNode?.type?.name;
     const isBlockImageNodeSelection = selName === 'image';
     const isInlineImageNodeSelection = selName === 'inlineImage';
+    // M-EQ: an equation NodeSelection shows NO floating toolbar — the
+    // editor bubble is the equation's toolbar (it opens on the very
+    // same selection; a text-format strip over an atom is noise).
+    const isEquationNodeSelection = selName === 'equation';
     let inlineObjRect: import('@tensor-editor/engine').PlacedRect | null = null;
     if (isInlineImageNodeSelection) {
       const node = selNode as { attrs: { width?: unknown; height?: unknown } };
@@ -518,6 +569,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     setToolbarPos(
       !draggingRef.current &&
         useConfigStore.getState().config.useFloatingToolbar &&
+        !isEquationNodeSelection &&
         (imageToolbarRect || caretCellAnchor || isCellSelection || !selection.empty)
         ? computeToolbar(
             imageToolbarRect
@@ -669,13 +721,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       updateSpellProjection(true);
     } catch (err) {
       // FALLBACK AUDIT (M6.1, CONVENTIONS.md): the pageless fallback
-      // catches ONLY the unsupported-kind sentinel — a document using
-      // a node the projection doesn't support yet degrades gracefully.
-      // Anything else is a real adapter/engine bug: rethrow in dev so
-      // it crashes LOUDLY (a silent degrade would hide it); prod keeps
-      // the never-eat-the-document fallback behind a loud console
+      // catches ONLY the sentinel family — a document using a node the
+      // projection doesn't support yet, or (M-EQ) an equation the
+      // engine refuses (taller than any page — user input, not a bug;
+      // the pageless surface renders the node view natively, no height
+      // limit). Anything else is a real adapter/engine bug: rethrow in
+      // dev so it crashes LOUDLY (a silent degrade would hide it); prod
+      // keeps the never-eat-the-document fallback behind a loud console
       // error. Blanket Error catches that swallow bugs are banned.
-      if (!(err instanceof UnsupportedDocError) && import.meta.env.DEV) {
+      if (
+        !(err instanceof UnsupportedDocError) &&
+        !(err instanceof EquationTooTallError) &&
+        import.meta.env.DEV
+      ) {
         throw err;
       }
       console.error('[PaginatedView] layout failed; falling back to pageless rendering:', err);
@@ -790,7 +848,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       inPageY >= p.rect.y &&
       inPageY <= p.rect.y + p.rect.height;
     const front = layout.result.placed.filter(
-      (p) => p.kind === 'image' && p.pageIndex === pageIndex && p.z !== 'behind',
+      (p) =>
+        (p.kind === 'image' || p.kind === 'equation') &&
+        p.pageIndex === pageIndex &&
+        p.z !== 'behind',
     );
     for (let i = front.length - 1; i >= 0; i--) {
       const p = front[i]!;
@@ -896,12 +957,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
         inPageX <= p.rect.x + p.rect.width &&
         inPageY >= p.rect.y &&
         inPageY <= p.rect.y + p.rect.height;
-      // 1. FRONT + in-flow (topmost wins): IMAGES ONLY — the
+      // 1. FRONT + in-flow (topmost wins): IMAGES and EQUATIONS — the
       //    tableCell rects are paint geometry; a click inside a cell
       //    routes to the text hitTest (the caret/cell rules).
+      //    Equations are in-flow atomics (no z, never behind) — the
+      //    same group by construction.
       for (let i = layout.result.placed.length - 1; i >= 0; i--) {
         const p = layout.result.placed[i]!;
-        if (p.kind !== 'image' || p.pageIndex !== pageIndex || p.z === 'behind') continue;
+        if (
+          (p.kind !== 'image' && p.kind !== 'equation') ||
+          p.pageIndex !== pageIndex ||
+          p.z === 'behind'
+        )
+          continue;
         if (inside(p)) {
           const block = layout.blocks.find((b) => b.id === p.blockId);
           if (block) {
@@ -1178,13 +1246,37 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
       //    by a font install (only the ruler changed), so reusing
       //    them is legal; the fresh engine re-measures them with the
       //    now-real font.
-      engineRef.current = createLayoutEngine({ metrics: metricsRef.current! });
+      engineRef.current = createLayoutEngine({
+        metrics: metricsRef.current!,
+        equationMetrics: equationMetricsRef.current!,
+      });
       relayoutRef.current();
     })();
     return () => {
       cancelled = true;
     };
   }, [fontEpoch]);
+
+  // M-EQ: KaTeX font arrival — an equation measured before the math
+  // fonts land caches fallback-font dims in the WALK cache (placed
+  // rects), the identical hazard the M-FONTS recreate cures for text.
+  // loadingdone already means the batch finished — no re-gate; the
+  // remedy is the same cold-cache recreate + relayout.
+  const katexEpochRef = useRef(katexFontEpochNow());
+  useEffect(
+    () =>
+      subscribeKatexFonts(() => {
+        const now = katexFontEpochNow();
+        if (now === katexEpochRef.current) return;
+        katexEpochRef.current = now;
+        engineRef.current = createLayoutEngine({
+          metrics: metricsRef.current!,
+          equationMetrics: equationMetricsRef.current!,
+        });
+        relayoutRef.current();
+      }),
+    [],
+  );
 
   // One IntersectionObserver over all sheets. Visible
   // (±1 buffer) pages mount canvases; the sheet with the highest
@@ -1428,6 +1520,39 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   }, []);
   const linkBubbleRef = useRef<HTMLDivElement>(null);
   const linkBubble = useLinkBubble(editor, linkBubbleRef, linkCoordsFor);
+
+  // M-EQ: the equation bubble's painted-rect anchor (L3 — the hidden
+  // view's geometry must never position it): the placed[] rect for the
+  // equation at `pos`, converted to viewport coords BELOW the rect,
+  // horizontally centered (the same half-bubble offset the pageless
+  // DOM anchor applies).
+  const equationCoordsFor = useCallback((pos: number) => {
+    const current = layoutRef.current;
+    const stack = stackRef.current;
+    if (!current || !stack) return { left: 0, top: 0 };
+    const block = current.blocks.find((b) => b.from === pos);
+    const placed = block
+      ? current.result.placed.find((p) => p.kind === 'equation' && p.blockId === block.id)
+      : undefined;
+    if (!placed) return { left: 0, top: 0 };
+    const z = useConfigStore.getState().config.editor.zoomLevel / 100;
+    const sr = stack.getBoundingClientRect();
+    const page0 = current.result.pages[0]!;
+    const stride = page0.size.height + pageSetup.pageGap;
+    const page = current.result.pages[placed.pageIndex]!;
+    return {
+      left:
+        sr.left +
+        (page.contentBox.x + placed.rect.x + placed.rect.width / 2 - 160) * z,
+      top: sr.top + (placed.pageIndex * stride + page.contentBox.y + placed.rect.y + placed.rect.height) * z + 4,
+    };
+  }, [pageSetup.pageGap]);
+  const equationBubbleRef = useRef<HTMLDivElement>(null);
+  const { state: equationState, close: closeEquationEditor } = useEquationEditor(
+    editor,
+    equationBubbleRef,
+    equationCoordsFor,
+  );
 
   if (!editor) return null;
 
@@ -1701,6 +1826,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
                   )}
                   radii={imageRadii}
                 />
+                {/* M-EQ: the equations — in-flow atomics, DOM overlay
+                    (KaTeX HTML cannot drawImage), pointer-through.
+                    Colors ride the paint-only map (the imageRadii
+                    precedent) + the doc-default text color. */}
+                {(visiblePages === null || visiblePages.has(page.index)) && (
+                  <EquationLayer
+                    geometry={page}
+                    placed={result.placed.filter(
+                      (p) => p.pageIndex === page.index && p.kind === 'equation',
+                    )}
+                    colors={equationColors}
+                    defaultColor={docDefaultTextColor}
+                  />
+                )}
               </PageSheet>
             );
           })}
@@ -1766,6 +1905,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
           containerLeft={rootRect.left}
         />
       )}
+
+      {equationState && rootRect && (() => {
+        const anchor = equationCoordsFor(equationState.pos);
+        return (
+          <EquationEditorBubble
+            ref={equationBubbleRef}
+            editor={editor}
+            state={{ ...equationState, coords: anchor }}
+            containerTop={rootRect.top}
+            containerLeft={rootRect.left}
+            onClose={closeEquationEditor}
+          />
+        );
+      })()}
       {/* The floating toolbar is UI chrome, not document content — it
           renders OUTSIDE the zoom transform at 100% scale, positioned
           from the selection's painted bounding box. */}

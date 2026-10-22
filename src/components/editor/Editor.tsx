@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useEditor } from "@tiptap/react";
-import type { TextMetrics } from "@tensor-editor/engine";
+import type { EquationMetrics, TextMetrics } from "@tensor-editor/engine";
 import { useDocumentStore } from "../../lib/document/store";
 import { useConfigStore } from "../../lib/config/store";
 import { useStyleRegistryStore } from "@/lib/styles/registry";
@@ -16,7 +16,7 @@ import { StylesStylesheet } from "@/lib/styles/StylesStylesheet";
 import { insertImageBlob, isExternalImageUrl } from "@/lib/media/insert";
 import { toast } from "@/components/ui/toast";
 
-export function Editor({ metrics }: { metrics?: TextMetrics }) {
+export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; equationMetrics?: EquationMetrics }) {
   const setEditor = useDocumentStore((s) => s.setEditor);
   const markDirty = useDocumentStore((s) => s.markDirty);
 
@@ -184,7 +184,7 @@ export function Editor({ metrics }: { metrics?: TextMetrics }) {
           the WebView's native menu globally. */}
       <DocumentContextMenu editor={editor}>
         {mode === 'Pages' ? (
-          <PaginatedView editor={editor} metrics={metrics} />
+          <PaginatedView editor={editor} metrics={metrics} equationMetrics={equationMetrics} />
         ) : (
           <PagelessEditor
             editor={editor}
