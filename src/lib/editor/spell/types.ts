@@ -48,9 +48,8 @@ export type SpellProvider = 'online' | 'local';
 
 /**
  * A checked-and-flagged span, already translated into PM positions.
- * `kind` is reserved for M2's grammar work — spelling is the only
- * producer today, and the visual grammar treatment will reuse this
- * shape with a different kind + color instead of a parallel system.
+ * `kind` selects the feature (and the visual color): spelling or
+ * grammar — one span model, one pipeline, two features.
  */
 export interface SpellError {
   from: number;
@@ -62,7 +61,9 @@ export interface SpellError {
   suggestions: string[];
   message: string;
   ruleId: string;
-  kind: 'spelling';
+  kind: 'spelling' | 'grammar';
+  /** LT's category id (bubble labels + the ignore-rule key). */
+  category: string;
 }
 
 /** Sidecar/server lifecycle state surfaced to the UI (local provider
@@ -79,11 +80,3 @@ export interface SpellInstallProgress {
   total: number;
 }
 
-/** Is this LT match a *spelling* error? Grammar/style stay out of scope
- *  (M2): LT's en spell misses ride category TYPOS (its/it's confusions
- *  included — Word treats those as spelling too) or issueType
- *  'misspelling'. The unfiltered stream still crosses the IPC boundary
- *  so grammar needs no new wire later. */
-export function isSpellingMatch(m: LTMatch): boolean {
-  return m.rule?.category?.id === 'TYPOS' || m.rule?.issueType === 'misspelling';
-}

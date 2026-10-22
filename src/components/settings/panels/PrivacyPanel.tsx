@@ -66,7 +66,7 @@ export function PrivacyPanel() {
         <Row
           icon={<SpellCheck className="h-4 w-4" />}
           label="Where checking happens"
-          description="Spell check is off by default. When enabled, the LOCAL provider runs LanguageTool as a process on this device and never sends anything over the network (loopback only). The ONLINE provider — an explicit choice in the setup dialog — sends your text to LanguageTool's servers for checking. The provider, dictionary, and local runtime storage are managed in Proofing."
+          description="Spelling and grammar checking are off by default. When enabled, the LOCAL provider runs LanguageTool as a process on this device and never sends anything over the network (loopback only). The ONLINE provider — an explicit choice in the setup dialog — sends your text to LanguageTool's servers for checking. Spelling and grammar are independent toggles (Proofing); the provider, dictionary, and local runtime storage are managed in Proofing. Grammar flags are advisory-blue by default; Accessibility holds the double-line color-blind aid."
         >
           <span />
         </Row>

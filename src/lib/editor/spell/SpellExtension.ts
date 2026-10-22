@@ -47,24 +47,34 @@ export interface SpellBlockRange {
 export type SpellMeta =
   | { type: 'setErrors'; errors: SpellError[]; blocks: SpellBlockRange[] }
   | { type: 'ignoreWord'; word: string }
+  | { type: 'ignoreRule'; ruleId: string }
   | { type: 'clear' };
 
 export const spellPluginKey = new PluginKey<SpellPluginState>('spell');
 
-const SPELL_CLASS = 'tensor-spell-error';
+/** The decoration class per feature kind — the pageless visual (Pages
+ *  mode colors the overlay bars the same way via SpellHighlights). */
+function classForKind(kind: SpellError['kind']): string {
+  return kind === 'grammar' ? 'tensor-grammar-error' : 'tensor-spell-error';
+}
 
 function buildDecorations(doc: import('@tiptap/pm/model').Node, errors: readonly SpellError[]): DecorationSet {
   return DecorationSet.create(
     doc,
-    errors.map((e) => Decoration.inline(e.from, e.to, { class: SPELL_CLASS })),
+    errors.map((e) => Decoration.inline(e.from, e.to, { class: classForKind(e.kind) })),
   );
 }
 
 /** The flagged text at a (possibly remapped) range, for the
- *  drop-on-content-edit guard. Block separators collapse to '\n' — a
- *  within-word range never contains one. */
+ *  drop-on-content-edit guard. Clamped to the doc — a stale/malformed
+ *  range (e.g. beyond doc end) reads as "" ≠ word and gets dropped;
+ *  it must NEVER throw, or one bad range would kill every subsequent
+ *  transaction's dispatch. */
 function textAtRange(state: EditorState, from: number, to: number): string {
-  return state.doc.textBetween(from, to, '\n');
+  const size = state.doc.content.size;
+  const f = Math.max(0, Math.min(from, size));
+  const t = Math.max(f, Math.min(to, size));
+  return state.doc.textBetween(f, t, '\n');
 }
 
 function createSpellPlugin() {
@@ -83,6 +93,10 @@ function createSpellPlugin() {
         } else if (meta?.type === 'ignoreWord') {
           const word = meta.word.toLowerCase();
           errors = errors.filter((e) => e.word.toLowerCase() !== word);
+        } else if (meta?.type === 'ignoreRule') {
+          // Grammar's ignore: rule-scoped, not word-scoped — one false
+          // positive kills the whole RULE for the session.
+          errors = errors.filter((e) => e.ruleId !== meta.ruleId);
         } else if (meta?.type === 'setErrors') {
           // Block-scoped replacement: fresh results for the rechecked
           // blocks (they all live inside `blocks`); everything outside
@@ -138,6 +152,10 @@ declare module '@tiptap/core' {
       /** Drop every current flag of this word (case-insensitive) — the
        *  add-to-dictionary / ignore-all immediate receipt. */
       ignoreSpellWord: (word: string) => ReturnType;
+      /** Grammar's twin: drop every flag of this RULE — the
+       *  ignore-rule immediate receipt (one false positive, whole
+       *  rule, this session). */
+      ignoreSpellRule: (ruleId: string) => ReturnType;
       clearSpellErrors: () => ReturnType;
     };
   }
@@ -172,6 +190,16 @@ export const SpellExtension = Extension.create<Record<string, never>, SpellStora
         ({ tr, dispatch }) => {
           if (dispatch) {
             tr.setMeta(spellPluginKey, { type: 'ignoreWord', word });
+            dispatch(tr);
+          }
+          return true;
+        },
+
+      ignoreSpellRule:
+        (ruleId) =>
+        ({ tr, dispatch }) => {
+          if (dispatch) {
+            tr.setMeta(spellPluginKey, { type: 'ignoreRule', ruleId });
             dispatch(tr);
           }
           return true;

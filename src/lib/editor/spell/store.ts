@@ -26,6 +26,9 @@ interface SpellUIState {
    *  Shared by the controller's filter and the bubble's action so
    *  there is one list, not two. */
   sessionIgnored: Set<string>;
+  /** "Ignore rule" — session-only, keyed by LT rule id (grammar false
+   *  positives are RULE-shaped, not word-shaped). Shared the same way. */
+  sessionIgnoredRules: Set<string>;
   /** The last checking failure, for Settings/setup surfacing (a
    *  controller write — never a toast spam channel). */
   lastError: string | null;
@@ -42,6 +45,9 @@ interface SpellUIState {
   /** "Ignore All": flags vanish now and future checks skip the word
    *  for this session. */
   ignoreSessionWord: (word: string) => void;
+  /** Grammar's twin: flags for this RULE vanish now and future checks
+   *  skip it for this session. */
+  ignoreSessionRule: (ruleId: string) => void;
 
   /** Loads the active language's dictionary once per language. */
   ensureDictionaryLoaded: (lang: string) => Promise<void>;
@@ -56,6 +62,7 @@ export const useSpellStore = create<SpellUIState>((set, get) => ({
   dictionaryWords: [],
   dictionaryLang: null,
   sessionIgnored: new Set<string>(),
+  sessionIgnoredRules: new Set<string>(),
   lastError: null,
   setupOpen: false,
   dictionaryOpen: false,
@@ -74,6 +81,13 @@ export const useSpellStore = create<SpellUIState>((set, get) => ({
     const next = new Set(get().sessionIgnored);
     next.add(key);
     set({ sessionIgnored: next });
+  },
+
+  ignoreSessionRule: (ruleId) => {
+    if (!ruleId) return;
+    const next = new Set(get().sessionIgnoredRules);
+    next.add(ruleId);
+    set({ sessionIgnoredRules: next });
   },
 
   ensureDictionaryLoaded: async (lang) => {

@@ -58,10 +58,12 @@ function useLocalRuntimeState() {
 }
 
 export function ProofingPanel() {
-  const enabled = useConfigStore((s) => s.config.spellCheck.enabled);
   const configured = useConfigStore((s) => s.config.spellCheck.configured);
   const provider = useConfigStore((s) => s.config.spellCheck.provider);
-  const setSpellCheckEnabled = useConfigStore((s) => s.setSpellCheckEnabled);
+  const spelling = useConfigStore((s) => s.config.spellCheck.spelling);
+  const grammar = useConfigStore((s) => s.config.spellCheck.grammar);
+  const setSpellSpelling = useConfigStore((s) => s.setSpellSpelling);
+  const setSpellGrammar = useConfigStore((s) => s.setSpellGrammar);
   const setSpellCheckProvider = useConfigStore((s) => s.setSpellCheckProvider);
   const setSpellCheckConfigured = useConfigStore((s) => s.setSpellCheckConfigured);
   const openSetup = useSpellStore((s) => s.openSetup);
@@ -70,13 +72,23 @@ export function ProofingPanel() {
   const { installed, status, probe } = useLocalRuntimeState();
   const { progress, error: installError, installing, install } = useSpellLocalInstall();
 
-  /** The consent gate — same rule as the ribbon button and F7. */
-  function toggle() {
-    if (!configured) {
-      openSetup();
+  /** The consent gate — same rule as the ribbon button and F7: the
+   *  FIRST enable of either feature opens the setup dialog (one
+   *  provider choice covers both). */
+  function withConsent(on: boolean, flip: () => void) {
+    if (on || configured) {
+      flip();
       return;
     }
-    setSpellCheckEnabled(!enabled);
+    openSetup();
+  }
+
+  function toggleSpelling() {
+    withConsent(spelling, () => setSpellSpelling(!spelling));
+  }
+
+  function toggleGrammar() {
+    withConsent(grammar, () => setSpellGrammar(!grammar));
   }
 
   /** Download right here — the setup dialog is only for the FIRST
@@ -97,9 +109,10 @@ export function ProofingPanel() {
     await probe();
   }
 
+  const active = spelling || grammar;
   const statusText =
     provider === 'online'
-      ? enabled
+      ? active
         ? 'Checking via the LanguageTool cloud (text is sent to their servers).'
         : 'Online checking (no download; text is sent to their servers while enabled).'
       : installed == null
@@ -114,13 +127,20 @@ export function ProofingPanel() {
 
   return (
     <div>
-      <SettingsSection id="spelling" title="Spelling">
+      <SettingsSection id="spelling" title="Checking">
         <Row
           icon={<SpellCheck className="h-4 w-4" />}
-          label="Check Spelling"
-          description="Off by default — nothing is checked, downloaded, or sent anywhere until it is enabled and a provider is chosen."
+          label="Check Spelling as You Type"
+          description="Misspelled words get a red flat line; corrections are a click away. Off by default — nothing is checked, downloaded, or sent anywhere until it is enabled and a provider is chosen."
         >
-          <Switch checked={enabled} onCheckedChange={toggle} data-testid="settings-spell-toggle" />
+          <Switch checked={spelling} onCheckedChange={toggleSpelling} data-testid="settings-spell-toggle" />
+        </Row>
+        <Row
+          icon={<CircleAlert className="h-4 w-4" />}
+          label="Check Grammar as You Type"
+          description="Agreement, punctuation, and common usage errors get an advisory blue line with an explanation and suggested fixes — independent from spelling, so either can run alone."
+        >
+          <Switch checked={grammar} onCheckedChange={toggleGrammar} data-testid="settings-grammar-toggle" />
         </Row>
         <Row
           icon={provider === 'online' ? <CloudOff className="h-4 w-4" /> : <HardDriveDownload className="h-4 w-4" />}

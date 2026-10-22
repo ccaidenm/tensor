@@ -402,6 +402,11 @@ pub async fn spell_check(
     text: String,
     language: String,
     provider: String,
+    // Comma-separated LT category ids the SERVER should not run at
+    // all (style/tone always; whichever checking feature is off).
+    // The client still classifies defensively — this is the perf trim,
+    // not the scope filter.
+    disabled_categories: Option<String>,
 ) -> Result<Vec<LtMatch>, String> {
     let url = match provider.as_str() {
         "online" => "https://api.languagetool.org/v2/check".to_string(),
@@ -412,7 +417,19 @@ pub async fn spell_check(
         other => return Err(format!("unknown spell provider: {other}")),
     };
 
-    let post = |url: String| {
+    let mut form: Vec<(&str, &str)> = vec![
+        ("text", text.as_str()),
+        ("language", language.as_str()),
+    ];
+    let disabled;
+    if let Some(cats) = disabled_categories.as_deref() {
+        if !cats.is_empty() {
+            disabled = cats.to_string();
+            form.push(("disabledCategories", disabled.as_str()));
+        }
+    }
+
+    let post = |url: String, form: Vec<(&str, &str)>| {
         state
             .http
             .post(url)
@@ -421,17 +438,19 @@ pub async fn spell_check(
             // before the POST itself — the shared client's 60s total
             // would race it to the wire.
             .timeout(Duration::from_secs(180))
-            .form(&[("text", text.as_str()), ("language", language.as_str())])
+            .form(&form)
             .send()
     };
 
-    let resp = post(url.clone()).await.map_err(|e| format!("LanguageTool request failed: {e}"))?;
+    let resp = post(url.clone(), form.clone())
+        .await
+        .map_err(|e| format!("LanguageTool request failed: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         // One restart attempt for a dead sidecar mid-session.
         if provider == "local" && !health_ok(&state.http, state.port.load(Ordering::SeqCst)).await {
             if let Ok(port) = ensure_server(&app, &state).await {
-                let retry = post(format!("http://127.0.0.1:{port}/v2/check"))
+                let retry = post(format!("http://127.0.0.1:{port}/v2/check"), form)
                     .await
                     .map_err(|e| format!("LanguageTool request failed: {e}"))?;
                 if retry.status().is_success() {

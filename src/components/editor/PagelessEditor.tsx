@@ -30,6 +30,10 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // background paints the paginated SHEETS and this pageless editing
   // SURFACE alike. Absent ('') = no background style.
   const pageColor = useDocumentStore((s) => s.pageSetup.pageColor);
+  // Accessibility: the double-line container class (the descendant CSS
+  // rule flips grammar decorations to text-decoration-style: double —
+  // live, without rebuilding the decoration set).
+  const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
 
   // The suggestion bubble (GDocs rule: plain click on a flagged word).
   // The anchor stores the OPEN-TIME offset from the container — the
@@ -45,14 +49,15 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     };
   }, [editor]);
 
-  /** A plain click on a flagged word (the decoration's DOM span — the
-   *  pageless surface IS the PM view) opens the suggestion bubble. The
-   *  span's text identifies the error (the plugin's drop-guard keeps
-   *  span text == word by construction — no posAtCoords needed). The
+  /** A plain click on a flagged span (the decoration's DOM span — the
+   *  pageless surface IS the PM view) opens the suggestion bubble.
+   *  Spelling AND grammar spans are both flagged spans. The span's
+   *  text identifies the error (the plugin's drop-guard keeps span
+   *  text == word by construction — no posAtCoords needed). The
    *  click-outside/Escape dismissal lives on the bubble itself. */
   function handleSpellClick(e: React.MouseEvent) {
     if (!editor) return;
-    const span = (e.target as HTMLElement).closest(".tensor-spell-error");
+    const span = (e.target as HTMLElement).closest(".tensor-spell-error, .tensor-grammar-error");
     if (!span) return;
     const word = span.textContent ?? "";
     const error = getSpellErrors(editor.state).find((x) => x.word === word);
@@ -99,7 +104,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
         >
           <div
             data-testid="pageless-surface"
-            className={`relative z-10 ${showNonPrintingChars ? "show-non-printing" : ""}`}
+            className={`relative z-10 ${showNonPrintingChars ? "show-non-printing" : ""} ${grammarDoubleLine ? "grammar-double-line" : ""}`}
             style={{ ...(pageColor ? { background: pageColor } : {}) }}
           >
             <EditorContent

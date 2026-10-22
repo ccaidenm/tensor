@@ -7,6 +7,7 @@ import { useSpellStore } from '@/lib/editor/spell/store';
 import { SpellController } from '@/lib/editor/spell/controller';
 import { getSpellErrors } from '@/lib/editor/spell/SpellExtension';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
+import { disabledCategoriesFor } from '@/lib/editor/spell/categories';
 import type { LTMatch } from '@/lib/editor/spell/types';
 
 /**
@@ -60,12 +61,19 @@ function makeEditor(html: string): Editor {
   return editor;
 }
 
-/** Enable spell check in the config store (default local provider). */
+/** Enable spell check in the config store (default local provider).
+ *  Both flags together = the master-switch state. */
 function enableSpell(): void {
   useConfigStore.setState({
     config: {
       ...DEFAULT_CONFIG,
-      spellCheck: { enabled: true, configured: true, provider: 'local', language: 'en-US' },
+      spellCheck: {
+        configured: true,
+        provider: 'local',
+        language: 'en-US',
+        spelling: true,
+        grammar: true,
+      },
     },
   });
 }
@@ -74,7 +82,13 @@ function disableSpell(): void {
   useConfigStore.setState({
     config: {
       ...DEFAULT_CONFIG,
-      spellCheck: { enabled: false, configured: true, provider: 'local', language: 'en-US' },
+      spellCheck: {
+        configured: true,
+        provider: 'local',
+        language: 'en-US',
+        spelling: false,
+        grammar: false,
+      },
     },
   });
 }
@@ -91,6 +105,7 @@ beforeEach(() => {
     dictionaryWords: [],
     dictionaryLang: 'en-US',
     sessionIgnored: new Set<string>(),
+    sessionIgnoredRules: new Set<string>(),
     lastError: null,
     setupOpen: false,
     dictionaryOpen: false,
@@ -117,6 +132,9 @@ describe('SpellController', () => {
       text: 'helo\n\nwrold',
       language: 'en-US',
       provider: 'local',
+      // Both features on → only the always-excluded style categories
+      // are trimmed server-side.
+      disabledCategories: 'STYLE,COLLOQUIALISMS,REDUNDANCY,PLEONASM,SEMANTICS,CREATIVE_WRITING,PLAIN_ENGLISH',
     });
     const errors = getSpellErrors(editor.state);
     expect(errors).toHaveLength(1);
@@ -199,23 +217,55 @@ describe('SpellController', () => {
     expect(getSpellErrors(editor.state)).toHaveLength(0);
   });
 
-  it('drops grammar/style matches (spelling only)', async () => {
-    enableSpell();
-    const editor = makeEditor('<p>helo</p>');
-    editors.push(editor);
+  it('grammar matches: kept as kind=grammar when on, dropped when off; style always dropped', async () => {
     const grammar: LTMatch = {
-      message: 'Grammar issue',
+      message: 'Third-person singular verb.',
+      shortMessage: 'Grammar',
       offset: 0,
-      length: 4,
-      rule: { id: 'SOME_GRAMMAR', description: 'x', issueType: 'grammar', category: { id: 'GRAMMAR', name: 'Grammar' } },
+      length: 2,
+      rule: { id: 'AGREEMENT', description: 'x', issueType: 'grammar', category: { id: 'GRAMMAR', name: 'Grammar' } },
     };
-    invokeMock.mockResolvedValueOnce(ltResponse(grammar, matchAt(0, 'helo', 'hello')));
-    const controller = new SpellController(editor);
+    const style: LTMatch = {
+      message: 'Style nudge',
+      offset: 2,
+      length: 2,
+      rule: { id: 'SOME_STYLE', description: 'x', issueType: 'style', category: { id: 'STYLE', name: 'Style' } },
+    };
+
+    // Grammar ON (the default enable): the grammar match renders with
+    // kind='grammar'; style never does.
+    enableSpell();
+    let editor = makeEditor('<p>He dont</p>');
+    editors.push(editor);
+    invokeMock.mockResolvedValueOnce(ltResponse(grammar, style));
+    let controller = new SpellController(editor);
     controller.attach();
     await flush();
-    const errors = getSpellErrors(editor.state);
+    let errors = getSpellErrors(editor.state);
     expect(errors).toHaveLength(1);
-    expect(errors[0]?.ruleId).toBe('MISSPELLED_RULE');
+    expect(errors[0]).toMatchObject({ kind: 'grammar', ruleId: 'AGREEMENT', category: 'GRAMMAR' });
+
+    // Grammar OFF, spelling ON: the grammar match is dropped (and the
+    // request says so server-side too).
+    useConfigStore.setState({
+      config: {
+        ...DEFAULT_CONFIG,
+        spellCheck: { configured: true, provider: 'local', language: 'en-US', spelling: true, grammar: false },
+      },
+    });
+    editor = makeEditor('<p>He dont</p>');
+    editors.push(editor);
+    const spellOnly = disabledCategoriesFor(true, false);
+    invokeMock.mockResolvedValueOnce(ltResponse(grammar, matchAt(0, 'He', 'he')));
+    controller = new SpellController(editor);
+    controller.attach();
+    await flush();
+    expect(invokeMock).toHaveBeenLastCalledWith(
+      'spell_check',
+      expect.objectContaining({ disabledCategories: `${spellOnly}` }),
+    );
+    errors = getSpellErrors(editor.state);
+    expect(errors.map((e) => e.kind)).toEqual(['spelling']);
   });
 
   it('a doc edit mid-flight drops the stale batch', async () => {

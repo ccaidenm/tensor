@@ -3,32 +3,32 @@ import { IconButton } from "../../../IconButton";
 import { BookA, Info, Languages, SpellCheck } from "lucide-react";
 import { useDocumentPropertiesStore } from "@/lib/document/propertiesStore";
 import { useConfigStore } from "@/lib/config/store";
+import { spellCheckActive } from "@/lib/config/schema";
 import { useSpellStore } from "@/lib/editor/spell/store";
 
 export function ProofingGroup() {
-  const enabled = useConfigStore((s) => s.config.spellCheck.enabled);
-  const configured = useConfigStore((s) => s.config.spellCheck.configured);
+  const spell = useConfigStore((s) => s.config.spellCheck);
   const setSpellCheckEnabled = useConfigStore((s) => s.setSpellCheckEnabled);
   const openSetup = useSpellStore((s) => s.openSetup);
   const openDictionary = useSpellStore((s) => s.openDictionary);
 
-  /** The consent gate: the FIRST enable goes through the setup dialog
-   *  (provider choice + the privacy/storage trade-offs); after that
-   *  the button is a plain toggle. */
+  /** MASTER semantic: the ribbon button flips BOTH features (the
+   *  common intent — "spell check off"); the per-feature switches live
+   *  in Settings → Proofing. Active = either feature on. */
   function toggleSpellCheck() {
-    if (!configured) {
+    if (!spell.configured) {
       openSetup();
       return;
     }
-    setSpellCheckEnabled(!enabled);
+    setSpellCheckEnabled(!spellCheckActive(spell));
   }
 
   return (
     <RibbonGroup>
       <IconButton
-        label={configured ? "Spelling & Grammar" : "Spelling & Grammar (set up first)"}
+        label={spell.configured ? "Spelling & Grammar" : "Spelling & Grammar (set up first)"}
         icon={<SpellCheck size={16} />}
-        active={enabled}
+        active={spellCheckActive(spell)}
         onClick={toggleSpellCheck}
         shortcutId="toggleSpellCheck"
       />

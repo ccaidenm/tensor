@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
-import { DEFAULT_CONFIG } from '@/lib/config/schema';
+import { DEFAULT_CONFIG, ConfigSchema } from '@/lib/config/schema';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
 import { getCommand } from '@/lib/commands/registry';
 import { SpellSetupDialog } from '@/components/dialogs/SpellSetupDialog';
 import { ProofingPanel } from '@/components/settings/panels/ProofingPanel';
+import { AccessibilityPanel } from '@/components/settings/panels/AccessibilityPanel';
 import { renderTensor, settleLayout } from './harness';
 
 /** The Proofing panel probes the Rust layer on mount — the honest
@@ -36,13 +37,19 @@ import type { Editor } from '@tiptap/core';
  */
 
 const HELLO_ERR: SpellError = {
-  from: 1, to: 5, word: 'helo', suggestions: ['hello'], message: 'spelling', ruleId: 'MISSPELLED_RULE', kind: 'spelling',
+  from: 1, to: 5, word: 'helo', suggestions: ['hello'], message: 'spelling', ruleId: 'MISSPELLED_RULE', kind: 'spelling', category: 'TYPOS',
 };
 const WROLD_ERR: SpellError = {
-  from: 6, to: 11, word: 'wrold', suggestions: ['world'], message: 'spelling', ruleId: 'MISSPELLED_RULE', kind: 'spelling',
+  from: 6, to: 11, word: 'wrold', suggestions: ['world'], message: 'spelling', ruleId: 'MISSPELLED_RULE', kind: 'spelling', category: 'TYPOS',
 };
 // <p>helo wrold</p> spans [0,12)
 const PARA_1: SpellBlockRange = { blockId: 'b1', from: 0, to: 12 };
+/** A GRAMMAR flag: subject-verb, LT-shaped ("He dont" in <p>He dont</p>,
+ *  text [1,8), block spans [0,9)). */
+const GRAMMAR_ERR: SpellError = {
+  from: 1, to: 8, word: 'He dont', suggestions: ['He doesn\u2019t', 'He does'], message: 'Use a third-person singular verb form.', ruleId: 'AGREEMENT_SENT_START', kind: 'grammar', category: 'GRAMMAR',
+};
+const GRAMMAR_PARA: SpellBlockRange = { blockId: 'b1', from: 0, to: 9 };
 
 function setErrors(editor: Editor, errors: SpellError[], blocks: SpellBlockRange[]) {
   act(() => {
@@ -381,6 +388,7 @@ describe('spell setup: the consent gate', () => {
       dictionaryWords: [],
       dictionaryLang: null,
       sessionIgnored: new Set<string>(),
+      sessionIgnoredRules: new Set<string>(),
       lastError: null,
       setupOpen: false,
       dictionaryOpen: false,
@@ -392,7 +400,8 @@ describe('spell setup: the consent gate', () => {
     render(<SpellSetupDialog />);
     // Default posture: OFF and UNCONFIGURED — nothing runs, nothing sends.
     expect(useConfigStore.getState().config.spellCheck).toMatchObject({
-      enabled: false,
+      spelling: false,
+      grammar: false,
       configured: false,
     });
     // The command the ribbon button, F7, and the palette all dispatch.
@@ -401,22 +410,25 @@ describe('spell setup: the consent gate', () => {
     });
     expect(document.querySelector('[data-testid="spell-setup-dialog"]')).not.toBeNull();
     // Spell stays off until the provider is chosen.
-    expect(useConfigStore.getState().config.spellCheck.enabled).toBe(false);
+    expect(useConfigStore.getState().config.spellCheck.spelling).toBe(false);
     const online = document.querySelector('[data-testid="spell-setup-online-btn"]') as HTMLElement;
     act(() => {
       fireEvent.click(online);
     });
     expect(useConfigStore.getState().config.spellCheck).toMatchObject({
-      enabled: true,
+      spelling: true,
+      grammar: true,
       configured: true,
       provider: 'online',
     });
-    // The dialog closes on choice; the next toggle is a plain off.
+    // The dialog closes on choice; the next toggle is a plain off (the
+    // MASTER: both flags together).
     expect(document.querySelector('[data-testid="spell-setup-dialog"]')).toBeNull();
     act(() => {
       getCommand('toggleSpellCheck')!.run();
     });
-    expect(useConfigStore.getState().config.spellCheck.enabled).toBe(false);
+    expect(useConfigStore.getState().config.spellCheck.spelling).toBe(false);
+    expect(useConfigStore.getState().config.spellCheck.grammar).toBe(false);
     expect(document.querySelector('[data-testid="spell-setup-dialog"]')).toBeNull();
   });
 });
@@ -437,6 +449,7 @@ describe('proofing settings: the local gate', () => {
       dictionaryWords: [],
       dictionaryLang: null,
       sessionIgnored: new Set<string>(),
+      sessionIgnoredRules: new Set<string>(),
       lastError: null,
       setupOpen: false,
       dictionaryOpen: false,
@@ -463,9 +476,181 @@ describe('proofing settings: the local gate', () => {
     });
     expect(document.querySelector('[data-testid="spell-setup-dialog"]')).toBeNull();
     expect(useConfigStore.getState().config.spellCheck).toMatchObject({
-      enabled: true,
+      spelling: true,
+      grammar: true,
       configured: true,
       provider: 'local',
     });
+  });
+});
+
+describe('grammar feature (distinct flagging)', () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: { ...DEFAULT_CONFIG } });
+    useDocumentStore.setState({
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
+      isDirty: false,
+      filePath: null,
+      lineNumbers: null,
+      coreProperties: {},
+    });
+  });
+
+  it('Pages mode: grammar bars take the grammar color; the double line is opt-in', async () => {
+    const { editor } = renderTensor('<p>He dont</p>');
+    await settleLayout();
+    setErrors(editor, [GRAMMAR_ERR], [GRAMMAR_PARA]);
+    const bars = underlines();
+    expect(bars).toHaveLength(1);
+    expect(bars[0]!.style.backgroundColor).toBe('var(--color-grammar-error)');
+    // Color-only by default — no second bar without the a11y opt-in.
+    expect(document.querySelectorAll('[data-testid="spell-underline-double"]')).toHaveLength(0);
+    // Opt in (Accessibility → Visual Cues): the second bar appears,
+    // live, without any re-check.
+    act(() => {
+      useConfigStore.setState({
+        config: {
+          ...useConfigStore.getState().config,
+          accessibility: { reduceMotion: 'system', grammarDoubleLine: true },
+        },
+      });
+    });
+    const doubles = document.querySelectorAll<HTMLElement>('[data-testid="spell-underline-double"]');
+    expect(doubles).toHaveLength(1);
+    expect(doubles[0]!.style.backgroundColor).toBe('var(--color-grammar-error)');
+  });
+
+  it('pageless: grammar decorations carry the grammar class + the double-line container class', async () => {
+    useConfigStore.setState({
+      config: {
+        ...DEFAULT_CONFIG,
+        editor: { ...DEFAULT_CONFIG.editor, defaultPageLayout: 'Pageless' },
+        accessibility: { reduceMotion: 'system', grammarDoubleLine: true },
+      },
+    });
+    const { editor } = renderTensor('<p>He dont</p>');
+    setErrors(editor, [GRAMMAR_ERR], [GRAMMAR_PARA]);
+    const span = document.querySelector<HTMLElement>('.tensor-grammar-error');
+    expect(span).not.toBeNull();
+    expect(span!.className).not.toContain('tensor-spell-error');
+    // The a11y container class rides the surface — CSS does the rest.
+    expect(document.querySelector('[data-testid="pageless-surface"]')!.className).toContain('grammar-double-line');
+  });
+
+  it('the grammar bubble: explanation + suggestion (undoable) + rule-scoped ignore', async () => {
+    useConfigStore.setState({ config: { ...DEFAULT_CONFIG } });
+    // Build the document OUTSIDE history (tr meta) so the suggestion
+    // insert is the single undoable step — the harness's setContent
+    // would coalesce with it inside PM's newGroupDelay.
+    const { editor } = renderTensor();
+    await settleLayout();
+    act(() => {
+      const tr = editor.state.tr;
+      tr.setMeta('addToHistory', false);
+      tr.replaceWith(
+        0,
+        tr.doc.content.size,
+        editor.state.schema.node('paragraph', {}, editor.state.schema.text('He dont run. She dont'))
+      );
+      editor.view.dispatch(tr);
+    });
+    await settleLayout();
+    setErrors(editor, [GRAMMAR_ERR, { ...GRAMMAR_ERR, from: 14, to: 22, word: 'She dont' }], [
+      { blockId: 'b1', from: 0, to: 23 },
+    ]);
+    // Left-click the first flag ('He dont' paints at x 96..166 on line 0).
+    const surface = document.querySelector('[data-testid="paginated-zoom-wrapper"]') as HTMLElement;
+    act(() => {
+      fireEvent.mouseDown(surface, { button: 0, clientX: 110, clientY: 100 });
+      fireEvent.mouseUp(surface, { button: 0 });
+    });
+    const bubble = document.querySelector<HTMLElement>('[data-spell-bubble]');
+    expect(bubble).not.toBeNull();
+    expect(bubble!.dataset.kind).toBe('grammar');
+    // THE EXPLANATION — the issue's explicit ask.
+    expect(
+      document.querySelector('[data-testid="spell-grammar-explanation"]')?.textContent
+    ).toContain('third-person singular');
+    // Dictionary actions hide for grammar; the rule ignore shows.
+    expect(document.querySelector('[data-testid="spell-add-dict"]')).toBeNull();
+    expect(document.querySelector('[data-testid="spell-ignore-rule"]')).not.toBeNull();
+    // Suggestion applies…
+    const sug = document.querySelector('[data-testid="spell-sug-0"]') as HTMLElement;
+    act(() => {
+      fireEvent.click(sug);
+    });
+    expect(editor.state.doc.textContent).toBe('He doesn’t run. She dont');
+    // …and is one undo step.
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(editor.state.doc.textContent).toBe('He dont run. She dont');
+    // Re-open — on the SURVIVING flag (the first was dropped when its
+    // text changed; 'She dont' paints at x 226..306) — and ignore the
+    // RULE: every instance of it vanishes.
+    act(() => {
+      fireEvent.mouseDown(surface, { button: 0, clientX: 240, clientY: 100 });
+      fireEvent.mouseUp(surface, { button: 0 });
+    });
+    const ignore = document.querySelector('[data-testid="spell-ignore-rule"]') as HTMLElement;
+    act(() => {
+      fireEvent.click(ignore);
+    });
+    expect(getSpellErrors(editor.state)).toHaveLength(0);
+    expect(document.querySelectorAll('[data-testid="spell-underline"]')).toHaveLength(0);
+  });
+});
+
+describe('spell config migration + independence', () => {
+  it('a pre-grammar config (enabled) migrates to both flags on', () => {
+    const parsed = ConfigSchema.parse({
+      spellCheck: { enabled: true, configured: true, provider: 'online', language: 'en-US' },
+    });
+    expect(parsed.spellCheck).toMatchObject({
+      spelling: true,
+      grammar: true,
+      configured: true,
+      provider: 'online',
+    });
+    const off = ConfigSchema.parse({ spellCheck: { enabled: false } });
+    expect(off.spellCheck).toMatchObject({ spelling: false, grammar: false });
+  });
+
+  it('Proofing: the two switches flip independently', async () => {
+    useConfigStore.setState({
+      config: {
+        ...DEFAULT_CONFIG,
+        spellCheck: { configured: true, provider: 'online', language: 'en-US', spelling: true, grammar: false },
+      },
+    });
+    render(<ProofingPanel />);
+    await act(async () => {});
+    const spellToggle = document.querySelector('[data-testid="settings-spell-toggle"]') as HTMLElement;
+    const grammarToggle = document.querySelector('[data-testid="settings-grammar-toggle"]') as HTMLElement;
+    expect(spellToggle.getAttribute('aria-checked')).toBe('true');
+    expect(grammarToggle.getAttribute('aria-checked')).toBe('false');
+    // Grammar on: spelling untouched.
+    act(() => {
+      fireEvent.click(grammarToggle);
+    });
+    expect(useConfigStore.getState().config.spellCheck).toMatchObject({ spelling: true, grammar: true });
+    // Spelling off: grammar survives (only-grammar is a legal state).
+    act(() => {
+      fireEvent.click(spellToggle);
+    });
+    expect(useConfigStore.getState().config.spellCheck).toMatchObject({ spelling: false, grammar: true });
+  });
+
+  it('Accessibility: Reduce Motion lives here now; the double-line switch writes config', () => {
+    render(<AccessibilityPanel />);
+    // The row moved from General — its control is present exactly once.
+    expect(document.querySelector('[data-testid="a11y-reduce-motion"]')).not.toBeNull();
+    const dbl = document.querySelector('[data-testid="a11y-grammar-double-line"]') as HTMLElement;
+    expect(dbl).not.toBeNull();
+    expect(dbl.getAttribute('aria-checked')).toBe('false');
+    act(() => {
+      fireEvent.click(dbl);
+    });
+    expect(useConfigStore.getState().config.accessibility.grammarDoubleLine).toBe(true);
   });
 });

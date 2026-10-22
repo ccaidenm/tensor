@@ -59,9 +59,10 @@ export function SpellSetupDialog() {
     <Dialog open={open} onOpenChange={(o) => !busy && (o ? null : closeSetup())}>
       <DialogContent className="max-w-lg" data-testid="spell-setup-dialog">
         <DialogHeader>
-          <DialogTitle>Enable Spell Check</DialogTitle>
+          <DialogTitle>Enable Spell &amp; Grammar Check</DialogTitle>
           <DialogDescription>
-            Choose how spelling is checked. This can be changed later in Settings → Proofing.
+            Choose how spelling and grammar are checked — text goes to the same place for both.
+            This can be changed later in Settings → Proofing.
           </DialogDescription>
         </DialogHeader>
 

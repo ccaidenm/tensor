@@ -2,8 +2,10 @@ import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/lib/config/store';
+import { spellCheckActive } from '@/lib/config/schema';
 import { dictionarySet, useSpellStore } from './store';
-import { isSpellingMatch, type LTMatch, type SpellError } from './types';
+import { classifyMatch, disabledCategoriesFor } from './categories';
+import type { LTMatch, SpellError } from './types';
 import type { SpellBlockRange } from './SpellExtension';
 
 /**
@@ -102,18 +104,24 @@ export class SpellController {
     const unsubConfig = useConfigStore.subscribe((state, prev) => {
       const now = state.config.spellCheck;
       const was = prev.config.spellCheck;
-      if (!now.enabled) {
-        if (was.enabled) this.clearAll();
+      // ANY change to the active feature set (a flag flip, provider, or
+      // language) is a fresh classification problem: recheck
+      // everything, one request, correct results.
+      const featureChanged =
+        now.spelling !== was.spelling ||
+        now.grammar !== was.grammar ||
+        now.language !== was.language ||
+        now.provider !== was.provider;
+      if (!spellCheckActive(now)) {
+        if (spellCheckActive(was)) this.clearAll();
         return;
       }
-      if (!was.enabled || now.language !== was.language || now.provider !== was.provider) {
-        this.recheckAll();
-      }
+      if (!spellCheckActive(was) || featureChanged) this.recheckAll();
     });
     this.detachFns.push(unsubConfig);
 
-    // Boot with spell already enabled (persisted config): full check.
-    if (useConfigStore.getState().config.spellCheck.enabled) this.recheckAll();
+    // Boot with checking active (persisted config): full check.
+    if (spellCheckActive(useConfigStore.getState().config.spellCheck)) this.recheckAll();
   }
 
   detach(): void {
@@ -145,7 +153,7 @@ export class SpellController {
   /** Debounced entry point (every doc update). */
   schedule(): void {
     const cfg = useConfigStore.getState().config.spellCheck;
-    if (!cfg.enabled) return;
+    if (!spellCheckActive(cfg)) return;
     if (this.timer) clearTimeout(this.timer);
     const delay = cfg.provider === 'online' ? DEBOUNCE_ONLINE_MS : DEBOUNCE_LOCAL_MS;
     this.timer = setTimeout(() => {
@@ -162,7 +170,7 @@ export class SpellController {
     this.running = true;
     try {
       const cfg = useConfigStore.getState().config.spellCheck;
-      if (!cfg.enabled || this.editor.isDestroyed) return;
+      if (!spellCheckActive(cfg) || this.editor.isDestroyed) return;
 
       // The identity cache marks textless blocks too (no re-scan churn
       // on image/rule blocks); textful ones get a Piece.
@@ -187,13 +195,23 @@ export class SpellController {
 
       // Batch whole blocks under CHUNK_CHARS; '\n\n' joins the pieces
       // of one request (spelling matches never cross it).
+      const batchOpts = {
+        language: cfg.language,
+        provider: cfg.provider,
+        spellingOn: cfg.spelling,
+        grammarOn: cfg.grammar,
+        // Style categories are excluded SERVER-SIDE every request;
+        // a disabled feature excludes its categories too (leaner work
+        // for the engine — and a grammar-only request never runs spell).
+        disabledCategories: disabledCategoriesFor(cfg.spelling, cfg.grammar),
+      };
       let batch: Piece[] = [];
       let batchLen = 0;
       let batchStart = 0;
       for (const piece of pieces) {
         const addition = piece.text.length + (batch.length > 0 ? 2 : 0);
         if (batch.length > 0 && batchLen + addition > CHUNK_CHARS) {
-          await this.checkBatch(batch, blocks.slice(batchStart), cfg.language, cfg.provider, doc);
+          await this.checkBatch(batch, blocks.slice(batchStart), batchOpts, doc);
           batchStart += batch.length;
           batch = [];
           batchLen = 0;
@@ -202,7 +220,7 @@ export class SpellController {
         batchLen += addition;
       }
       if (batch.length > 0) {
-        await this.checkBatch(batch, blocks.slice(batchStart), cfg.language, cfg.provider, doc);
+        await this.checkBatch(batch, blocks.slice(batchStart), batchOpts, doc);
       }
 
       useSpellStore.getState().setLastError(null);
@@ -215,7 +233,7 @@ export class SpellController {
       // silent swallow — the store feeds Settings/setup surfaces).
       const message = err instanceof Error ? err.message : String(err);
       useSpellStore.getState().setLastError(message);
-      if (!this.editor.isDestroyed && useConfigStore.getState().config.spellCheck.enabled) {
+      if (!this.editor.isDestroyed && spellCheckActive(useConfigStore.getState().config.spellCheck)) {
         if (this.retryTimer) clearTimeout(this.retryTimer);
         this.retryTimer = setTimeout(() => {
           this.retryTimer = null;
@@ -230,8 +248,13 @@ export class SpellController {
   private async checkBatch(
     pieces: Piece[],
     blocks: SpellBlockRange[],
-    language: string,
-    provider: 'online' | 'local',
+    opts: {
+      language: string;
+      provider: 'online' | 'local';
+      spellingOn: boolean;
+      grammarOn: boolean;
+      disabledCategories?: string;
+    },
     capturedDoc: PMNode,
   ): Promise<void> {
     // Build the request text + per-piece starts in it.
@@ -243,24 +266,41 @@ export class SpellController {
       text += p.text;
     }
 
-    const matches = await invoke<LTMatch[]>('spell_check', { text, language, provider });
+    const matches = await invoke<LTMatch[]>('spell_check', {
+      text,
+      language: opts.language,
+      provider: opts.provider,
+      disabledCategories: opts.disabledCategories ?? null,
+    });
 
     // Stale doc (the invalidating edit already scheduled a fresh run)
     // or shutdown mid-flight: drop the batch wholesale.
     if (this.editor.isDestroyed || this.editor.state.doc !== capturedDoc) return;
 
     const dict = dictionarySet();
-    const sessionIgnored = useSpellStore.getState().sessionIgnored;
+    const spellStore = useSpellStore.getState();
+    const sessionIgnored = spellStore.sessionIgnored;
+    const sessionIgnoredRules = spellStore.sessionIgnoredRules;
     const errors: SpellError[] = [];
     for (const m of matches) {
-      if (!isSpellingMatch(m)) continue;
+      // THE SCOPE LINE: classify (spelling / grammar / dropped), then
+      // the feature toggles have the final word — a disabled feature's
+      // matches never render even if the engine sent them anyway.
+      const kind = classifyMatch(m);
+      if (kind === 'dropped') continue;
+      if (kind === 'spelling' && !opts.spellingOn) continue;
+      if (kind === 'grammar' && !opts.grammarOn) continue;
       if (m.offset < 0 || m.length <= 0 || m.offset + m.length > text.length) continue;
       const word = text.slice(m.offset, m.offset + m.length);
       const key = word.toLowerCase();
-      if (dict.has(key) || sessionIgnored.has(key)) continue;
+      // Dictionary + session ignores are WORD-shaped (spelling);
+      // grammar false positives are RULE-shaped — ignore by ruleId.
+      if (kind === 'spelling' && (dict.has(key) || sessionIgnored.has(key))) continue;
+      const ruleId = m.rule?.id ?? '';
+      if (ruleId && sessionIgnoredRules.has(ruleId)) continue;
 
-      // Which piece does the match start in? (Spelling matches never
-      // cross the '\n\n' separators; a straddler is dropped.)
+      // Which piece does the match start in? (Word matches never cross
+      // the '\n\n' separators; a straddler is dropped.)
       let idx = -1;
       for (let i = starts.length - 1; i >= 0; i--) {
         if (starts[i]! <= m.offset) {
@@ -274,7 +314,7 @@ export class SpellController {
       if (local + m.length > piece.posMap.length) continue; // spans a separator — not a word
 
       const from = piece.posMap[local]!;
-      // `to`: the next char's position when the word ends mid-text;
+      // `to`: the next char's position when the match ends mid-text;
       // else lastCharPos + 1 (NEVER piece.to — the node-end position
       // would swallow the block separator in textBetween and the
       // drop-guard would kill the error at once).
@@ -285,8 +325,9 @@ export class SpellController {
         word,
         suggestions: (m.replacements ?? []).slice(0, MAX_SUGGESTIONS).map((r) => r.value),
         message: m.shortMessage || m.message,
-        ruleId: m.rule?.id ?? '',
-        kind: 'spelling',
+        ruleId,
+        kind,
+        category: m.rule?.category?.id ?? '',
       });
     }
     errors.sort((a, b) => a.from - b.from);

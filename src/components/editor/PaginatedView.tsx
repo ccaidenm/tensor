@@ -60,7 +60,7 @@ import { Ruler, VerticalRuler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
-import { SpellHighlights } from './paginated/SpellHighlights';
+import { SpellHighlights, type SpellBar } from './paginated/SpellHighlights';
 import { FloatingToolbar } from './FloatingToolbar';
 import { LinkBubble } from './LinkBubble';
 import { SpellBubble } from './SpellBubble';
@@ -178,8 +178,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     inline: boolean;
   } | null>(null);
   const [searchPaint, setSearchPaint] = useState<SearchPaint | null>(null);
-  // Spell flags: the flat-line projection (see updateSpellProjection).
-  const [spellPaint, setSpellPaint] = useState<PaintedRect[]>([]);
+  // Spell/grammar flags: the flat-line projection (see updateSpellProjection).
+  const [spellPaint, setSpellPaint] = useState<SpellBar[]>([]);
   // The suggestion bubble: set by a plain left-click on a flagged
   // word (GDocs behavior); the anchor derives at render time from the
   // error's painted extent (fresh through scrolls/zoom re-renders).
@@ -234,6 +234,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   // granular show/hide; the ribbon button toggles both).
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
+  // Accessibility: grammar flags as a double line (the pageless
+  // fallback surface + PagelessEditor read this via a container class).
+  const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
   // M-IMAGES-2.1 — the INLINE paint's arrival law: bumps when any
   // bitmap lands (pending inline objects repaint once; no relayout —
   // the bitmapVersion is geometry-free, it only rides boxKey).
@@ -568,7 +571,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
 
   /** The spell flags' projection — the search pattern, one word at a
    *  time: PM plugin state (error ranges) mapped through positionMap
-   *  into flat underline bars. Recomputed on relayout (geometry moved)
+   *  into flat underline bars, KIND-TAGGED (spelling red, grammar
+   *  blue — SpellHighlights owns the colors, and the optional double
+   *  line rides the same bars). Recomputed on relayout (geometry moved)
    *  and on spell-meta transactions (results arrived — those dispatch
    *  WITHOUT doc changes, the same seam search's index metas ride).
    *  Doc-changing transactions reach this through relayout()'s force. */
@@ -580,11 +585,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
     if (!force && errors === prevSpellErrorsRef.current) return;
     prevSpellErrorsRef.current = errors;
     const gap = useDocumentStore.getState().pageSetup.pageGap;
-    const bars: PaintedRect[] = [];
+    const bars: SpellBar[] = [];
     for (const e of errors) {
-      bars.push(
-        ...textRangeUnderlineRects(current.blocks, current.result, e.from, e.to, metricsRef.current!, gap)
-      );
+      for (const rect of textRangeUnderlineRects(
+        current.blocks,
+        current.result,
+        e.from,
+        e.to,
+        metricsRef.current!,
+        gap
+      )) {
+        bars.push({ ...rect, kind: e.kind });
+      }
     }
     setSpellPaint(bars);
   }
@@ -1424,7 +1436,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics }: PaginatedVie
   // flips from hidden-input to visible pageless in place.
   if (adapterError) {
     return (
-      <div className="relative" data-testid="paginated-fallback">
+      <div
+        // The accessibility double-line class (the pageless surface's
+        // decoration styling — same rule as PagelessEditor's container).
+        className={`relative ${grammarDoubleLine ? 'grammar-double-line' : ''}`}
+        data-testid="paginated-fallback"
+      >
         <div className="mx-auto w-full max-w-3xl px-8 py-6">
           <div
             className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
