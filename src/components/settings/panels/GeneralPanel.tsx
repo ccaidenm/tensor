@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Moon, Type, Paintbrush, User, Accessibility as AccessibilityIcon, Mouse, Terminal } from 'lucide-react';
+import { Moon, Type, Paintbrush, User, Mouse, Terminal } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -23,7 +23,6 @@ export const GENERAL_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'user', label: 'User' },
   { id: 'editor', label: 'Editor' },
   { id: 'behavior', label: 'Behavior' },
-  { id: 'accessibility', label: 'Accessibility' },
   { id: 'advanced', label: 'Advanced' },
 ];
 
@@ -110,8 +109,6 @@ export function GeneralPanel() {
   const setTheme = useConfigStore((s) => s.setTheme);
   const useFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
   const setUseFloatingToolbar = useConfigStore((s) => s.setUseFloatingToolbar);
-  const reduceMotion = useConfigStore((s) => s.config.accessibility.reduceMotion);
-  const setReduceMotion = useConfigStore((s) => s.setReduceMotion);
   const pasteOnMiddleClick = useConfigStore((s) => s.config.editor.pasteOnMiddleClick);
   const setPasteOnMiddleClick = useConfigStore((s) => s.setPasteOnMiddleClick);
   const developerMode = useConfigStore((s) => s.config.developerMode);
@@ -152,28 +149,6 @@ export function GeneralPanel() {
             checked={pasteOnMiddleClick}
             onCheckedChange={(checked: boolean) => setPasteOnMiddleClick(checked)}
           />
-        </Row>
-      </SettingsSection>
-
-      <SettingsSection id="accessibility" title="Accessibility">
-        <Row
-          icon={<AccessibilityIcon className="h-4 w-4" />}
-          label="Reduce Motion"
-          description="Disable UI animations (panels, transitions)"
-        >
-          <div className="flex gap-1">
-            {(['system', 'on', 'off'] as const).map((opt) => (
-              <Button
-                key={opt}
-                size="sm"
-                variant={reduceMotion === opt ? 'secondary' : 'ghost'}
-                onClick={() => setReduceMotion(opt)}
-                className="capitalize"
-              >
-                {opt}
-              </Button>
-            ))}
-          </div>
         </Row>
       </SettingsSection>
 

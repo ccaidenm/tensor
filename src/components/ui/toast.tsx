@@ -20,7 +20,14 @@ function ToastViewport({ className, ...props }: ToastPrimitive.Viewport.Props) {
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "pointer-events-none fixed inset-x-4 bottom-4 z-50 mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
+        // z-[100]: THE TOPMOST LAYER, BY LAW — dialogs, popovers, and
+        // menus all cap at z-50, and same-z stacking is decided by
+        // portal DOM order (dialogs mount later, so they win). A toast
+        // is a transient, system-level notice: it must never render
+        // behind ANY surface, open or not. (The only thing above this
+        // is the dev-only bench <pre> at z-9999 — a debugging surface,
+        // deliberately extreme.)
+        "pointer-events-none fixed inset-x-4 bottom-4 z-[100] mx-auto w-auto max-w-sm outline-none sm:right-4 sm:left-auto sm:mx-0 sm:w-full",
         className
       )}
       {...props}

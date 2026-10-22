@@ -38,6 +38,7 @@ import {
   SeparatorHorizontal,
   Settings,
   Sparkles,
+  SpellCheck,
   Strikethrough,
   Underline as UnderlineIcon,
   MessageSquareText,
@@ -70,6 +71,8 @@ import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
 import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
+import { useSpellStore } from '@/lib/editor/spell/store';
+import { spellCheckActive } from '@/lib/config/schema';
 
 /**
  * M-PALETTE. The declarative app command registry — the single source
@@ -490,6 +493,25 @@ export const COMMANDS: CommandAction[] = [
         mode: current?.mode ?? 'per-page',
         countBy: current?.countBy,
       });
+    },
+  },
+  {
+    id: 'toggleSpellCheck',
+    title: 'Toggle Spelling & Grammar',
+    icon: SpellCheck,
+    group: 'navigate',
+    keywords: ['spell', 'spelling', 'grammar', 'check', 'proof', 'proofing', 'languagetool'],
+    // The consent gate (the ribbon button's rule): the FIRST enable
+    // opens the setup dialog — the provider choice is never defaulted.
+    // MASTER semantic: flips both features together (Settings →
+    // Proofing holds the per-feature switches).
+    run: () => {
+      const { config, setSpellCheckEnabled } = cfg();
+      if (!config.spellCheck.configured) {
+        useSpellStore.getState().openSetup();
+        return;
+      }
+      setSpellCheckEnabled(!spellCheckActive(config.spellCheck));
     },
   },
   // ─── M-IMAGES-1.5: the image commands (toolbar + palette dispatch

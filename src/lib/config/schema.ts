@@ -74,10 +74,62 @@ export const ConfigSchema = z.object({
     fetchLinkMetadata: true,
     allowFontCatalogs: false,
   }),
+  /** Spell check — the CONSENT posture (the fonts/privacy precedents,
+   *  hardened): OFF by default; enabling requires picking a provider
+   *  with an informed choice (Settings > Proofing / the setup dialog).
+   *  Online = text is sent to LanguageTool's servers; Local = the
+   *  sidecar, loopback-only after a one-time ≈290MB download.
+   *
+   *  TWO INDEPENDENT FEATURES under one consent: `spelling` and
+   *  `grammar` are separate as-you-type toggles (Settings → Proofing)
+   *  so either can run alone; the master switch (ribbon / F7 /
+   *  palette) flips BOTH. `configured` records that the provider
+   *  choice was made — the consent covers both features, since the
+   *  same text goes to the same destination either way.
+   *
+   *  MIGRATION: configs persisted by the spell-check release carry
+   *  `enabled` (both-or-neither) — `enabled: true` maps to both flags
+   *  on (grammar arrives enabled for existing users), anything else
+   *  to both off. */
+  spellCheck: z.preprocess(
+    (raw) => {
+      if (raw && typeof raw === 'object' && !('spelling' in raw) && !('grammar' in raw)) {
+        const old = raw as Record<string, unknown> & { enabled?: unknown };
+        return {
+          ...old,
+          spelling: old.enabled === true,
+          grammar: old.enabled === true,
+        };
+      }
+      return raw;
+    },
+    z.object({
+      /** The informed choice has been MADE (the ribbon button toggles
+       *  outright once true; before that, it opens the setup dialog). */
+      configured: z.boolean().default(false),
+      provider: z.enum(['online', 'local']).default('local'),
+      /** LT language code; v1 ships en-US (the bundled dictionary file
+       *  and the runtime's languages follow it). */
+      language: z.string().default('en-US'),
+      spelling: z.boolean().default(false),
+      grammar: z.boolean().default(false),
+    }).default({
+      configured: false,
+      provider: 'local',
+      language: 'en-US',
+      spelling: false,
+      grammar: false,
+    })
+  ),
   accessibility: z.object({
     reduceMotion: z.enum(['system', 'on', 'off']).default('system'),
+    /** Grammar flags: double-line in ADDITION to color — the
+     *  color-blind aid (Accessibility → Visual Cues). Default off:
+     *  color-only is the default distinction. */
+    grammarDoubleLine: z.boolean().default(false),
   }).default({
     reduceMotion: 'system',
+    grammarDoubleLine: false,
   }),
   /** M-T4 — DEVELOPER MODE: exposes Reload + Inspect Element in the
    *  document context menu. Default OFF; enabling requires accepting
@@ -107,3 +159,10 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 export const DEFAULT_CONFIG: Config = ConfigSchema.parse({});
+
+/** The MASTER gate — is any checking feature active? (Either flag on =
+ *  the ribbon button shows active; the master switch turns both
+ *  together. Either alone is a legitimate running state.) */
+export function spellCheckActive(spell: Config['spellCheck']): boolean {
+  return spell.spelling || spell.grammar;
+}

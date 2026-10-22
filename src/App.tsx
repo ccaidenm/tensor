@@ -12,6 +12,8 @@ import { StyleDialog } from './components/dialogs/StyleDialog';
 import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
 import { AltTextDialog } from './components/dialogs/ImageDialogs';
 import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
+import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
+import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
@@ -187,6 +189,10 @@ function App() {
       <DocumentStatisticsDialog />
       <CustomPageSizeDialog />
       <MarginsDialog />
+      {/* Spell check: the provider-choice consent surface + the
+          personal dictionary manager (both store-driven, one mount). */}
+      <SpellSetupDialog />
+      <DictionaryDialog />
     </>
   );
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link2, RefreshCw, Type } from 'lucide-react';
+import { Link2, RefreshCw, SpellCheck, Type } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { Switch } from '@/components/ui/switch';
 import { IconButton } from '@/components/layout/IconButton';
@@ -9,6 +9,7 @@ import type { SettingsSectionDefinition } from '@/lib/settings/types';
 export const PRIVACY_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'link-previews', label: 'Link Previews' },
   { id: 'fonts', label: 'Fonts' },
+  { id: 'spell-check', label: 'Spell Check' },
   { id: 'updates', label: 'Updates' },
 ];
 
@@ -58,6 +59,16 @@ export function PrivacyPanel() {
             onCheckedChange={setAllowFontCatalogs}
             data-testid="allow-font-catalogs-switch"
           />
+        </Row>
+      </SettingsSection>
+
+      <SettingsSection id="spell-check" title="Spell Check">
+        <Row
+          icon={<SpellCheck className="h-4 w-4" />}
+          label="Where checking happens"
+          description="Spelling and grammar checking are off by default. When enabled, the LOCAL provider runs LanguageTool as a process on this device and never sends anything over the network (loopback only). The ONLINE provider — an explicit choice in the setup dialog — sends your text to LanguageTool's servers for checking. Spelling and grammar are independent toggles (Proofing); the provider, dictionary, and local runtime storage are managed in Proofing. Grammar flags are advisory-blue by default; Accessibility holds the double-line color-blind aid."
+        >
+          <span />
         </Row>
       </SettingsSection>
 

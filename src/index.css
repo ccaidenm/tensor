@@ -57,6 +57,12 @@ body {
   --color-search-highlight-foreground: oklch(25% 0.02 95);
   --color-search-current: oklch(72% 0.19 42);
   --color-search-current-foreground: oklch(98% 0 0);
+  /* Spell check: the flagged-word flat line (Pages overlay background,
+   * pageless text-decoration color — one var, both surfaces). */
+  --color-spell-error: oklch(55% 0.21 25);
+  /* Grammar: the ADVISORY blue (Word/GDocs convention) — distinct from
+   * spelling's red by color (and, optionally, the double line). */
+  --color-grammar-error: oklch(52% 0.17 250);
 }
 
 .dark {
@@ -94,6 +100,10 @@ body {
   --sidebar-accent-foreground: oklch(0.96 0.002 285);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.70 0.18 42);
+  /* Spell check (dark): a red that clears the dark background. */
+  --color-spell-error: oklch(66% 0.20 25);
+  /* Grammar (dark): the advisory blue, lifted for dark backgrounds. */
+  --color-grammar-error: oklch(68% 0.14 250);
 }
 
 .ProseMirror:focus {
@@ -290,6 +300,37 @@ body {
 .tensor-search-match-current {
   background-color: var(--color-search-current);
   color: var(--color-search-current-foreground);
+}
+
+/* ── SPELL & GRAMMAR CHECK (pageless surface) ───────────────────────────
+    The flat flagged-span lines: SOLID by explicit user ruling (not the
+    squiggle convention), tuned SIGNAL geometry — 2px, offset 3px, and
+    ~15% translucent (color-mix) so they read as flags rather than
+    typographic underlining. Pages mode paints the same look as
+    overlay bars (SpellHighlights: max(2px, fontSize/12) thickness,
+    baseline+0.12·fontSize, opacity .85).
+    SPELLING = red, GRAMMAR = advisory blue (Word/GDocs convention);
+    the `.grammar-double-line` container class (Accessibility →
+    Visual Cues) flips grammar to a double line — the color-blind
+    aid, opt-in (color-only is the default distinction). */
+.tensor-spell-error,
+.tensor-grammar-error {
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.tensor-spell-error {
+  text-decoration-color: color-mix(in oklab, var(--color-spell-error) 85%, transparent);
+}
+
+.tensor-grammar-error {
+  text-decoration-color: color-mix(in oklab, var(--color-grammar-error) 85%, transparent);
+}
+
+.grammar-double-line .tensor-grammar-error {
+  text-decoration-style: double;
 }
 
 @theme inline {
