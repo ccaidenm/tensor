@@ -669,6 +669,24 @@ Performance work here is measured, never guessed. Three permanent, zero-cost-in-
 
 ---
 
+## The contextual ribbon
+
+`src/lib/ribbon/` — the contextual tab system (M-CONTEXTUAL-RIBBON).
+
+Three pieces, and the split is the scaling surface:
+
+- **`contextStore.ts`** (zustand) — the producer-facing activation model. Contexts **announce themselves**: `enter(id)` when a context's selection kind becomes active, `exit(id)` when it stops. One context at a time (first-come wins; `enter` is idempotent per id), and `exit` is **id-scoped** so a stale producer can never tear down a newer context.
+- **`contextualTabs.tsx`** — the registry. One entry per contextual tab (id, label, icon, lazy `content` component). `RibbonContextId` is the key union and the compile-time lock: `enter()` is typed against it, so a context id with no tab definition cannot even be announced. A new context is a new entry here plus a producer — the `Ribbon.tsx` wiring never grows.
+- **`useRibbonContext.ts`** — the producer binding: `useRibbonContext(id, isActive)` maps a boolean signal to `enter`/`exit` (mounted once per context by the Ribbon via `useSelectionContexts`). Selection kinds come from `useEditorState`, the app's reactive PM read.
+
+The **interplay lives in `Ribbon.tsx`**, next to the tab state it acts on: entering a context appends its trigger to the strip (accent ink — `text-primary` — against the neutral static strip), auto-focuses it, and remembers the tab the user was on; exiting removes it and restores that tab. Clicking a NORMAL tab does **not** exit the context — the trigger lingers in the strip while the selection kind persists (Word behavior), and the exit→enter cycle that follows a genuine selection change re-focuses it.
+
+The entrance animation (`tensor-contextual-tab-in`, ~130ms fade+rise in `index.css`) is gated through `useReducedMotion()` — the accessibility `reduceMotion: 'on'` override and the system preference both suppress it.
+
+Current contexts: **table** (selection inside/`NodeSelection` on a table) and **image** (image/inlineImage `NodeSelection`) are real producers with placeholder group content until their own issues; **headerFooter** is registered (so the tab and its types exist) with its producer stubbed until the headers/footers milestone wires `activeSurface` to it.
+
+---
+
 ## Known limits
 
 Deliberate, all of them:

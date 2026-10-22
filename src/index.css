@@ -248,6 +248,30 @@ body {
   }
 }
 
+/* M-CONTEXTUAL-RIBBON — the contextual tab's quick entrance: a short
+   fade + rise of the strip trigger (~130ms, ease-out). Deliberately
+   SUBTLE (the tab is a small strip target, not a panel). The component
+   gates the class through useReducedMotion (the app's 'on'/'off'/'system'
+   setting) — this media query is the second belt for the 'system' leg. */
+.tensor-contextual-tab-in {
+  animation: tensor-contextual-tab-in 130ms ease-out;
+}
+@keyframes tensor-contextual-tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tensor-contextual-tab-in {
+    animation: none;
+  }
+}
+
 .ProseMirror li,
 .ProseMirror li p {
   line-height: 1.6;
