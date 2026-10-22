@@ -17,11 +17,13 @@ import { NodeSelection } from '@tiptap/pm/state';
  * coordsFor (the painted-rect resolver); pageless uses the node view's
  * own DOM box (the visible surface IS the PM view there).
  *
- * PINNING: pointerdown inside the bubble pins it — the attr writes the
- * bubble itself dispatches (live-apply per keystroke) fire 'update'
- * events that would otherwise re-run this path; pinned updates are
- * ignored, and the bubble holds its own draft (state.latex only seeds
- * it at open).
+ * PINNING: pointerdown inside the bubble pins it — the open state HOLDS
+ * (no re-anchor, no close) while its own chrome is being clicked, but
+ * its OWN attr writes (style buttons, palette inserts, typing) still
+ * REFRESH the state's style attrs in place (the S/M/L/XL highlight
+ * must follow the click — the mid-interaction refresh in update()).
+ * The bubble's latex DRAFT is its own local state — state.latex only
+ * seeds it at open, so refreshes never clobber mid-edit text.
  */
 
 export interface EquationEditorState {
@@ -36,12 +38,14 @@ export interface EquationEditorState {
   coords: { left: number; top: number };
 }
 
-/** Pageless anchor: the node view's DOM box, bubble opens BELOW it,
+/** Pageless anchor (VIEWPORT coords — the bubble renders fixed at
+ *  body level): the node view's DOM box, bubble opens BELOW it,
  *  horizontally centered on the box (the bubble offsets by half its
- *  own width — the same number the bubble is styled at, w-80 = 320). */
+ *  own width — the same number the bubble is styled at, w-80 = 320).
+ *  Exported for the bubble's render-time re-derivation. */
 const BUBBLE_HALF_WIDTH = 160;
 
-function domAnchor(editor: Editor, pos: number): { left: number; top: number } {
+export function equationDomAnchor(editor: Editor, pos: number): { left: number; top: number } {
   const dom = editor.view.nodeDOM(pos) as HTMLElement | null;
   if (!dom) {
     const c = editor.view.coordsAtPos(pos);
@@ -78,13 +82,16 @@ export function useEquationEditor(
     const currentEditor = editor;
 
     function update() {
-      if (pinnedRef.current) return;
       const { selection } = currentEditor.state;
       const equationSelection =
         selection instanceof NodeSelection && selection.node.type.name === 'equation'
           ? selection
           : null;
       if (!equationSelection) {
+        // PINNED (interacting with the bubble's own chrome): HOLD —
+        // e.g. an undo edge momentarily dropped the NodeSelection; the
+        // deleted-while-open effect below owns the real close.
+        if (pinnedRef.current) return;
         openPosRef.current = null;
         setState(null);
         return;
@@ -92,24 +99,42 @@ export function useEquationEditor(
       const pos = equationSelection.from;
       const known = openPosRef.current === pos;
       openPosRef.current = pos;
+      const node = equationSelection.node;
+      const attrs = {
+        latex: node.attrs.latex as string,
+        align: node.attrs.align as 'left' | 'center' | 'right',
+        color: (node.attrs.color as string | null) ?? null,
+        scale: (node.attrs.scale as number) ?? 1,
+      };
+
+      // THE MID-INTERACTION REFRESH (the stale-style-highlight fix):
+      // while the bubble is pinned, its OWN attr writes (style buttons,
+      // palette, typing) re-enter through 'update' events — the open
+      // state must REFRESH (the S/M/L/XL highlight moves) without
+      // re-anchoring (the bubble holds still while you click its
+      // chrome) and without re-seeding the draft (the bubble's latex
+      // state is its own; only the style attrs flow).
+      if (known && pinnedRef.current) {
+        setState((prev) =>
+          prev && prev.pos === pos
+            ? { ...prev, ...attrs }
+            : {
+                ...attrs,
+                pos,
+                coords: coordsFor ? coordsFor(pos) : equationDomAnchor(currentEditor, pos),
+              },
+        );
+        return;
+      }
+
       const coords = coordsFor
         ? coordsFor(pos)
-        : domAnchor(currentEditor, pos);
-      // A re-fire for the ALREADY-open equation (the bubble's own attr
-      // writes) must not clobber the user's draft — the bubble seeds
-      // from state.latex at open only, so identical-pos re-fires are
-      // skipped; a DIFFERENT equation re-anchors fresh.
-      setState((prev) => {
-        if (known && prev && prev.pos === pos) return prev;
-        return {
-          pos,
-          latex: equationSelection.node.attrs.latex as string,
-          align: equationSelection.node.attrs.align as 'left' | 'center' | 'right',
-          color: (equationSelection.node.attrs.color as string | null) ?? null,
-          scale: (equationSelection.node.attrs.scale as number) ?? 1,
-          coords,
-        };
-      });
+        : equationDomAnchor(currentEditor, pos);
+      setState((prev) =>
+        prev && prev.pos === pos
+          ? { ...prev, ...attrs, coords }
+          : { ...attrs, pos, coords },
+      );
     }
 
     function handlePointerDown(e: PointerEvent) {

@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { MathfieldElement } from 'mathlive';
-import { loadMathLive } from '@/lib/equations/wysiwyg';
+import { configureMathField, loadMathLive } from '@/lib/equations/wysiwyg';
 
 /**
  * M-EQ-2 — the WYSIWYG math field: a thin React wrapper over
@@ -77,14 +77,11 @@ export const MathLiveField = forwardRef<MathLiveFieldHandle, MathLiveFieldProps>
       .then(() => {
         if (cancelled || !hostRef.current) return;
         const mf = document.createElement('math-field') as MathfieldElement;
-        // The keyboard overlays and alternate-key popovers are chrome
-        // noise for a desktop editor; the structural work happens
-        // through typing + the palette.
-        mf.menuItems = [];
-        mf.smartMode = true;
-        mf.smartFence = true;
-        mf.smartSuperscript = true;
         hostRef.current.appendChild(mf);
+        // AFTER attachment (the option accessors require a mounted
+        // field): smart typing + the `/`→fraction shortcut, configured
+        // read-extend against MathLive's default set (wysiwyg.ts).
+        configureMathField(mf);
         mfRef.current = mf;
         mf.value = latexRef.current;
         mf.addEventListener('input', () => {

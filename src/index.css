@@ -459,18 +459,38 @@ body {
   border-radius: 2px;
 }
 /* M-EQ-2 — the WYSIWYG math-field editor surface (the bubble's
-   MathLiveField wrapper). The <math-field> custom element defaults to
-   inline; the wrapper gives it the document-truth face: block, full
-   width, the shared theme caret. Its INTERNAL styles are MathLive's
-   own (its math fonts are the same KaTeX_* faces the document
-   bundles — the loader sees them in document.fonts and never fetches
-   its own). */
+   MathLiveField wrapper). The WRAPPER carries the app's shadcn Input
+   recipe (ui/input.tsx verbatim: border-input / focus-within ring in
+   --ring, the app's accent); these rules NEUTRALIZE MathLive's own
+   :host chrome so the custom element reads as one native input:
+   its built-in #acacac-bordered gray box (the "empty container below
+   the input" — a second box INSIDE the wrapper), its system 'field'
+   background (an off-theme fill), and the UA focus outline
+   (-webkit-focus-ring-color — the non-native ring color). Outer
+   document rules on the host element beat shadow :host rules. Its
+   INTERNAL styles stay MathLive's own (the math fonts are the same
+   KaTeX_* faces the document bundles). */
 .tensor-equation-editor math-field {
   display: block;
   width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
   padding: 4px 8px;
   --caret-color: var(--primary);
   --contains-highlight-background-color: var(--accent);
+}
+/* MathLive's built-in chrome buttons — the "Toggle Virtual Keyboard"
+   and "Menu" toggles — render UNCONDITIONALLY in the field's shadow
+   markup (dist: the ML__toggles block has no visibility option; the
+   menu toggle hides only for disabled/readonly/too-narrow fields).
+   Tensor's editor has its own palette and no touch surface, so both
+   are hidden through the EXPOSED shadow parts (part=virtual-keyboard-
+   toggle / part=menu-toggle — the documented cross-boundary styling
+   mechanism). The empty menuItems config stays as the belt. */
+.tensor-equation-editor math-field::part(virtual-keyboard-toggle),
+.tensor-equation-editor math-field::part(menu-toggle) {
+  display: none;
 }
 /* The placeholder glyphs inside the editor surface (the #? slots) get
    MathLive's own prompt style — leave it; only the chrome above is

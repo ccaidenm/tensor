@@ -11,6 +11,7 @@ import { EDITOR_COMMAND_MAP } from '@/lib/editor/editorCommands';
 import { getCommand } from '@/lib/commands/registry';
 import { parseEquation, renderEquation, renderInlineMath } from '@/lib/equations/render';
 import { MATH_SYMBOLS, MATH_TEMPLATES } from '@/lib/equations/catalogs';
+import { FRACTION_SLASH_SHORTCUT, sanitizeMathliveLatex } from '@/lib/equations/wysiwyg';
 import { renderTensor, settleLayout } from './harness';
 import { FakeEquationMetrics, FakeMetrics } from './fakeMetrics';
 
@@ -51,7 +52,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 // surface's own behavior is upstream (MathLive's); what IS tested here
 // is the React glue around it: the fallback law, the palette's
 // source-splice path, and the commit paths (attrs, color, scale).
-vi.mock('@/lib/equations/wysiwyg', () => ({
+// The SANITIZER is the real one (pure string math — the document
+// boundary is exactly what must hold in every environment).
+vi.mock('@/lib/equations/wysiwyg', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/equations/wysiwyg')>()),
   loadMathLive: () => Promise.reject(new Error('MathLive unavailable in jsdom tests')),
   resetMathLiveLoader: () => {},
 }));
@@ -427,8 +431,9 @@ describe('editor bubble (assisted input)', () => {
       fireEvent.change(source, { target: { value: '\\frac{a}{b}' } });
     });
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{a}{b}');
-    // The preview renders the same projection:
-    expect(document.querySelector('[data-testid="equation-bubble-math"] .katex')).not.toBeNull();
+    // The document is the live preview (no preview pane): the node
+    // view re-renders the committed projection.
+    expect(document.querySelector('[data-testid="equation-render"] .katex')).not.toBeNull();
 
     // The palette (the no-LaTeX-knowledge path): a template button
     // splices its skeleton into the source at the cursor.
@@ -449,7 +454,9 @@ describe('editor bubble (assisted input)', () => {
     });
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{a}{b}\\frac{a}{b}\\alpha');
 
-    // The parse error surfaces in the bubble (never in the document).
+    // The parse error surfaces in the bubble (never in the document):
+    // the ONE in-bubble failure signal — the preview pane is gone, so
+    // the line shows ONLY while the source does not parse.
     await act(async () => {
       fireEvent.change(source, { target: { value: '\\sqrt{' } });
     });
@@ -726,5 +733,200 @@ describe('style attrs', () => {
     expect(fraction.mf).toBe('\\frac{#@}{#?}');
     const sqrt = MATH_TEMPLATES[0]!.templates.find((t) => t.name === 'square root')!;
     expect(sqrt.mf).toBe('\\sqrt{#@}');
+  });
+});
+
+// ─── 11. The MathLive → document boundary (M-EQ-2) ──────────────────────
+
+describe('mathlive boundary', () => {
+  it('sanitizeMathliveLatex: editing tokens never reach the document latex', () => {
+    // Empty-argument slots (\placeholder{} — MathLive's serializer
+    // spelling) become EMPTY arguments, not parse errors.
+    expect(sanitizeMathliveLatex('\\frac{1}{\\placeholder{}}')).toBe('\\frac{1}{}');
+    expect(sanitizeMathliveLatex('\\placeholder{}')).toBe('');
+    expect(sanitizeMathliveLatex('\\sqrt[\\placeholder{}]{x}')).toBe('\\sqrt[]{x}');
+    // The optional-arg spelling and wrapped content.
+    expect(sanitizeMathliveLatex('a\\placeholder[#?]{note}b')).toBe('ab');
+    // MathLive-only letter spellings (the ii/jj/ee shortcuts) map to
+    // plain letters KaTeX knows.
+    expect(sanitizeMathliveLatex('\\imaginaryI + \\exponentialE')).toBe('i + e');
+    expect(sanitizeMathliveLatex('\\imaginaryJ\\differentialD')).toBe('jd');
+    // The diagonal fraction maps to the stacked spelling.
+    expect(sanitizeMathliveLatex('\\nicefrac{3}{4}')).toBe('\\frac{3}{4}');
+    // Plain latex passes through byte-identical.
+    expect(sanitizeMathliveLatex('x^{2} + \\sqrt{y}')).toBe('x^{2} + \\sqrt{y}');
+  });
+
+  it('the slash-to-fraction shortcut is pinned: the main-row / has NO default binding (verified against the dist), so Tensor ADDS it over the defaults', () => {
+    // The read-extend-write contract: extending, never replacing
+    // (assigning inlineShortcuts replaces wholesale — a partial set
+    // would silently lose sqrt/pi/sum).
+    expect(FRACTION_SLASH_SHORTCUT.value).toBe('\\frac{#@}{#?}');
+    // `#@` = the just-typed token (numerator), `#?` = the slot the
+    // caret lands in (denominator) — typing "2/3" grows the fraction.
+    expect(FRACTION_SLASH_SHORTCUT.after).not.toContain('text');
+  });
+
+  it('through the SOURCE box too: placeholder-ful input commits sanitized — the document shows RENDERED math, never the raw-source invalid face', async () => {
+    const { editor } = renderTensor('<p>b</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.focus();
+      editor.commands.insertEquation();
+    });
+    await settleLayout(80);
+    // (MathLive is mocked out here — the Source textarea is the
+    // surface; the boundary is the SAME one the field rides.)
+    const source = document.querySelector('[data-testid="equation-bubble-source"]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(source, { target: { value: '\\frac{1}{\\placeholder{}}' } });
+    });
+    // The node's committed latex is the SANITIZED document latex…
+    expect(findEquation(editor)!.attrs.latex).toBe('\\frac{1}{}');
+    // …so the document renders math (no raw-source invalid face), the
+    // bubble shows NO error line, and there is NO preview pane (the
+    // document is the preview).
+    expect(document.querySelector('[data-testid="equation-invalid"]')).toBeNull();
+    expect(document.querySelector('[data-testid="equation-bubble-error"]')).toBeNull();
+    expect(document.querySelector('[data-testid="equation-bubble-preview"]')).toBeNull();
+    expect(document.querySelector('[data-testid="equation-render"] .katex')).not.toBeNull();
+  });
+});
+
+// ─── 12. The style-highlight refresh (the stale-open-state fix) ────────
+
+describe('style highlight refresh', () => {
+  it('clicking S moves the highlight off M (attrs refresh while the bubble is pinned)', async () => {
+    const { editor } = renderTensor('<p>hl</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.focus();
+      editor.commands.insertEquation();
+    });
+    await settleLayout(80);
+
+    const scaleS = document.querySelector('[data-testid="equation-scale-S"]')!;
+    const scaleM = document.querySelector('[data-testid="equation-scale-M"]')!;
+    // M (the default) starts active:
+    expect(scaleM.getAttribute('aria-pressed')).toBe('true');
+    expect(scaleS.getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => {
+      fireEvent.pointerDown(scaleS, { button: 0, pointerId: 1 });
+      fireEvent.pointerUp(scaleS, { pointerId: 1 });
+      fireEvent.click(scaleS);
+    });
+    // The attr commits…
+    expect(findEquation(editor)!.attrs.scale).toBe(0.75);
+    // …and the HIGHLIGHT MOVES (state refreshes mid-interaction —
+    // the stale-open-time-snapshot bug's pin):
+    expect(scaleS.getAttribute('aria-pressed')).toBe('true');
+    expect(scaleM.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('the alignment highlight moves the same way', async () => {
+    const { editor } = renderTensor('<p>al</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.focus();
+      editor.commands.insertEquation();
+    });
+    await settleLayout(80);
+    const alignRight = document.querySelector('[data-testid="equation-align-right"]')!;
+    expect(alignRight.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => {
+      fireEvent.click(alignRight);
+    });
+    expect(findEquation(editor)!.attrs.align).toBe('right');
+    expect(alignRight.getAttribute('aria-pressed')).toBe('true');
+    expect(
+      document.querySelector('[data-testid="equation-align-center"]')!.getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+});
+
+// ─── 13. The bubble's chrome shape (M-EQ-2 polish) ─────────────────────
+
+describe('bubble chrome', () => {
+  it('the footer is a REAL footer: edge-to-edge (the DialogFooter negative-margin pattern), no preview pane, no close X', async () => {
+    const { editor } = renderTensor('<p>chrome</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.focus();
+      editor.commands.insertEquation();
+    });
+    await settleLayout(80);
+
+    // NO preview pane (the document is the live preview — the user
+    // ruling) and NO header X (Done/Escape/click-away own closing):
+    expect(document.querySelector('[data-testid="equation-bubble-preview"]')).toBeNull();
+    const header = document.querySelector('[data-testid="equation-bubble-header"]')!;
+    expect(header.querySelector('button')).toBeNull();
+
+    // The footer: the app's DialogFooter pattern (ui/dialog.tsx) —
+    // negative margins (-mx-3 -mb-3) escaping the root's p-3 so the
+    // rule and the muted band run edge-to-edge, rounded to the
+    // bubble's bottom corners.
+    const footer = document.querySelector('[data-testid="equation-bubble-footer"]') as HTMLElement;
+    expect(footer).not.toBeNull();
+    expect(footer.className).toContain('-mx-3');
+    expect(footer.className).toContain('-mb-3');
+    expect(footer.className).toContain('border-t');
+    expect(footer.className).toContain('rounded-b-lg');
+    // The bubble's own padding is p-3 — the pinned escape values:
+    const bubble = document.querySelector('[data-equation-bubble]') as HTMLElement;
+    expect(bubble.className).toContain('p-3');
+
+    // THE FLOATING PANEL (the drag-over-the-ribbon fix): the bubble
+    // renders through a BODY portal at fixed position + max z — it
+    // escapes the editor's scroll container, whose overflow clip (not
+    // any z-index) is what put a dragged bubble under the ribbon.
+    expect(document.body.contains(bubble)).toBe(true);
+    expect(bubble.parentElement).toBe(document.body);
+    expect(bubble.className).toContain('fixed');
+    expect(bubble.className).toContain('z-[9999]');
+
+    // The input surface (the Source textarea in this fallback
+    // environment — the field wrapper carries the same recipe) speaks
+    // the shadcn Input treatment: border-input + the --ring accent on
+    // focus, never the UA focus ring MathLive's host draws by default.
+    const source = document.querySelector('[data-testid="equation-bubble-source"]') as HTMLTextAreaElement;
+    expect(source.className).toContain('border-input');
+    expect(source.className).toContain('focus-visible:ring-ring/50');
+    expect(source.className).toContain('focus-visible:border-ring');
+  });
+});
+
+// ─── 14. The drag handle (M-EQ-2 polish) ────────────────────────────────
+
+describe('drag handle', () => {  it('dragging the header moves the bubble by the pointer delta; the style toolbar is not a handle', async () => {
+    const { editor } = renderTensor('<p>drag</p>');
+    await settleLayout();
+    act(() => {
+      editor.commands.focus();
+      editor.commands.insertEquation();
+    });
+    await settleLayout(80);
+    const bubble = document.querySelector('[data-equation-bubble]') as HTMLElement;
+    const header = document.querySelector('[data-testid="equation-bubble-header"]')!;
+    const leftBefore = parseFloat(bubble.style.left);
+    const topBefore = parseFloat(bubble.style.top);
+
+    await act(async () => {
+      fireEvent.pointerDown(header, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      fireEvent.pointerMove(header, { pointerId: 1, clientX: 125, clientY: 108 });
+      fireEvent.pointerUp(header, { pointerId: 1 });
+    });
+    // The offset rides the anchor: +25px right, +8px down.
+    expect(parseFloat(bubble.style.left)).toBeCloseTo(leftBefore + 25, 5);
+    expect(parseFloat(bubble.style.top)).toBeCloseTo(topBefore + 8, 5);
+    // A second drag ACCUMULATES from the moved position.
+    const leftMid = parseFloat(bubble.style.left);
+    await act(async () => {
+      fireEvent.pointerDown(header, { button: 0, pointerId: 1, clientX: 300, clientY: 200 });
+      fireEvent.pointerMove(header, { pointerId: 1, clientX: 290, clientY: 200 });
+      fireEvent.pointerUp(header, { pointerId: 1 });
+    });
+    expect(parseFloat(bubble.style.left)).toBeCloseTo(leftMid - 10, 5);
   });
 });

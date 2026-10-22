@@ -1906,19 +1906,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         />
       )}
 
-      {equationState && rootRect && (() => {
-        const anchor = equationCoordsFor(equationState.pos);
-        return (
-          <EquationEditorBubble
-            ref={equationBubbleRef}
-            editor={editor}
-            state={{ ...equationState, coords: anchor }}
-            containerTop={rootRect.top}
-            containerLeft={rootRect.left}
-            onClose={closeEquationEditor}
-          />
-        );
-      })()}
+      {/* M-EQ: the equation editor — portaled to body + fixed + max z
+          INSIDE the component (escapes the scroll container's overflow
+          clip: a dragged bubble must never go under the ribbon). The
+          painted-rect anchor resolver is passed in; the bubble
+          re-derives it at render (fresh through scrolls/zoom). */}
+      {equationState && (
+        <EquationEditorBubble
+          ref={equationBubbleRef}
+          editor={editor}
+          state={equationState}
+          coordsFor={equationCoordsFor}
+          onClose={closeEquationEditor}
+        />
+      )}
       {/* The floating toolbar is UI chrome, not document content — it
           renders OUTSIDE the zoom transform at 100% scale, positioned
           from the selection's painted bounding box. */}

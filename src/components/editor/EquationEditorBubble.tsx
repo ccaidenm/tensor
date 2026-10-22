@@ -1,15 +1,18 @@
-import { forwardRef, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Code2, Sigma, X } from 'lucide-react';
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlignCenter, AlignLeft, AlignRight, Code2, Sigma } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { MATH_SYMBOLS, MATH_TEMPLATES } from '@/lib/equations/catalogs';
-import { parseEquation, renderEquation, renderInlineMath } from '@/lib/equations/render';
+import { parseEquation, renderInlineMath } from '@/lib/equations/render';
+import { sanitizeMathliveLatex } from '@/lib/equations/wysiwyg';
 import { MathLiveField, type MathLiveFieldHandle } from './MathLiveField';
+import { getScrollParent } from '@/lib/editor/domUtils';
+import { equationDomAnchor, type EquationEditorState } from '@/lib/editor/useEquationEditor';
 import type { Editor } from '@tiptap/core';
-import type { EquationEditorState } from '@/lib/editor/useEquationEditor';
 
 /**
  * M-EQ-2 — the equation editor bubble, VISUAL-FIRST. The WYSIWYG math
@@ -21,10 +24,11 @@ import type { EquationEditorState } from '@/lib/editor/useEquationEditor';
  *
  * ONE DRAFT, TWO SURFACES: `draft` is the single source of truth; the
  * math field emits it via input events, the Source textarea edits it
- * directly, and the KaTeX preview shows the DOCUMENT-truth rendering
- * (what the page will paint — MathLive's rendering is close, KaTeX is
- * what ships). Every draft change live-applies to the node (the M-EQ
- * live-apply law, coalesced by prosemirror-history).
+ * directly. Every draft change live-applies to the node (coalesced by
+ * prosemirror-history) — which makes THE DOCUMENT the live preview
+ * (no preview pane; the user ruling). What remains in-bubble is the
+ * FAILURE signal alone: a one-line error, only when the source does
+ * not parse.
  *
  * STYLE CONTROLS (the M-EQ-2 ruling): color via the SHARED
  * ColorPickerButton (the font-color tool's own component — same
@@ -41,8 +45,10 @@ import type { EquationEditorState } from '@/lib/editor/useEquationEditor';
 interface EquationEditorBubbleProps {
   editor: Editor;
   state: EquationEditorState;
-  containerTop: number;
-  containerLeft: number;
+  /** Viewport-coordinate anchor resolver (the paginated painted-rect
+   *  derivation). Absent → the pageless node-view DOM anchor. Either
+   *  way it is re-derived AT RENDER (fresh through scrolls/zoom). */
+  coordsFor?: (pos: number) => { left: number; top: number };
   onClose: () => void;
 }
 
@@ -55,7 +61,7 @@ const SCALE_PRESETS: { label: string; value: number; title: string }[] = [
 
 export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBubbleProps>(
   function EquationEditorBubble(
-    { editor, state, containerTop, containerLeft, onClose },
+    { editor, state, coordsFor, onClose },
     ref,
   ) {
   const [draft, setDraft] = useState(state.latex);
@@ -70,6 +76,68 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
   // point is computed against the OLD draft, so it lands AFTER the
   // DOM re-render.
   const pendingCursorRef = useRef<number | null>(null);
+  // DRAG (the tear-off model): while ANCHORED the bubble re-derives
+  // its base at every render (fresh through scrolls/zoom) and the
+  // offset rides it; the first completed drag BAKES the current
+  // position as the new base — from then on the bubble is a floating
+  // panel that ignores re-anchors (Word's docked-equation-tools
+  // precedent: a torn-off editor panel is a panel).
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [hasDragged, setHasDragged] = useState(false);
+  const frozenBaseRef = useRef<{ left: number; top: number } | null>(null);
+  const dragStartRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
+  // The in-flight offset's SOURCE OF TRUTH: endDrag must read the
+  // final delta SYNCHRONOUSLY (its state twin is still the pre-batch
+  // closure value when React batches pointerMove+pointerUp into one
+  // flush — the delta was silently lost there).
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  // Scroll-follow (anchored state): the body portal is fixed-position
+  // (viewport coords), so content scrolls must re-derive the anchor —
+  // a tick re-renders and the render-time anchor recomputes.
+  const [, setScrollTick] = useState(0);
+
+  function handleHeaderPointerDown(e: React.PointerEvent) {
+    if (e.button !== 0) return;
+    dragStartRef.current = {
+      px: e.clientX,
+      py: e.clientY,
+      ox: dragOffsetRef.current.x,
+      oy: dragOffsetRef.current.y,
+    };
+    // Pointer capture keeps the drag alive outside the header's box;
+    // where the API is missing/throws (jsdom), the handlers on the
+    // header still cover the common in-strip path.
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* capture unavailable — drag stays header-local */
+    }
+    e.preventDefault();
+  }
+  function handleHeaderPointerMove(e: React.PointerEvent) {
+    const s = dragStartRef.current;
+    if (!s) return;
+    const next = { x: s.ox + (e.clientX - s.px), y: s.oy + (e.clientY - s.py) };
+    dragOffsetRef.current = next;
+    setDragOffset(next);
+  }
+  function endDrag() {
+    if (dragStartRef.current) {
+      // Bake: the dropped viewport position becomes the panel's base
+      // (read through the REF — the state twin is batch-stale here).
+      const base = hasDragged ? frozenBaseRef.current : currentAnchorRef.current;
+      if (base) {
+        frozenBaseRef.current = {
+          left: base.left + dragOffsetRef.current.x,
+          top: base.top + dragOffsetRef.current.y,
+        };
+      }
+      setHasDragged(true);
+      setDragOffset({ x: 0, y: 0 });
+      dragOffsetRef.current = { x: 0, y: 0 };
+    }
+    dragStartRef.current = null;
+  }
 
   useLayoutEffect(() => {
     if (pendingCursorRef.current == null) return;
@@ -80,6 +148,37 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
     }
     pendingCursorRef.current = null;
   }, [draft]);
+
+  // ─── POSITION (the body-portal model) ─────────────────────────────
+  // The bubble renders through a document.body portal at fixed
+  // position + max z: it ESCAPES the editor's scroll container, whose
+  // overflow would otherwise clip it at the ribbon's edge (the
+  // dragged-under-the-ribbon bug) — no ancestor z-index can beat a
+  // clip. Fixed positioning takes VIEWPORT coordinates directly, so
+  // the anchor resolvers (both already viewport-spaced) need no
+  // container subtraction. While anchored, the base re-derives at
+  // every render; the scroll listener below keeps it fresh through
+  // content scrolls.
+  const currentAnchorRef = useRef<{ left: number; top: number }>({ left: 0, top: 0 });
+  const anchor = hasDragged
+    ? (frozenBaseRef.current ?? state.coords)
+    : (() => {
+        try {
+          return coordsFor ? coordsFor(state.pos) : equationDomAnchor(editor, state.pos);
+        } catch {
+          return state.coords;
+        }
+      })();
+  currentAnchorRef.current = anchor;
+
+  useEffect(() => {
+    if (hasDragged) return; // torn off: a floating panel does not chase
+    const scrollParent = getScrollParent(editor.view.dom);
+    if (!scrollParent) return;
+    const onScroll = () => setScrollTick((t) => t + 1);
+    scrollParent.addEventListener('scroll', onScroll);
+    return () => scrollParent.removeEventListener('scroll', onScroll);
+  }, [editor, hasDragged]);
 
   /** The ONE attr-write path (raw tr at the captured pos — positionally
    *  exact even if the PM selection drifted; attrs are merged from the
@@ -96,7 +195,7 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
       onClose();
       return;
     }
-view.dispatch(
+    view.dispatch(
       view.state.tr.setNodeMarkup(state.pos, undefined, {
         latex: next.latex ?? (node.attrs.latex as string),
         align: next.align ?? (node.attrs.align as 'left' | 'center' | 'right'),
@@ -108,7 +207,12 @@ view.dispatch(
 
   function applyDraft(next: string) {
     setDraft(next);
-    commit({ latex: next });
+    // THE ONE BOUNDARY: MathLive's editing tokens (\placeholder{},
+    // \imaginaryI, …) never reach the document — KaTeX can't parse
+    // them and the node would fall into the raw-source invalid face.
+    // The DRAFT stays raw (the field's slots survive its own re-fires
+    // through the echo guard); only the committed latex is normalized.
+    commit({ latex: sanitizeMathliveLatex(next) });
   }
 
   /** Source-surface palette insert: splice at the textarea's cursor
@@ -133,10 +237,13 @@ view.dispatch(
     }
   }
 
-  const parseError = useMemo(
-    () => (draft.trim() === '' ? null : parseEquation(draft)),
-    [draft],
-  );
+  // The VALIDATION surface (the preview pane is gone — live-apply makes
+  // the document the preview): the sanitized projection is what parses;
+  // placeholders are empty slots, never errors.
+  const parseError = useMemo(() => {
+    const documentLatex = sanitizeMathliveLatex(draft);
+    return documentLatex.trim() === '' ? null : parseEquation(documentLatex);
+  }, [draft]);
 
   const filteredSymbols = useMemo(() => {
     if (!query.trim()) return MATH_SYMBOLS;
@@ -156,24 +263,25 @@ view.dispatch(
     }
   }
 
+  /** One style toggle: the ACTIVE state rides aria-pressed (AT + the
+   *  highlight test) AND the secondary variant; state refreshes live
+   *  through useEquationEditor's mid-interaction merge. */
   const toolbarButton = (
-    value: 'left' | 'center' | 'right' | number,
+    testid: string,
+    active: boolean,
     icon: React.ReactNode,
     label: string,
+    onPick: () => void,
   ) => (
     <Tooltip>
       <TooltipTrigger
         render={
           <Button
-            variant={
-              (typeof value === 'number' ? state.scale : state.align) === value
-                ? 'secondary'
-                : 'ghost'
-            }
+            variant={active ? 'secondary' : 'ghost'}
             size="icon-xs"
-            onClick={() =>
-              commit(typeof value === 'number' ? { scale: value } : { align: value })
-            }
+            aria-pressed={active}
+            data-testid={testid}
+            onClick={onPick}
           >
             {icon}
           </Button>
@@ -183,29 +291,63 @@ view.dispatch(
     </Tooltip>
   );
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       data-equation-bubble
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
-      className="absolute z-30 w-80 rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
-      style={{ left: state.coords.left - containerLeft, top: state.coords.top - containerTop }}
+      // FIXED + MAX Z at body level: the bubble escapes the editor's
+      // scroll container (whose overflow clip is what put a dragged
+      // bubble under the ribbon — no ancestor z-index can beat a
+      // clip), and z-max keeps it above every app surface while
+      // dragging. Viewport coordinates directly — no container math.
+      className="fixed z-[9999] w-80 rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
+      style={{
+        left: anchor.left + dragOffset.x,
+        top: anchor.top + dragOffset.y,
+      }}
     >
-      <div className="mb-2 flex items-center justify-between">
+      {/* THE HEADER IS THE DRAG HANDLE (no close button — Done, Escape,
+          and click-away own closing) and carries the equation mark. */}
+      <div
+        data-testid="equation-bubble-header"
+        className="mb-2 flex cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
+        style={{ touchAction: 'none' }}
+        onPointerDown={handleHeaderPointerDown}
+        onPointerMove={handleHeaderPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <Sigma size={13} className="text-muted-foreground" />
         <span className="font-medium">Equation</span>
-        <Button variant="ghost" size="icon-xs" onClick={onClose}>
-          <X size={12} />
-        </Button>
       </div>
 
       {/* The style toolbar: alignment (the engine's align attr), the
           SHARED color picker (null = inherit), scale presets, and the
           Visual/Source surface toggle. */}
       <div className="mb-2 flex items-center gap-1">
-        {toolbarButton('left', <AlignLeft size={12} />, 'Align left')}
-        {toolbarButton('center', <AlignCenter size={12} />, 'Align center')}
-        {toolbarButton('right', <AlignRight size={12} />, 'Align right')}
+        {toolbarButton(
+          'equation-align-left',
+          state.align === 'left',
+          <AlignLeft size={12} />,
+          'Align left',
+          () => commit({ align: 'left' }),
+        )}
+        {toolbarButton(
+          'equation-align-center',
+          state.align === 'center',
+          <AlignCenter size={12} />,
+          'Align center',
+          () => commit({ align: 'center' }),
+        )}
+        {toolbarButton(
+          'equation-align-right',
+          state.align === 'right',
+          <AlignRight size={12} />,
+          'Align right',
+          () => commit({ align: 'right' }),
+        )}
         <div className="mx-1 h-5 w-px bg-border" />
         <ColorPickerButton
           label="Equation color"
@@ -217,9 +359,11 @@ view.dispatch(
         <div className="mx-1 h-5 w-px bg-border" />
         {SCALE_PRESETS.map((preset) =>
           toolbarButton(
-            preset.value,
+            `equation-scale-${preset.label}`,
+            state.scale === preset.value,
             <span className="text-[10px] leading-none">{preset.label}</span>,
             `Font size — ${preset.title}`,
+            () => commit({ scale: preset.value }),
           ),
         )}
         <div className="ml-auto">
@@ -229,13 +373,15 @@ view.dispatch(
                 <Button
                   variant={mode === 'source' ? 'secondary' : 'ghost'}
                   size="icon-xs"
+                  aria-pressed={mode === 'source'}
+                  data-testid="equation-bubble-toggle-source"
                   onClick={() => setMode((m) => (m === 'visual' ? 'source' : 'visual'))}
                 >
                   <Code2 size={12} />
                 </Button>
               }
             />
-            <TooltipContent>{mode === 'visual' ? 'Edit LaTeX source' : 'Visual editing'}</TooltipContent>
+            <TooltipContent>{mode === 'visual' ? 'Show LaTeX source' : 'Visual editing'}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -247,8 +393,16 @@ view.dispatch(
         <MathLiveField
           ref={fieldRef}
           latex={draft}
-          className="tensor-equation-editor mb-2 rounded border border-border bg-background"
-          style={{ minHeight: '52px', fontSize: '16px' }}
+          // THE SHADCN INPUT RECIPE (ui/input.tsx verbatim, with
+          // :focus-within standing in for :focus-visible — the custom
+          // element owns the actual focus): the wrapper carries the
+          // app's border/bg/ring treatment, and index.css neutralizes
+          // MathLive's own :host chrome (its built-in #acacac box,
+          // system 'field' background, and the UA focus outline — the
+          // non-native ring). No min-height: the wrapper hugs the
+          // field's content, killing the empty band below the input.
+          className="tensor-equation-editor mb-2 rounded-lg border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50 dark:bg-input/30"
+          style={{ fontSize: '16px' }}
           onChange={applyDraft}
           onUnavailable={() => setFieldAvailable(false)}
         />
@@ -262,33 +416,23 @@ view.dispatch(
           rows={2}
           spellCheck={false}
           placeholder="e.g. \frac{a}{b} \cdot x^{2}"
-          className="mb-2 w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          className="mb-2 w-full rounded-lg border border-input bg-transparent px-2 py-1.5 font-mono text-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 dark:bg-input/30"
         />
       )}
 
-      {/* Live preview — the DOCUMENT-truth rendering (KaTeX, the one
-          render surface; MathLive's is close but KaTeX ships). */}
-      <div
-        data-testid="equation-bubble-preview"
-        className="tensor-equation mb-2 min-h-9 items-center overflow-x-auto rounded border border-border bg-background px-3 py-1.5"
-        style={{ justifyContent: 'center', fontSize: '16px', color: state.color ?? undefined }}
-      >
-        {draft.trim() === '' ? (
-          <span className="text-xs text-muted-foreground">
-            {fieldAvailable ? 'Type, press / for a fraction, or pick below' : 'Type LaTeX or pick from the palette below'}
-          </span>
-        ) : parseError ? (
-          <span data-testid="equation-bubble-error" className="text-xs text-destructive">
-            {parseError}
-          </span>
-        ) : (
-          <div
-            data-testid="equation-bubble-math"
-            className="tensor-equation-math"
-            dangerouslySetInnerHTML={{ __html: renderEquation(draft) }}
-          />
-        )}
-      </div>
+      {/* NO PREVIEW PANE (the user ruling): live-apply makes the
+          DOCUMENT the preview — it re-renders on every keystroke.
+          What remains here is the FAILURE signal alone: a one-line
+          error, shown ONLY when the (sanitized) source does not
+          parse, so the surface stays clean in the common case. */}
+      {parseError && (
+        <div
+          data-testid="equation-bubble-error"
+          className="mb-2 rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+        >
+          {parseError}
+        </div>
+      )}
 
       <Tabs defaultValue="structures">
         <TabsList className="mb-2 h-7 w-full">
@@ -376,14 +520,23 @@ view.dispatch(
         </TabsContent>
       </Tabs>
 
-      <div className="mt-2 flex items-center justify-between">
+      {/* THE FOOTER — the app's DialogFooter pattern (ui/dialog.tsx):
+          negative margins escape the root's padding so the rule and
+          the muted band run EDGE-TO-EDGE, rounded to the bubble's own
+          bottom corners; the live-apply hint and the one explicit
+          close live inside it. */}
+      <div
+        data-testid="equation-bubble-footer"
+        className="-mx-3 -mb-3 mt-2 flex items-center justify-between rounded-b-lg border-t bg-muted/50 px-3 py-2"
+      >
         <span className="text-[11px] text-muted-foreground">Changes apply as you type</span>
         <Button size="sm" className="h-7 px-2 text-xs" onClick={onClose}>
           <Sigma size={12} className="mr-1" />
           Done
         </Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
   },
 );

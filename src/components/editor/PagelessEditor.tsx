@@ -131,13 +131,14 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
             />
           )}
 
-          {equationState && editor && containerRef.current && (
+          {/* M-EQ: body-portal + fixed inside the component (escapes
+              the zoomed container and the scroll clip — drag-safe over
+              the ribbon); the pageless DOM anchor derives at render. */}
+          {equationState && editor && (
             <EquationEditorBubble
               ref={equationBubbleRef}
               editor={editor}
               state={equationState}
-              containerTop={containerRef.current.getBoundingClientRect().top}
-              containerLeft={containerRef.current.getBoundingClientRect().left}
               onClose={closeEquationEditor}
             />
           )}
