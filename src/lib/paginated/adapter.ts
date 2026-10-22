@@ -2,6 +2,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import type {
   Block,
   CodeBlockBlock,
+  EquationBlock,
   HeadingBlock,
   ImageBlock,
   ParagraphBlock,
@@ -44,6 +45,12 @@ export type { TextAlign } from './positionMap';
  *     monospace @ the document-default size (the pageless <pre> look).
  *   - horizontalRule projects as a single-line paragraph block with a
  *     rule paint hint — one LineBox, never fragments.
+ *   - equation (M-EQ) projects onto the engine's equation kind: latex
+ *     is the node's ONLY document data; dims are NOT sent — they are
+ *     derived facts the engine asks the EquationMetrics PORT for at
+ *     layout time (the adapter is pure and cannot measure — L1).
+ *     fontSize is the resolved document-default run size (`base` — the
+ *     same derivation every paragraph run carries).
  * Remaining kinds throw UnsupportedDocError — ONLY the true future
  * features (table, image, drawing). The PaginatedView's fallback
  * catches ONLY that sentinel; everything else crashes loudly in dev
@@ -209,7 +216,7 @@ function defaultListStyle(kind: 'bullet' | 'ordered'): string {
  */
 interface CachedConversion {
   gen: number;
-  semantic: ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock | TableBlock;
+  semantic: ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock | EquationBlock | TableBlock;
   adapter: AdapterBlock;
   /** Projection facts this conversion was built under (sibling-dependent). */
   indentLeft: number;
@@ -386,7 +393,7 @@ function ownIndentRight(node: PMNode): number {
 
 /** How a PM node projects into the engine's Block union. */
 interface Projection {
-  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'table';
+  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'equation' | 'table';
   /** Block-tier left indent (px) — 0 for unindented blocks. Images
    * don't wrap — the indent family is ignored for them (engine
    * ImageBlock law). */
@@ -403,6 +410,12 @@ interface Projection {
   keepNext?: boolean;
   /** M-IMAGES-2: the anchored float echo (dx/dy/z). */
   float?: { dx: number; dy: number; z: 'front' | 'behind' } | null;
+  // ─── M-EQ: the equation projection fields (kind 'equation') ────
+  /** OPAQUE LaTeX source — the node's only document data. */
+  latex?: string;
+  /** M-EQ-2: the font scale against the document default (folds into
+   *  the metrics fontSize key; default 1). */
+  scale?: number;
 }
 
 /**
@@ -688,6 +701,40 @@ function convertNode(
       semantic,
       // The AdapterBlock mirrors paint-side facts: images carry no
       // text; placed[] (not lines[]) is the render surface.
+      adapter: { id: blockId, runs: [], text: '', from: 0, to: 0, align: 'left', runDecor: [] },
+      indentLeft: 0,
+    };
+  }
+
+  // M-EQ — equations convert structurally, the image arm's shape:
+  // no runs, no text, no BlockTier (the indent family is wrap
+  // geometry, ignored for atomics by law; align is the horizontal
+  // control). THE DIMS RULING: width/height are NOT projected — they
+  // are derived facts (a function of latex + fontSize under the KaTeX
+  // fonts) the engine asks the EquationMetrics port for at layout
+  // time; the adapter is pure (L1) and cannot measure. fontSize is
+  // the resolved document-default run size scaled by the node's
+  // `scale` attr (M-EQ-2 style control — a LAYOUT-relevant attr that
+  // rides the fontSize hash, so a scale edit re-measures + re-walks
+  // through the existing engine path; color is paint-only and stays
+  // OUT of the engine entirely, the image-radius precedent). No
+  // float/flow v1: a display equation is strictly in flow (Word's
+  // display-equation model).
+  if (kind === 'equation') {
+    const scale =
+      typeof projection.scale === 'number' && Number.isFinite(projection.scale) && projection.scale > 0
+        ? projection.scale
+        : 1;
+    const semantic: EquationBlock = {
+      id: blockId,
+      kind: 'equation',
+      latex: projection.latex ?? '',
+      fontSize: base.fontSize * scale,
+      align: projection.align ?? 'center',
+    };
+    return {
+      gen: cacheGeneration,
+      semantic,
       adapter: { id: blockId, runs: [], text: '', from: 0, to: 0, align: 'left', runDecor: [] },
       indentLeft: 0,
     };
@@ -1273,13 +1320,34 @@ export function pmDocToSemantic(
         node,
         offset,
       );
+    } else if (name === 'equation') {
+      // M-EQ — the equation joins the projection (see convertNode's
+      // equation arm for the dims ruling; color stays out of the
+      // engine — paint-only, derived shell-side).
+      const eqAttrs = node.attrs as { latex?: string; align?: string; scale?: unknown };
+      push(
+        projected(
+          node,
+          {
+            kind: 'equation',
+            indentLeft: 0,
+            latex: String(eqAttrs.latex ?? ''),
+            align:
+              eqAttrs.align === 'left' || eqAttrs.align === 'right' ? eqAttrs.align : 'center',
+            scale: typeof eqAttrs.scale === 'number' ? eqAttrs.scale : 1,
+          },
+          offset,
+        ),
+        node,
+        offset,
+      );
     } else if (name === 'table') {
       // M-TABLES — the table joins the projection: one engine
       // TableBlock + the cell-paragraph map (see the conversion).
       push(projected(node, { kind: 'table', indentLeft: 0 }, offset), node, offset);
     } else {
-      // THE THROW LIST (M6.1, pruned by M-IMAGES-1 and M-TABLES): the
-      // last true future feature is (drawing).
+      // THE THROW LIST (M6.1, pruned by M-IMAGES-1, M-TABLES and
+      // M-EQ): the last true future feature is (drawing).
       throw new UnsupportedDocError(
         `[adapter] unsupported block kind '${name}' at offset ${offset}: future features ` +
           '(drawing) — the pageless fallback renders them until the engine supports them'

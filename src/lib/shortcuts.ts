@@ -36,6 +36,8 @@ export const SHORTCUTS: ShortcutDefinition[] = [
 
   { id: 'insertLink', label: 'Hyperlink', keys: 'ctrl+k', context: 'editor', category: 'Insert' },
   { id: 'insertPageBreak', label: 'Page Break', keys: 'ctrl+enter', context: 'editor', category: 'Insert' },
+  // Word's equation shortcut convention (Alt+=).
+  { id: 'insertEquation', label: 'Equation', keys: 'alt+=', context: 'editor', category: 'Insert' },
 
   { id: 'alignLeft', label: 'Align Left', keys: 'ctrl+shift+l', context: 'editor', category: 'Paragraphs' },
   { id: 'alignCenter', label: 'Align Center', keys: 'ctrl+shift+e', context: 'editor', category: 'Paragraphs' },

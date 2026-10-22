@@ -37,6 +37,7 @@ import {
   Scissors,
   SeparatorHorizontal,
   Settings,
+  Sigma,
   Sparkles,
   SpellCheck,
   Strikethrough,
@@ -764,6 +765,13 @@ export const COMMANDS: CommandAction[] = [
     group: 'format',
     shortcutId: 'insertLink',
     keywords: ['link', 'hyperlink', 'url', 'insert'],
+  }),
+  editorCommand('insertEquation', {
+    title: 'Insert Equation',
+    icon: Sigma,
+    group: 'format',
+    shortcutId: 'insertEquation',
+    keywords: ['equation', 'formula', 'math', 'latex', 'insert', 'sigma'],
   }),
   editorCommand('alignLeft', {
     title: 'Align Left',

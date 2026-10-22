@@ -1,4 +1,4 @@
-import type { TextMetrics } from '@tensor-editor/engine';
+import type { EquationMetrics, TextMetrics } from '@tensor-editor/engine';
 
 /**
  * Deterministic metrics for the integration suite (injected via the
@@ -11,4 +11,14 @@ export const FakeMetrics: TextMetrics = {
   measure: (text, style) => text.length * 10 * (style.fontSize / 16),
   ascent: (style) => 0.8 * style.fontSize,
   descent: (style) => 0.2 * style.fontSize,
+};
+
+/** M-EQ: the equation dims port's deterministic double — same 10px/
+ *  char shape as the text ruler (jsdom cannot measure DOM, so the real
+ *  KaTeX measurer's rects read as zeros there; tests inject this). */
+export const FakeEquationMetrics: EquationMetrics = {
+  measure: (latex, fontSize) => ({
+    width: latex.length * 10 * (fontSize / 16),
+    height: fontSize * 1.6,
+  }),
 };

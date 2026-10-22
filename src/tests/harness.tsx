@@ -2,7 +2,7 @@ import { render, act } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { Editor } from '@/components/editor/Editor';
 import { useDocumentStore } from '@/lib/document/store';
-import { FakeMetrics } from './fakeMetrics';
+import { FakeEquationMetrics, FakeMetrics } from './fakeMetrics';
 
 /** Renders the REAL production <Editor/> (tensorExtensions, mode routing,
  * PaginatedView) with deterministic FakeMetrics injected through the
@@ -13,7 +13,7 @@ export function renderTensor(initialHTML?: string) {
   const utils = render(
     <div data-desk-wrapper className="relative">
       <div data-desk-scroll style={{ overflow: 'auto' }}>
-        <Editor metrics={FakeMetrics} />
+        <Editor metrics={FakeMetrics} equationMetrics={FakeEquationMetrics} />
       </div>
     </div>,
   );

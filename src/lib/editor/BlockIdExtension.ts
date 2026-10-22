@@ -32,7 +32,9 @@ import { nanoid } from 'nanoid';
 // M-TABLES: the table node joins the ID-bearing set — the paginated
 // adapter turns one table into ONE engine TableBlock, so the id lives
 // on the table node alone (rows/cells are positional inside it).
-const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'table'];
+// M-EQ: the equation joins too (one EquationBlock per node; PlacedRect
+// echoes the same id — the edit-survival contract's atomic family).
+const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table'];
 
 /**
  * Mint ids for missing/duplicate ID-bearing blocks INTO `tr` (positions

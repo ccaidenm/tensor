@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { EditorContent, type Editor } from "@tiptap/react";
 import { useLinkBubble } from "@/lib/editor/useLinkBubble";
 import { LinkBubble } from "./LinkBubble";
+import { useEquationEditor } from "@/lib/editor/useEquationEditor";
+import { EquationEditorBubble } from "./EquationEditorBubble";
 import { TooltipProvider } from "../ui/tooltip";
 import { useConfigStore } from "@/lib/config/store";
 import { useDocumentStore } from "@/lib/document/store";
@@ -22,6 +24,11 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   const containerRef = useRef<HTMLDivElement>(null);
   const linkBubbleRef = useRef<HTMLDivElement>(null);
   const linkBubble = useLinkBubble(editor, linkBubbleRef);
+  // M-EQ: the equation editor bubble — same chrome spot as the link
+  // bubble (anchored to the clicked node view's DOM box; pageless has
+  // no painted-rect projection).
+  const equationBubbleRef = useRef<HTMLDivElement>(null);
+  const { state: equationState, close: closeEquationEditor } = useEquationEditor(editor, equationBubbleRef);
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   const zoomLevel = useConfigStore((s) => s.config.editor.zoomLevel);
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
@@ -121,6 +128,18 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
               bubble={linkBubble}
               containerTop={containerRef.current.getBoundingClientRect().top}
               containerLeft={containerRef.current.getBoundingClientRect().left}
+            />
+          )}
+
+          {/* M-EQ: body-portal + fixed inside the component (escapes
+              the zoomed container and the scroll clip — drag-safe over
+              the ribbon); the pageless DOM anchor derives at render. */}
+          {equationState && editor && (
+            <EquationEditorBubble
+              ref={equationBubbleRef}
+              editor={editor}
+              state={equationState}
+              onClose={closeEquationEditor}
             />
           )}
 
