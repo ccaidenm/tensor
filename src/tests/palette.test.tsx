@@ -11,6 +11,7 @@ import { usePaletteStore } from '@/lib/palette/store';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { COMMANDS, getCommand, getCommandByMenuEvent } from '@/lib/commands/registry';
 import { filterCommands } from '@/lib/commands/useAppCommands';
+import { hasBandContainer, selectionInBand, setDifferentFirstPage } from '@/lib/editor/headerFooterCommands';
 import { EDITOR_COMMAND_MAP } from '@/lib/editor/editorCommands';
 import { useAppShortcuts } from '@/lib/shortcuts/useAppShortcuts';
 import {
@@ -525,5 +526,79 @@ describe('safe quit (requiresSafeQuit)', () => {
     });
     expect(windowMocks.close).toHaveBeenCalledTimes(1);
     expect(writeTextFile).not.toHaveBeenCalled();
+  });
+});
+
+// ─── M-HEADER-FOOTER-3: the header/footer palette commands ────────────────
+
+describe('header/footer palette commands (M-HEADER-FOOTER-3)', () => {
+
+  it('the four entries register; presence enablement hides remove-when-empty', () => {
+    // Registration (the unique-ids pin lives in the base suite).
+    const ids = ['insertHeader', 'insertFooter', 'toggleShowHeadersFooters', 'removeAllHeadersFooters'];
+    for (const id of ids) {
+      expect(COMMANDS.some((c) => c.id === id)).toBe(true);
+    }
+    // Remove is hidden while nothing exists; the other three show.
+    renderTensor('<p>hello</p>');
+    render(<CommandPalette />);
+    openPalette(true);
+    expect(paletteItem('insertHeader')).not.toBeNull();
+    expect(paletteItem('insertFooter')).not.toBeNull();
+    expect(paletteItem('toggleShowHeadersFooters')).not.toBeNull();
+    expect(paletteItem('removeAllHeadersFooters')).toBeNull();
+  });
+
+  it('Insert Header/Focus flow: run inserts the container + focuses its end', async () => {
+    const { editor } = renderTensor('<p>hello</p>');
+    render(<CommandPalette />);
+    openPalette(true);
+
+    const insertHeader = COMMANDS.find((c) => c.id === 'insertHeader')!;
+    await act(async () => {
+      await insertHeader.run();
+    });
+    expect(hasBandContainer(editor!, 'header')).toBe(true);
+    expect(selectionInBand(editor!)).toBe(true);
+    // Footer likewise.
+    const insertFooter = COMMANDS.find((c) => c.id === 'insertFooter')!;
+    await act(async () => {
+      await insertFooter.run();
+    });
+    expect(hasBandContainer(editor!, 'footer')).toBe(true);
+  });
+
+  it('the display toggle flips config; Remove All clears containers + the first-page flag', async () => {
+    const { editor } = renderTensor('<p>hello</p>');
+    render(<CommandPalette />);
+    openPalette(true);
+
+    act(() => {
+      COMMANDS.find((c) => c.id === 'toggleShowHeadersFooters')!.run();
+    });
+    expect(useConfigStore.getState().config.editor.showHeadersFooters).toBe(false);
+    act(() => {
+      COMMANDS.find((c) => c.id === 'toggleShowHeadersFooters')!.run();
+    });
+    expect(useConfigStore.getState().config.editor.showHeadersFooters).toBe(true);
+
+    // Seed: header + footer containers + differentFirstPage.
+    await act(async () => {
+      await COMMANDS.find((c) => c.id === 'insertHeader')!.run();
+      await COMMANDS.find((c) => c.id === 'insertFooter')!.run();
+      setDifferentFirstPage(true);
+    });
+    expect(hasBandContainer(editor!, 'header')).toBe(true);
+    expect(hasBandContainer(editor!, 'footer')).toBe(true);
+
+    // Remove All: containers gone, flag reset, body text untouched.
+    const removeAll = COMMANDS.find((c) => c.id === 'removeAllHeadersFooters')!;
+    await act(async () => {
+      await removeAll.run();
+    });
+    expect(hasBandContainer(editor!, 'header')).toBe(false);
+    expect(hasBandContainer(editor!, 'footer')).toBe(false);
+    expect(useDocumentStore.getState().headerFooter?.differentFirstPage).toBe(false);
+    expect(editor!.state.doc.textContent).toContain('hello');
   });
 });

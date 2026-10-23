@@ -53,9 +53,15 @@ import {
   Undo2,
   ZoomIn,
   ZoomOut,
+  PanelTop,
+  PanelBottom,
+  Eye,
+  Eraser,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
+import { enableRegion, hasBandContainer } from '@/lib/editor/headerFooterCommands';
+import { cloneHeaderFooterSettings, defaultHeaderFooterSettings } from '@/lib/document/headerFooter';
 import { runEditorCommand } from '@/lib/editor/editorCommands';
 import { focusedTextControl } from '@/lib/editor/domUtils';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -471,6 +477,90 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['table', 'properties', 'sidebar', 'panel', 'dimensions', 'columns', 'rows', 'width', 'height', 'merge', 'shading'],
     enablement: () => !!doc().editor,
     run: () => useSidebarStore.getState().open('table', 'right'),
+  },
+
+  // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
+  // PRESENCE (the band containers in the one PM doc) — the same fact the
+  // Insert buttons' active state reads. ─────────────────────────────
+  {
+    id: 'insertHeader',
+    title: 'Insert Header',
+    icon: PanelTop,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['header', 'insert', 'band', 'top', 'margin'],
+    enablement: () => !!doc().editor,
+    run: () => enableRegion(doc().editor, 'header'),
+  },
+  {
+    id: 'insertFooter',
+    title: 'Insert Footer',
+    icon: PanelBottom,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['footer', 'insert', 'band', 'bottom', 'margin'],
+    enablement: () => !!doc().editor,
+    run: () => enableRegion(doc().editor, 'footer'),
+  },
+  {
+    id: 'toggleShowHeadersFooters',
+    title: 'Toggle Headers & Footers',
+    icon: Eye,
+    group: 'navigate',
+    keywords: ['header', 'footer', 'show', 'hide', 'display', 'toggle', 'band'],
+    // The captions/ruler NPC pattern: a DISPLAY toggle is always
+    // offered (presentation-only; the model round-trips regardless).
+    run: () => {
+      const { config, setShowHeadersFooters } = cfg();
+      setShowHeadersFooters(!config.editor.showHeadersFooters);
+    },
+  },
+  {
+    id: 'removeAllHeadersFooters',
+    title: 'Remove All Headers & Footers',
+    icon: Eraser,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['header', 'footer', 'remove', 'delete', 'clear', 'band', 'all'],
+    // Enablement is honest: nothing to remove → the palette hides it.
+    // Runs delete every band container node (content included) and
+    // reset differentFirstPage — undoable (one PM history step each).
+    enablement: () => {
+      const editor = doc().editor;
+      return (
+        !!editor &&
+        (hasBandContainer(editor, 'header') ||
+          hasBandContainer(editor, 'footer') ||
+          (doc().headerFooter?.differentFirstPage ?? false))
+      );
+    },
+    run: () => {
+      const editor = doc().editor;
+      if (!editor) return;
+      // COLLECT then delete in REVERSE document order — deleting while
+      // walking invalidates the later positions (the "Position N out of
+      // range" crash the test caught). One PM step, so undo restores
+      // everything at once.
+      const targets: Array<{ pos: number; size: number }> = [];
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'headerBlock' && node.type.name !== 'footerBlock') return true;
+        targets.push({ pos, size: node.nodeSize });
+        return false; // children die with the container
+      });
+      if (targets.length > 0) {
+        const tr = editor.state.tr;
+        for (const { pos, size } of targets.reverse()) tr.delete(pos, pos + size);
+        editor.view.dispatch(tr);
+      }
+      const store = doc();
+      const current = store.headerFooter ?? defaultHeaderFooterSettings();
+      if (current.differentFirstPage) {
+        store.setHeaderFooter({
+          ...cloneHeaderFooterSettings(current),
+          differentFirstPage: false,
+        });
+      }
+    },
   },
   {
     id: 'toggleNPC',
