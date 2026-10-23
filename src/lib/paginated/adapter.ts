@@ -6,6 +6,7 @@ import type {
   HeadingBlock,
   ImageBlock,
   ParagraphBlock,
+  ReferenceTableBlock,
   Run,
   SemanticDoc,
   TableBlock,
@@ -18,6 +19,17 @@ import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { lookupStyle } from '@/lib/styles/registry';
 import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
 import { regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
+// M-REFS: the collection scan — the referenceTable node's entries are
+// a LIVE projection of the document (the atom-field ruling: the node
+// stores only kind/depth), so the adapter reads them through the same
+// memoized one-walk scan every consumer shares.
+import {
+  REFERENCE_KINDS,
+  entriesForKind,
+  scanCollections,
+  type CollectionScan,
+  type ReferenceKind,
+} from '@/lib/references/scan';
 import {
   baselineRunStyle,
   resolveBlockTier,
@@ -106,6 +118,10 @@ export interface BlockPaint {
    *  paint-side hook (document-derived fact; config stays out of the
    *  projection). */
   caption?: boolean;
+  /** M-REFS: a reference table block — the GDocs-style FIELD BORDER
+   * (a light gray rounded box around the block's per-page fragment,
+   * drawn by paintLines as pure ink; layout never reads it). */
+  reference?: boolean;
 }
 
 export interface AdapterBlock {
@@ -147,6 +163,50 @@ export interface AdapterBlock {
    * every text selection lives inside one slice.
    */
   table?: { paragraphs: { relStart: number; textStart: number; textLen: number }[] };
+  /**
+   * M-REFS — present IFF this block is a referenceTable: the
+   * ENTRY map, the hit-offset → navigation-target bridge (the
+   * table.paragraphs precedent). The block's runs/text are the
+   * entries' CANONICAL concatenation (entry text, then the tab +
+   * page-number runs when pages are resolved); each sidecar entry
+   * names one collection entry's text slice + its PM navigation
+   * targets (toc/figures: exactly one; index: one per occurrence).
+   * The placeholder (empty collection) carries ONE entry with ZERO
+   * targets — visible, never navigable.
+   */
+  reference?: ReferenceSidecar;
+}
+
+/** One reference-table sidecar entry — see AdapterBlock.reference. */
+export interface ReferenceSidecarEntry {
+  textStart: number;
+  textLen: number;
+  /** PM positions (final caret targets), doc order. */
+  targets: number[];
+}
+
+export interface ReferenceSidecar {
+  entries: ReferenceSidecarEntry[];
+}
+
+/** The sidecar entry whose text slice contains `offset` (the slices
+ * tile the block text; binary search on textStart). Null when the
+ * offset falls between slices — never happens today (no separators),
+ * kept honest for the number-run layout. */
+export function referenceEntryAt(
+  ref: ReferenceSidecar,
+  offset: number
+): ReferenceSidecarEntry | null {
+  let lo = 0;
+  let hi = ref.entries.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const e = ref.entries[mid]!;
+    if (offset < e.textStart) hi = mid - 1;
+    else if (offset >= e.textStart + e.textLen) lo = mid + 1;
+    else return e;
+  }
+  return null;
 }
 
 export interface RunDecor {
@@ -191,6 +251,10 @@ const BUILTIN_REGISTRY: StyleRegistrySnapshot = {
 // dropped-set (enumerating them), not per block and not per occurrence.
 // Painted (runDecor/align, NOT dropped): color, highlight,
 // underline, strike, textAlign left/center/right.
+// M-REFS: the indexEntry mark is RECOGNIZED-QUIET — invisible by
+// design (a reading-mode mark the scanner consumes document-side),
+// never a dropped-in-error warn. Its entries ride the referenceTable
+// blocks, not the paragraph runs it decorates.
 const warnedDroppedSignatures = new Set<string>();
 
 const DEFAULT_HIGHLIGHT = '#fef08a';
@@ -228,11 +292,23 @@ function defaultListStyle(kind: 'bullet' | 'ordered'): string {
  */
 interface CachedConversion {
   gen: number;
-  semantic: ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock | EquationBlock | TableBlock;
+  semantic:
+    | ParagraphBlock
+    | HeadingBlock
+    | CodeBlockBlock
+    | ImageBlock
+    | EquationBlock
+    | TableBlock
+    | ReferenceTableBlock;
   adapter: AdapterBlock;
   /** Projection facts this conversion was built under (sibling-dependent). */
   indentLeft: number;
   paint?: BlockPaint;
+  /** M-REFS: the scan object the referenceTable entries were built
+   * under (the doc-version fact — see Projection.scan). Undefined on
+   * every other kind (undefined === undefined keeps their reuse test
+   * byte-identical). */
+  scan?: CollectionScan;
 }
 
 const nodeCache = new WeakMap<PMNode, CachedConversion>();
@@ -274,7 +350,8 @@ function paintEqual(a: BlockPaint | undefined, b: BlockPaint | undefined): boole
     markersEqual &&
     (a.blockquote ?? false) === (b.blockquote ?? false) &&
     (a.rule ?? false) === (b.rule ?? false) &&
-    (a.code ?? false) === (b.code ?? false)
+    (a.code ?? false) === (b.code ?? false) &&
+    (a.reference ?? false) === (b.reference ?? false)
   );
 }
 
@@ -405,7 +482,7 @@ function ownIndentRight(node: PMNode): number {
 
 /** How a PM node projects into the engine's Block union. */
 interface Projection {
-  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'equation' | 'table';
+  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'equation' | 'table' | 'referenceTable';
   /** Block-tier left indent (px) — 0 for unindented blocks. Images
    * don't wrap — the indent family is ignored for them (engine
    * ImageBlock law). */
@@ -428,6 +505,18 @@ interface Projection {
   /** M-EQ-2: the font scale against the document default (folds into
    *  the metrics fontSize key; default 1). */
   scale?: number;
+  // ─── M-REFS: the referenceTable projection fields ─────────────────
+  /** The collection kind ('toc' | 'figures' | 'index'). */
+  refKind?: ReferenceKind;
+  /** The ToC's heading-depth option (node attr; other kinds ignore). */
+  refDepth?: number;
+  /** The DOC-VERSION FACT the entries were built under — the memoized
+   * scan object (identity-stable while the doc is unchanged). A
+   * referenceTable node's PM object does NOT change when a heading is
+   * retitled, so the conversion cache reuses ONLY when the scan
+   * object is the same one (the sibling-fact pattern: list markers
+   * reconvert the same way). */
+  scan?: CollectionScan;
 }
 
 /**
@@ -941,6 +1030,79 @@ function convertNode(
     };
   }
 
+  // M-REFS — the reference table converts from the SCAN (the atom-field
+  // ruling: the node's only document data is kind/depth; entries are a
+  // live projection). One engine ReferenceTableBlock + the ENTRY sidecar
+  // (the table.paragraphs precedent): the block's canonical runs/text
+  // are the entries' concatenation — text runs now, the tab + page-
+  // number runs once the two-pass resolves pages (a page edit re-runs
+  // THIS conversion with a changed scan/facts and re-breaks through
+  // the engine's contentHash — the number IS an entry-runs edit by
+  // construction). Entry styling: the document-default run look
+  // (baseStyle resolution, no paragraph tier — an entry belongs to no
+  // paragraph style). Entry indent: (level−1) × 32 (the list gutter
+  // precedent). The PLACEHOLDER (empty collection): ONE muted italic
+  // entry with ZERO targets — visible, never navigable (the NodeView's
+  // twin ruling), so the block can never be a zero-height ghost.
+  if (kind === 'referenceTable') {
+    const refKind = projection.refKind ?? 'toc';
+    const refDepth = typeof projection.refDepth === 'number' ? projection.refDepth : 3;
+    const entries = entriesForKind(projection.scan ?? scanCollections(node), refKind, refDepth);
+    const entryStyle: TextStyle = textStyleOf(base, undefined);
+    const engineEntries: ReferenceTableBlock['entries'] = [];
+    const refRuns: Run[] = [];
+    const refDecor: RunDecor[] = [];
+    const sidecarEntries: ReferenceSidecarEntry[] = [];
+    let refText = '';
+
+    if (entries.length === 0) {
+      // The placeholder entry — italic muted ink, never navigable.
+      const placeholderStyle: TextStyle = { ...entryStyle, italic: true };
+      const hint = REFERENCE_KINDS[refKind].emptyHint;
+      engineEntries.push({ runs: [{ text: hint, style: placeholderStyle }] });
+      refRuns.push({ text: hint, style: placeholderStyle });
+      refDecor.push({});
+      sidecarEntries.push({ textStart: 0, textLen: hint.length, targets: [] });
+      refText = hint;
+    } else {
+      for (const e of entries) {
+        const textStart = refText.length;
+        engineEntries.push({
+          runs: [{ text: e.text, style: entryStyle }],
+          ...(e.level > 1 ? { indentLeft: (e.level - 1) * LIST_INDENT_PX } : {}),
+        });
+        refRuns.push({ text: e.text, style: entryStyle });
+        refDecor.push({});
+        sidecarEntries.push({ textStart, textLen: e.text.length, targets: e.targets.map((t) => t.pos) });
+        refText += e.text;
+      }
+    }
+
+    const semantic: ReferenceTableBlock = {
+      id: blockId,
+      kind: 'referenceTable',
+      entries: engineEntries,
+    };
+    return {
+      gen: cacheGeneration,
+      semantic,
+      adapter: {
+        id: blockId,
+        runs: refRuns,
+        text: refText,
+        from: 0,
+        to: 0,
+        align: 'left',
+        paint: { reference: true },
+        runDecor: refDecor,
+        reference: { entries: sidecarEntries },
+      },
+      indentLeft: 0,
+      // The doc-version fact (see Projection.scan) — the reuse test.
+      scan: projection.scan,
+    };
+  }
+
   // The paragraph tier's style identity. Headings resolve through
   // `heading-{level}` — the styleId attr's guaranteed twin (the
   // HeadingSync plugin maintains the alignment); paragraphs through
@@ -1113,6 +1275,12 @@ export function pmDocToSemantic(
   const base = baselineRunStyle(baseStyle);
   const definitions = registry.definitions;
 
+  // M-REFS — the ONE per-call scan (memoized on the doc object — one
+  // walk per doc version, shared by every referenceTable node AND the
+  // pageless NodeView). Computed lazily-adjacent here so every
+  // projection branch below closes over the same identity.
+  const refScan = scanCollections(pm);
+
   const blocks: AdapterBlock[] = [];
   const semantic: Block[] = [];
   const dropped = new Set<string>();
@@ -1161,7 +1329,12 @@ export function pmDocToSemantic(
       cached &&
       cached.gen === cacheGeneration &&
       cached.indentLeft === projection.indentLeft &&
-      paintEqual(cached.paint, projection.paint)
+      paintEqual(cached.paint, projection.paint) &&
+      // M-REFS: the scan fact — a referenceTable node reuses its
+      // conversion only under the SAME doc scan (a retitle elsewhere
+      // keeps the node object but changes the scan object). Every
+      // other kind carries undefined on both sides (no-op test).
+      cached.scan === projection.scan
     ) {
       return cached;
     }
@@ -1417,6 +1590,27 @@ export function pmDocToSemantic(
       // M-TABLES — the table joins the projection: one engine
       // TableBlock + the cell-paragraph map (see the conversion).
       push(projected(node, { kind: 'table', indentLeft: 0 }, offset), node, offset);
+    } else if (name === 'referenceTable') {
+      // M-REFS — the reference table joins the projection: one engine
+      // ReferenceTableBlock per node, entries from the per-call SCAN
+      // (the doc-version fact — the conversion cache reuses only under
+      // the same scan object; a retitle elsewhere reconverts). The
+      // sidecar (entry slices → PM targets) rides the AdapterBlock.
+      push(
+        projected(
+          node,
+          {
+            kind: 'referenceTable',
+            indentLeft: 0,
+            refKind: node.attrs?.kind === 'figures' || node.attrs?.kind === 'index' ? node.attrs.kind : 'toc',
+            refDepth: typeof node.attrs?.depth === 'number' ? node.attrs.depth : 3,
+            scan: refScan,
+          },
+          offset,
+        ),
+        node,
+        offset,
+      );
     } else {
       // THE THROW LIST (M6.1, pruned by M-IMAGES-1, M-TABLES and
       // M-EQ): the last true future feature is (drawing).

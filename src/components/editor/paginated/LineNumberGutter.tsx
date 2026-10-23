@@ -23,13 +23,21 @@ interface LineNumberGutterProps {
   /** Page content box (logical px) — contentBox.x IS the left margin. */
   contentBox: Rect;
   entries: GutterEntry[];
+  /**
+   * M-GUTTER — CONTEXTUAL REPLACEMENT: the y-offsets (content-
+   * relative, the shared key with the icon layers) of lines whose
+   * number YIELDS its slot to a contextual gutter element (a ref-
+   * table badge, a table-header pin, an index bookmark). The icon
+   * renders IN the number's place; the number is hidden — never both.
+   */
+  suppressed?: ReadonlySet<number>;
   /** The document's baseStyle (resolveNormalBase) — the gutter speaks
    *  the document's font, at a muted, smaller voice. */
   fontFamily: string;
   fontSize: number;
 }
 
-export function LineNumberGutter({ contentBox, entries, fontFamily, fontSize }: LineNumberGutterProps) {
+export function LineNumberGutter({ contentBox, entries, suppressed, fontFamily, fontSize }: LineNumberGutterProps) {
   return (
     <div
       data-testid="line-number-gutter"
@@ -47,6 +55,8 @@ export function LineNumberGutter({ contentBox, entries, fontFamily, fontSize }: 
             right: '8px',
             lineHeight: `${line.rect.height}px`,
             fontSize: `${Math.round(fontSize * 0.75)}px`,
+            // M-GUTTER: the number gives way to the contextual icon.
+            ...(suppressed?.has(line.rect.y) ? { visibility: 'hidden' } : {}),
           }}
         >
           {number}

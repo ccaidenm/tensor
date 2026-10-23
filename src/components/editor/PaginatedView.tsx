@@ -6,7 +6,13 @@ import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import type { EquationMetrics, LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
-import { pmDocToSemantic, UnsupportedDocError, type AdapterBlock } from '@/lib/paginated/adapter';
+import {
+  pmDocToSemantic,
+  referenceEntryAt,
+  UnsupportedDocError,
+  type AdapterBlock,
+} from '@/lib/paginated/adapter';
+import { navigateToReferenceTarget } from '@/lib/references/navigate';
 import { EquationTooTallError } from '@tensor-editor/engine';
 import { getRealMetrics, fontString } from '@/lib/paginated/metrics';
 import { assertContiguity } from '@/lib/paginated/paint';
@@ -31,6 +37,13 @@ import { cellAround, findTable, TableMap } from '@tiptap/pm/tables';
 import type { CellSelection as CellSelectionType } from '@tiptap/pm/tables';
 import { TableCellLayer } from './paginated/TableCellLayer';
 import { TableHeaderPins, type TableHeaderPin } from './paginated/TableHeaderPins';
+import {
+  IndexLineMarks,
+  ReferenceTableBadges,
+  type IndexLineMark,
+  type ReferenceTableBadge,
+} from './paginated/ReferenceGutter';
+import type { ReferenceKind } from '@/lib/references/scan';
 import { TableResizeHandles } from './paginated/TableResizeHandles';
 import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { scrollCaretIntoView } from '@/lib/paginated/caretFollow';
@@ -438,7 +451,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       metricsRef.current!,
       bandPage
     );
-    setCaret(geom);
+    // M-REFS: a NodeSelection on a reference table has NO text caret
+    // (the equation treatment — an atom's selection is the block, not
+    // a position in its projected text).
+    const selNode0 = (selection as unknown as { node?: { type?: { name?: string } } }).node;
+    const isReferenceTableNodeSelection = selNode0?.type?.name === 'referenceTable';
+    setCaret(isReferenceTableNodeSelection ? null : geom);
     // Any input/selection motion resets the caret to solid;
     // the 500ms idle timer starts blinking.
     resetCaretBlink();
@@ -570,7 +588,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     }
     const rects = isCellSelection
       ? cellRects!
-      : selection.empty || isInlineImageNodeSelection
+      : selection.empty || isInlineImageNodeSelection || isReferenceTableNodeSelection
         ? []
         : textRangeLineRects(
             current.blocks,
@@ -583,7 +601,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             surface,
             current.bandBlockIds
           );
-    if (isInlineImageNodeSelection || isCellSelection) setCaret(null);
+    if (isInlineImageNodeSelection || isCellSelection || isReferenceTableNodeSelection) setCaret(null);
     setSelRects(rects);
     const imageNode = isBlockImageNodeSelection
       ? (selection as unknown as { node: { attrs: { blockId?: string } } }).node
@@ -607,6 +625,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       !draggingRef.current &&
         useConfigStore.getState().config.useFloatingToolbar &&
         !isEquationNodeSelection &&
+        !isReferenceTableNodeSelection &&
         (imageToolbarRect || caretCellAnchor || isCellSelection || !selection.empty)
         ? computeToolbar(
             imageToolbarRect
@@ -834,6 +853,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // projections (caret/selection/toolbar/bubble) resolve THAT page.
     if (hit.band != null) bandPageRef.current = hit.pageIndex;
     const block = current.blocks.find((b) => b.id === hit.blockId);
+    // M-REFS: a reference table drags/extends AS A UNIT — its entries
+    // are a projection (no PM positions inside the atom), so any hit
+    // within the block resolves to the position just after it. A drag
+    // across the table therefore selects the whole block, never a
+    // phantom caret inside projected text.
+    if (block?.reference) return block.from + 1;
     return block ? blockOffsetToPmPos(block, hit.offset) : null;
   }
 
@@ -1066,6 +1091,49 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             break;
           }
         }
+      }
+    }
+
+    // M-REFS — the reference-table ENTRY click (the locked ruling): a
+    // plain click SELECTS the block (NodeSelection — deletable, Delete
+    // works natively); Ctrl/Cmd+click NAVIGATES the hit entry's target
+    // (the sidecar's offset→entry map; the caret-follow scroll owns
+    // the reveal — ScrollGuardExtension routes the navigation write).
+    // Runs BEFORE the generic text hit: an entry line is an
+    // interaction surface, not a caret position. Right-clicks take the
+    // same branch (the selection is still set — the context menu then
+    // opens on it).
+    if (stack) {
+      const rz = useConfigStore.getState().config.editor.zoomLevel / 100;
+      const rs = stack.getBoundingClientRect();
+      const refHit = hitTest(
+        layout.result,
+        layout.blocks,
+        metricsRef.current!,
+        useDocumentStore.getState().pageSetup.pageGap,
+        (e.clientX - rs.left) / rz,
+        (e.clientY - rs.top) / rz
+      );
+      const refBlock = refHit ? layout.blocks.find((b) => b.id === refHit.blockId) : undefined;
+      if (refBlock?.reference) {
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) {
+          const entry = referenceEntryAt(refBlock.reference, refHit!.offset);
+          // The placeholder carries ZERO targets — visible, never
+          // navigable (an honest no-op, not a silent caret jump).
+          if (entry && entry.targets.length > 0) {
+            navigateToReferenceTarget(editor, entry.targets[0]!);
+          }
+        } else {
+          // The SELECTION ask (GDocs): a plain click selects the block
+          // AND arms a drag — holding and moving extends a text
+          // selection from the block's start, so dragging across the
+          // table selects it AS A UNIT with the content around it (a
+          // release without moving keeps the NodeSelection).
+          editor.commands.setNodeSelection(refBlock.from);
+          startDrag(refBlock.from);
+        }
+        return;
       }
     }
 
@@ -1509,18 +1577,104 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       const firstRow = tableNode.child(0);
       const pinned =
         firstRow.childCount > 0 && firstRow.firstChild?.type.name === 'tableHeader';
-      let best: { pageIndex: number; y: number } | null = null;
+      let best: { pageIndex: number; y: number; height: number } | null = null;
       for (const pr of layout.result.placed) {
         if (pr.kind !== 'tableCell' || pr.blockId !== block.id || !pr.cell) continue;
         if (pr.cell.row !== 0 || pr.cell.col !== 0) continue;
         if (!best || pr.pageIndex < best.pageIndex || (pr.pageIndex === best.pageIndex && pr.rect.y < best.y)) {
-          best = { pageIndex: pr.pageIndex, y: pr.rect.y };
+          best = { pageIndex: pr.pageIndex, y: pr.rect.y, height: pr.rect.height };
         }
       }
-      if (best) out.push({ blockId: block.id, pageIndex: best.pageIndex, y: best.y, pinned });
+      if (best) out.push({ blockId: block.id, pageIndex: best.pageIndex, y: best.y, height: best.height, pinned });
     }
     return out;
   }, [layout, editor]);
+
+  /** M-REFS — the gutter TYPE BADGES: one per reference table, at its
+   * first line overall (a fragmenting table badges only its true
+   * start). Kind read from the PM node (the model fact), geometry from
+   * the engine's LineBoxes. */
+  const referenceBadges = useMemo<ReferenceTableBadge[]>(() => {
+    if (!layout || !editor) return [];
+    const out: ReferenceTableBadge[] = [];
+    for (const block of layout.blocks) {
+      if (!block.reference) continue;
+      const node = editor.state.doc.nodeAt(block.from);
+      const kind: ReferenceKind =
+        node?.attrs?.kind === 'figures' || node?.attrs?.kind === 'index' ? node.attrs.kind : 'toc';
+      let best: { pageIndex: number; y: number; height: number } | null = null;
+      for (const line of layout.result.lines) {
+        if (line.blockId !== block.id) continue;
+        if (!best || line.pageIndex < best.pageIndex || (line.pageIndex === best.pageIndex && line.rect.y < best.y)) {
+          best = { pageIndex: line.pageIndex, y: line.rect.y, height: line.rect.height };
+        }
+      }
+      if (best) out.push({ blockId: block.id, pos: block.from, kind, pageIndex: best.pageIndex, y: best.y, height: best.height });
+    }
+    return out;
+  }, [layout, editor]);
+
+  /** M-REFS — the INDEX BOOKMARKS (GDocs): one bookmark per LINE that
+   * carries an indexEntry mark — the marked terms listed in the
+   * tooltip. Doc walk → block-offset → line lookup (the search
+   * projection's math, gutter-local). */
+  const indexBookmarks = useMemo<IndexLineMark[]>(() => {
+    if (!layout || !editor) return [];
+    const marks: Array<{ from: number; to: number; term: string }> = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.marks.some((m) => m.type.name === 'indexEntry')) {
+        marks.push({ from: pos, to: pos + node.nodeSize, term: node.text ?? '' });
+      }
+    });
+    const out: IndexLineMark[] = [];
+    const seen = new Set<string>();
+    for (const mark of marks) {
+      const bo = pmPosToBlockOffset(layout.blocks, mark.from);
+      if (!bo) continue;
+      for (const line of layout.result.lines) {
+        if (line.blockId !== bo.block.id) continue;
+        if (line.rangeEnd <= bo.offset || line.rangeStart >= bo.offset + (mark.to - mark.from)) continue;
+        const key = `${line.pageIndex}:${Math.round(line.rect.y)}`;
+        if (seen.has(key)) {
+          // Same line, another term — merge into the tooltip list.
+          const existing = out.find((m) => `${m.pageIndex}:${Math.round(m.y)}` === key);
+          if (existing && !existing.terms.includes(mark.term)) existing.terms.push(mark.term);
+          continue;
+        }
+        seen.add(key);
+        out.push({
+          id: key,
+          pageIndex: line.pageIndex,
+          y: line.rect.y,
+          height: line.rect.height,
+          terms: [mark.term],
+        });
+      }
+    }
+    return out;
+  }, [layout, editor]);
+
+  /** M-GUTTER — CONTEXTUAL REPLACEMENT: the per-page set of line y-
+   *  offsets whose NUMBER yields its slot to a contextual gutter
+   *  element (a header pin, a ref-table badge, an index bookmark).
+   *  The y is the shared key between the icon layers and the number
+   *  gutter (lines stack — y is unique per page except table lanes,
+   *  where a covered number pair is an acceptable v1 edge). */
+  const gutterReplaced = useMemo(() => {
+    const byPage = new Map<number, Set<number>>();
+    const add = (pageIndex: number, y: number) => {
+      let set = byPage.get(pageIndex);
+      if (!set) {
+        set = new Set();
+        byPage.set(pageIndex, set);
+      }
+      set.add(y);
+    };
+    for (const pin of headerPins) if (pin.pinned) add(pin.pageIndex, pin.y);
+    for (const badge of referenceBadges) add(badge.pageIndex, badge.y);
+    for (const mark of indexBookmarks) add(mark.pageIndex, mark.y);
+    return byPage;
+  }, [headerPins, referenceBadges, indexBookmarks]);
 
   // The pin's toggle: park the selection in the table's first cell
   // (toggleHeaderRow operates on the selection's row), toggle, restore
@@ -1790,6 +1944,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             transformOrigin: 'top left',
           }}
         >
+          {/* M-GUTTER: the shared tooltip provider for page-mounted
+              chrome (header pins, ref-table badges, index bookmarks)
+              — the popups portal to body, so zoom never scales them
+              and the stack's overflow never clips them. */}
+          <TooltipProvider delay={200}>
           {result.pages.map((page) => {
             const pageGroups = groupsByPage.get(page.index) ?? [];
             return (
@@ -1890,6 +2049,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                       <LineNumberGutter
                         contentBox={page.contentBox}
                         entries={entries}
+                        // M-GUTTER: contextual icons own these lines'
+                        // slots; their numbers hide.
+                        suppressed={gutterReplaced.get(page.index)}
                         fontFamily={gutterBase.fontFamily}
                         fontSize={gutterBase.fontSize}
                       />
@@ -1897,6 +2059,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                   })()}
                 {/* M-T3: the header-row pins (gutter chrome, click-to-toggle). */}
                 <TableHeaderPins geometry={page} pins={headerPins} onToggle={toggleTableHeader} />
+                {/* M-REFS: the collection badges (one per table, at its
+                    first line — click selects the block) + the index
+                    bookmarks (one per marked line, GDocs-style). */}
+                <ReferenceTableBadges
+                  geometry={page}
+                  badges={referenceBadges}
+                  onSelect={(pos) => editor.commands.setNodeSelection(pos)}
+                />
+                <IndexLineMarks geometry={page} marks={indexBookmarks} />
 
                 {/* The selected image's border + resize handles. An
                     INLINE object gets no float drag (in-flow objects
@@ -1948,6 +2119,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
               </PageSheet>
             );
           })}
+          </TooltipProvider>
           {spellPaint.length > 0 && <SpellHighlights bars={spellPaint} />}
           {searchPaint && (
             <SearchHighlights matches={searchPaint.all} current={searchPaint.current} />

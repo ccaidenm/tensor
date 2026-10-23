@@ -36,6 +36,10 @@ const NPC_COLOR = 'rgba(0, 0, 0, 0.45)';
 const QUOTE_BORDER_COLOR = '#d4d4d8';
 const QUOTE_BG_COLOR = 'rgba(0, 0, 0, 0.04)';
 const CODE_BG_COLOR = '#f4f4f5';
+/** M-REFS: the GDocs-style field border — light gray, 1px, rounded.
+ * Concrete hex by law (canvas cannot resolve theme variables — the
+ * hyperlink-seed ruling family). */
+const REF_BORDER_COLOR = '#d4d4d8';
 const RULE_COLOR = '#a1a1aa';
 const LIST_INDENT_PX = 32;
 
@@ -202,6 +206,36 @@ export function paintLines(
   // nothing — blank space, layout intact (display-only ink).
   if (paint?.caption && extras.showCaptions === false) return;
   const markerStyle = extras.markerStyle;
+
+  // M-REFS — the FIELD BORDER (GDocs-style): one light gray rounded
+  // box around the block's per-page fragment (the union of its line
+  // rects, padded), pure ink behind the text. A table fragmenting
+  // across pages gets one box per page — each fragment reads as the
+  // field's extent on that page. The full content column width (the
+  // GDocs box hugs the column, not the longest entry).
+  if (paint?.reference && lines.length > 0) {
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (const line of lines) {
+      top = Math.min(top, line.rect.y);
+      bottom = Math.max(bottom, line.rect.y + line.rect.height);
+    }
+    const y0 = top - minY - 4;
+    const h = bottom - top + 8;
+    const prevStroke = ctx.strokeStyle;
+    const prevWidth = ctx.lineWidth;
+    ctx.strokeStyle = REF_BORDER_COLOR;
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(-6.5, y0 + 0.5, contentWidth + 13, h, 6);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(-6.5, y0 + 0.5, contentWidth + 13, h);
+    }
+    ctx.strokeStyle = prevStroke;
+    ctx.lineWidth = prevWidth;
+  }
 
   for (const line of lines) {
     const off = alignOffset(align, line.rect.width, contentWidth - line.rect.x);
