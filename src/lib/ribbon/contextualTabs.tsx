@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import { PanelTop, Table as TableIcon, Image as ImageIcon } from 'lucide-react';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '@/components/layout/IconButton';
+import { HeaderFooterTools } from '@/components/layout/ribbon/contextual/HeaderFooterTools';
 
 /**
  * M-CONTEXTUAL-RIBBON — the contextual tab registry.
@@ -18,9 +19,9 @@ import { IconButton } from '@/components/layout/IconButton';
  * NOTE: the TABLE and IMAGE tabs are STRUCTURAL STARTERS this milestone:
  * the activation paths are real (selection-driven producers, end to
  * end), the group CONTENT is a placeholder stub until their own issues.
- * HEADER/FOOTER is registered so the tab exists (and type-checks) while
- * its producer stays a stub until the headers/footers milestone wires
- * `activeSurface` to it.
+ * HEADER/FOOTER is fully live (M-HEADER-FOOTER): its producer binds the
+ * header/footer store's activeSurface, and its groups are the real
+ * Header & Footer tools.
  */
 
 /**
@@ -65,9 +66,6 @@ function PlaceholderGroup({
 
 const TableContent = () => <PlaceholderGroup label="Table" icon={TableIcon} />;
 const ImageContent = () => <PlaceholderGroup label="Image" icon={ImageIcon} />;
-const HeaderFooterContent = () => (
-  <PlaceholderGroup label="Header & Footer" icon={PanelTop} />
-);
 
 export const CONTEXTUAL_TABS = {
   table: {
@@ -86,6 +84,8 @@ export const CONTEXTUAL_TABS = {
     id: 'headerFooter',
     label: 'Header & Footer',
     icon: PanelTop,
-    content: HeaderFooterContent,
+    // M-HEADER-FOOTER: the real groups (options / navigation / close).
+    // Formatting rides the Home tab via useActiveEditor routing.
+    content: HeaderFooterTools,
   },
 } satisfies Record<RibbonContextId, ContextualTabDef>;

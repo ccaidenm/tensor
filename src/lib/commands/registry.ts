@@ -380,14 +380,19 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['quit', 'exit', 'close', 'shutdown'],
     requiresSafeQuit: true,
     run: async () => {
-      const { editor, filePath, isDirty, pageSetup, lineNumbers, coreProperties } = doc();
+      const { editor, filePath, isDirty, pageSetup, lineNumbers, coreProperties, headerFooter } = doc();
       // Safe-quit: dirty doc → recovery snapshot NOW via the EXISTING
       // autosave recovery path (recovery.ts saveRecoveryCopy — same
       // format, same appDataDir()/recovery/ location), so the existing
       // restore flow picks it up. No second snapshot format, no
       // forked restore logic.
       if (editor && isDirty) {
-        await saveRecoveryCopy(editor, filePath, { pageSetup, lineNumbers, coreProperties });
+        await saveRecoveryCopy(editor, filePath, {
+          pageSetup,
+          lineNumbers,
+          coreProperties,
+          headerFooter,
+        });
       }
       getCurrentWindow().close();
     },

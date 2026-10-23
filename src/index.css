@@ -272,6 +272,11 @@ body {
   }
 }
 
+/* M-HEADER-FOOTER-2: the bands are CANVAS paint (engine band lines —
+   the unified pipeline), so no DOM editor styling exists; selection
+   ink, tab advances, and caret all ride the standard paginated
+   projections (paint.ts / hitTest.ts / caret). */
+
 .ProseMirror li,
 .ProseMirror li p {
   line-height: 1.6;

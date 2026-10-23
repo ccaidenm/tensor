@@ -379,10 +379,14 @@ describe('Layout tab (ArrangeGroup) + palette commands', () => {
     render(<ShowGroup />);
     expect(document.querySelector('button[aria-label="Show Line Numbers"]')).toBeNull();
     // M-RULER: Show Rulers is LIVE (both bars ship); its button is a
-    // real toggle, the remaining placeholders stay disabled.
-    expect(document.querySelectorAll('button[disabled]').length).toBe(4);
+    // real toggle. M-HEADER-FOOTER: Show Headers & Footers is LIVE too
+    // (the captions NPC precedent); the remaining placeholders stay
+    // disabled.
+    expect(document.querySelectorAll('button[disabled]').length).toBe(3);
     const rulers = document.querySelector('button[aria-label="Show Rulers"]') as HTMLButtonElement;
     expect(rulers.disabled).toBe(false);
+    const hf = document.querySelector('button[aria-label="Show Headers & Footers"]') as HTMLButtonElement;
+    expect(hf.disabled).toBe(false);
   });
 
   it('the main icon button reflects and toggles the setting (default Per Page)', () => {

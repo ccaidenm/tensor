@@ -365,3 +365,32 @@ describe('paint: alignment (one shared offset)', () => {
     expect(ctx.ops.find((o) => o.op === 'fillText')!.args[1]).toBe(544);
   });
 });
+
+// ─── M-HEADER-FOOTER-3: the DESATURATE ruling ─────────────────────────────
+// Inactive band ink keeps its LUMA, loses its HUE (grayscale at 55%
+// opacity) — never a flat gray that erases the author's color choice.
+
+import { mutedColorOf } from '@/lib/paginated/paint';
+
+describe('mutedColorOf (the desaturate ruling)', () => {
+  it('default black → the classic muted gray (back-compat)', () => {
+    expect(mutedColorOf('#000')).toBe('rgba(0, 0, 0, 0.55)');
+    expect(mutedColorOf(undefined)).toBe('rgba(0, 0, 0, 0.55)');
+  });
+
+  it('pure red desaturates to its Rec.601 luma, not flat gray', () => {
+    // 0.299·255 = 76.
+    expect(mutedColorOf('#ff0000')).toBe('rgba(76, 76, 76, 0.55)');
+    expect(mutedColorOf('#f00')).toBe('rgba(76, 76, 76, 0.55)');
+  });
+
+  it('a mid color keeps its relative luminance', () => {
+    // #3366cc: 0.299·51 + 0.587·102 + 0.114·204 ≈ 98.
+    expect(mutedColorOf('#3366cc')).toBe('rgba(98, 98, 98, 0.55)');
+  });
+
+  it('unparseable colors fall back to the flat gray', () => {
+    expect(mutedColorOf('rgb(1, 2, 3)')).toBe('rgba(0, 0, 0, 0.55)');
+    expect(mutedColorOf('')).toBe('rgba(0, 0, 0, 0.55)');
+  });
+});

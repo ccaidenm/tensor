@@ -4,6 +4,7 @@ import type { NodeSelection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
 import { useRibbonContextStore } from './contextStore';
 import type { RibbonContextId } from './contextualTabs';
+import { selectionInBand } from '@/lib/editor/headerFooterCommands';
 
 /**
  * M-CONTEXTUAL-RIBBON — the context producer binding.
@@ -83,7 +84,12 @@ export function useSelectionContexts(editor: Editor | null) {
   });
   useRibbonContext('image', imageActive ?? false);
 
-  // M-HEADER-FOOTER: the headerFooter producer is a stub until the
-  // headers/footers milestone wires `activeSurface` to it.
-  useRibbonContext('headerFooter', false);
+  // M-HEADER-FOOTER-2: the headerFooter producer — selection-driven,
+  // the table/image pattern (a band container in the selection's
+  // ancestry enters the Header & Footer context; leaving it exits).
+  const inBand = useEditorState({
+    editor,
+    selector: ({ editor: e }) => selectionInBand(e ?? null),
+  });
+  useRibbonContext('headerFooter', inBand ?? false);
 }

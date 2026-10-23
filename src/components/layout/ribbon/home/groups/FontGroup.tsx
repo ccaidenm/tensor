@@ -76,6 +76,8 @@ function availableWeights(entry: FontEntry): number[] {
 }
 
 export function FontGroup() {
+  // M-HEADER-FOOTER-2: ONE editor again — header/footer content rides
+  // the same PM doc (formatting works there via the same groups).
   const editor = useDocumentStore((s) => s.editor);
 
   const defaultFontSize = useConfigStore((s) => s.config.editor.defaultFontSize);

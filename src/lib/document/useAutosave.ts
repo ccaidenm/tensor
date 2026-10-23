@@ -15,13 +15,19 @@ export function useAutosave() {
 
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      const { editor, filePath, pageSetup, lineNumbers, coreProperties } = useDocumentStore.getState();
+      const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } =
+        useDocumentStore.getState();
       if (!editor) return;
 
-      await saveRecoveryCopy(editor, filePath, { pageSetup, lineNumbers, coreProperties });
+      await saveRecoveryCopy(editor, filePath, {
+        pageSetup,
+        lineNumbers,
+        coreProperties,
+        headerFooter,
+      });
 
       if (filePath) {
-        await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties });
+        await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
         await clearRecoveryCopy(filePath);
         useDocumentStore.setState({ isDirty: false });
       }

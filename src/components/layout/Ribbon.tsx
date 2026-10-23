@@ -163,7 +163,7 @@ export function Ribbon() {
 
         <TabsContent value="Insert" className="m-0 h-14 flex-none px-3">
           <div className="flex h-full items-center">
-            <PagesGroup editor={editor} />
+            <PagesGroup />
             <IllustrationsGroup editor={editor} />
             <ReferenceTablesGroup />
             <BreaksGroup editor={editor} />
@@ -216,11 +216,16 @@ export function Ribbon() {
 
 /**
  * M-CONTEXTUAL-RIBBON — the contextual strip trigger. Accent (primary)
- * ink by design — the contextual tab announces itself against the
- * neutral static strip (Word colors its contextual tabs). The quick
- * entrance animation is applied ONLY when motion is allowed
- * (useReducedMotion: the accessibility 'on' override and the system
- * preference both suppress it — instant appear instead).
+ * ink in EVERY state — hover, active, dark mode — by design: the
+ * contextual tab announces itself against the neutral static strip
+ * (Word colors its contextual tabs). `text-primary!` (important) is
+ * deliberate: the ui/tabs base classes carry `data-active:text-foreground`
+ * and `dark:data-active:text-foreground`, and a variant utility beats a
+ * plain one in Tailwind's sheet order — the plain `text-primary` lost
+ * exactly there (the "turns neutral once active" bug). The entrance
+ * animation is applied ONLY when motion is allowed (useReducedMotion:
+ * the accessibility 'on' override and the system preference both
+ * suppress it — instant appear instead).
  */
 function ContextualTabTrigger({
   id,
@@ -237,7 +242,7 @@ function ContextualTabTrigger({
       value={def.id}
       data-testid="contextual-tab-trigger"
       className={
-        'flex h-10 flex-none items-center gap-1.5 rounded-none border-0 px-3 text-sm text-primary hover:bg-muted/50 hover:text-primary/90 data-active:hover:bg-muted/50 group-data-horizontal/tabs:after:bottom-0 group-data-horizontal/tabs:after:h-0.5 after:bg-muted-foreground hover:after:opacity-100 data-active:after:bg-primary ' +
+        'flex h-10 flex-none items-center gap-1.5 rounded-none border-0 px-3 text-sm text-primary! hover:bg-muted/50 data-active:hover:bg-muted/50 group-data-horizontal/tabs:after:bottom-0 group-data-horizontal/tabs:after:h-0.5 after:bg-muted-foreground hover:after:opacity-100 data-active:after:bg-primary ' +
         (reduceMotion ? '' : 'tensor-contextual-tab-in')
       }
     >

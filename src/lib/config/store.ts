@@ -21,6 +21,7 @@ interface ConfigStore {
   setPasteOnMiddleClick: (value: boolean) => void;
   setShowNonPrintingChars: (value: boolean) => void;
   setShowCaptions: (value: boolean) => void;
+  setShowHeadersFooters: (value: boolean) => void;
   setShowHorizontalRuler: (value: boolean) => void;
   setShowVerticalRuler: (value: boolean) => void;
   setBothRulers: (value: boolean) => void;
@@ -149,6 +150,15 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         editor: { ...state.config.editor, showCaptions: value },
+      },
+    })),
+
+  // M-HEADER-FOOTER: the band display toggle (the captions NPC precedent).
+  setShowHeadersFooters: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, showHeadersFooters: value },
       },
     })),
 

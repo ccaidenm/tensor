@@ -13,6 +13,7 @@ import { assertContiguity } from '@/lib/paginated/paint';
 import {
   blockOffsetToPmPos,
   blockRangeAround,
+  pmPosToBlockOffset,
   caretGeometry,
   caretStackRect,
   cellPosAt,
@@ -40,8 +41,11 @@ import type { SpellError } from '@/lib/editor/spell/types';
 import { getScrollParent } from '@/lib/editor/domUtils';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
+import { useEditorState } from '@tiptap/react';
 import { toLayoutOptions } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
+import { selectionInBand } from '@/lib/editor/headerFooterCommands';
+import { HeaderFooterSlots } from './paginated/HeaderFooterSlots';
 import { useConfigStore } from '@/lib/config/store';
 import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
 import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/resolve';
@@ -127,6 +131,11 @@ interface PaginatedViewProps {
 interface LayoutState {
   blocks: AdapterBlock[];
   result: LayoutResult;
+  /**
+   * M-HEADER-FOOTER-3: the band blocks' ids — the cross-surface
+   * selection clamp's membership set (from the adapter sidecar).
+   */
+  bandBlockIds: ReadonlySet<string>;
   /** Registry epoch this layout was built under — rides the STATE (not
    * a separate subscription) so BlockCanvas's epoch-keyed repaint can
    * never fire ahead of the relayout that owns it (a stale intermediate
@@ -250,6 +259,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // read fresh at call time (L4) — these selectors never feed options
   // directly.
   const pageSetup = useDocumentStore((s) => s.pageSetup);
+  // M-HEADER-FOOTER-2: the active-band signal (muted band ink + the
+  // ruler's active-region accent) — selection-driven, one PM doc.
+  const inBand = useEditorState({
+    editor,
+    selector: ({ editor: e }) => selectionInBand(e ?? null),
+  });
   const defaultFontFamily = useConfigStore((s) => s.config.editor.defaultFontFamily);
   const defaultFontSize = useConfigStore((s) => s.config.editor.defaultFontSize);
   // REGISTRY EPOCH (M-STYLES): a definition edit bumps the epoch and
@@ -268,6 +283,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // granular show/hide; the ribbon button toggles both).
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
+  // M-HEADER-FOOTER-2: the band display toggle (rides the layout —
+  // a hidden band gives back its reservation; see relayout).
+  const showHeadersFooters = useConfigStore((s) => s.config.editor.showHeadersFooters);
   // Accessibility: grammar flags as a double line (the pageless
   // fallback surface + PagelessEditor read this via a container class).
   const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
@@ -398,11 +416,27 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // bubble — it anchors one word; a collapsed caret placement (our
     // own opening click) keeps it open.
     if (!selection.empty) setSpellBubble(null);
+    // M-HEADER-FOOTER-3: band selections project onto the ACTIVE page's
+    // echo (recorded by the hit-test; viewport fallback). The surface
+    // clamp: a selection whose ends sit on different surfaces (band vs
+    // body — reachable via shift+click) paints ONLY the anchor's side
+    // (PM state untouched — the painted projection stays honest).
+    const inBandSel = selectionInBand(editor);
+    const bandPage = inBandSel ? activeBandPage() : undefined;
+    let surface: 'band' | 'body' | undefined;
+    if (current.bandBlockIds.size > 0) {
+      const a = pmPosToBlockOffset(current.blocks, selection.anchor);
+      const h = pmPosToBlockOffset(current.blocks, selection.head);
+      const aBand = a ? current.bandBlockIds.has(a.block.id) : false;
+      const hBand = h ? current.bandBlockIds.has(h.block.id) : false;
+      if (aBand !== hBand) surface = aBand ? 'band' : 'body';
+    }
     const geom = caretGeometry(
       current.blocks,
       current.result,
       selection.head,
-      metricsRef.current!
+      metricsRef.current!,
+      bandPage
     );
     setCaret(geom);
     // Any input/selection motion resets the caret to solid;
@@ -544,7 +578,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             selection.from,
             selection.to,
             metricsRef.current!,
-            useDocumentStore.getState().pageSetup.pageGap
+            useDocumentStore.getState().pageSetup.pageGap,
+            bandPage,
+            surface,
+            current.bandBlockIds
           );
     if (isInlineImageNodeSelection || isCellSelection) setCaret(null);
     setSelRects(rects);
@@ -657,6 +694,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (!editor || !fontsReadyRef.current) return;
     // L4: read per call, never captured.
     const pageSetupNow = useDocumentStore.getState().pageSetup;
+    // M-HEADER-FOOTER-2: the band options read PER CALL (L4) — the
+    // different-first-page flag travels in .wpdoc metadata; the ENGINE
+    // owns the band geometry (placement, anchor, reservation) off the
+    // adapter's doc.bands. No shell-side reservation exists anymore.
+    const hfSettings = useDocumentStore.getState().headerFooter;
     const { defaultFontFamily: family, defaultFontSize: size } =
       useConfigStore.getState().config.editor;
     const registryNow = useStyleRegistryStore.getState();
@@ -687,8 +729,22 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       const adapted = pmDocToSemantic(editor.state.doc, baseStyle, {
         definitions: registryNow.merged,
         epoch: registryNow.epoch,
+      }, {
+        // M-HEADER-FOOTER-2: per-call band options (L4) — the engine
+        // owns the band geometry from here.
+        differentFirstPage: hfSettings?.differentFirstPage ?? false,
       });
-      const result = engineRef.current!.layout(adapted.doc, toLayoutOptions(pageSetupNow));
+      const result = engineRef.current!.layout(
+        // M-HEADER-FOOTER-2: the View ▸ Show Headers & Footers toggle is
+        // DISPLAY-ONLY but rides the LAYOUT (the captions precedent is
+        // ink-only; a hidden band must also GIVE BACK its reservation —
+        // Word collapses the area). Stripping doc.bands pre-layout does
+        // both: no band lines, body reclaimed. Per-call read (L4).
+        useConfigStore.getState().config.editor.showHeadersFooters === false
+          ? { ...adapted.doc, bands: undefined }
+          : adapted.doc,
+        toLayoutOptions(pageSetupNow),
+      );
       // Permanent benchmark seam: total relayout time, readable
       // by the self-driving bench and the coalescing test. The
       // engine's lastStats ride along (M-STYLES acceptance receipt —
@@ -705,7 +761,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         lastStats: { ...engineRef.current!.lastStats },
       });
       assertContiguity(result);
-      const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch };
+      const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch, bandBlockIds: adapted.bandBlockIds };
       layoutRef.current = next;
       // No flushSync — React batches setLayout calls
       // from N input events into ONE render + ONE useLayoutEffect paint
@@ -743,6 +799,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       setPageInfo(1, 1);
     }
   }
+  // M-HEADER-FOOTER-3: the ACTIVE BAND PAGE — the page whose band echo
+  // the caret/selection/toolbar project onto. Band blocks echo on every
+  // page with IDENTICAL ranges, so the projections need the page the
+  // user interacted with: pmPosAt records it on every band hit (the
+  // ONE hit-test seam); band selections without a click (Go-to-Header,
+  // enable) fall back to the viewport's current page.
+  const bandPageRef = useRef<number | null>(null);
+  function activeBandPage(): number {
+    return bandPageRef.current ?? Math.max(0, useDocumentStore.getState().currentPage - 1);
+  }
+
   relayoutRef.current = relayout;
   selectionProjectionRef.current = updateSelectionProjection;
   searchProjectionRef.current = updateSearchProjection;
@@ -763,6 +830,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       (e.clientY - r.top) / z
     );
     if (!hit) return null;
+    // M-HEADER-FOOTER-3: every band hit records its page — the echo
+    // projections (caret/selection/toolbar/bubble) resolve THAT page.
+    if (hit.band != null) bandPageRef.current = hit.pageIndex;
     const block = current.blocks.find((b) => b.id === hit.blockId);
     return block ? blockOffsetToPmPos(block, hit.offset) : null;
   }
@@ -1112,7 +1182,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         current.blocks,
         current.result,
         editor.state.selection.head,
-        metricsRef.current!
+        metricsRef.current!,
+        selectionInBand(editor) ? activeBandPage() : undefined
       );
       if (!caretGeom) return; // selection outside text: nothing to reveal
       const page0 = current.result.pages[0];
@@ -1207,7 +1278,26 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // registry change.
   useEffect(() => {
     relayoutRef.current();
-  }, [pageSetup, defaultFontFamily, defaultFontSize, styleEpoch]);
+    // M-HEADER-FOOTER-2: showHeadersFooters rides the LAYOUT (the band
+    // strip above) — its flips relayout through this same warm path.
+  }, [pageSetup, defaultFontFamily, defaultFontSize, styleEpoch, showHeadersFooters]);
+
+  // M-HEADER-FOOTER-2: settings writes (differentFirstPage) relayout
+  // through the same warm path — the flag feeds the adapter's band
+  // options, read fresh per call (L4, inside relayout itself).
+  // Content edits ride the standard PM 'update' relayout.
+  useEffect(() => {
+    let lastHf: unknown = useDocumentStore.getState().headerFooter;
+    const unsubDoc = useDocumentStore.subscribe((s) => {
+      if (s.headerFooter !== lastHf) {
+        lastHf = s.headerFooter;
+        relayoutRef.current();
+      }
+    });
+    return () => {
+      unsubDoc();
+    };
+  }, []);
 
   // M-FONTS: a font install/uninstall changes the RULER mid-session.
   // The font registry's epoch bump means a FontFace was registered or
@@ -1505,7 +1595,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (!current || !stack) return { left: 0, top: 0 };
     const z = useConfigStore.getState().config.editor.zoomLevel / 100;
     const sr = stack.getBoundingClientRect();
-    const geom = caretGeometry(current.blocks, current.result, pos, metricsRef.current!);
+    const geom = caretGeometry(current.blocks, current.result, pos, metricsRef.current!, activeBandPage());
     const page0 = current.result.pages[0];
     if (!geom || !page0) return { left: 0, top: 0 };
     const { pageSetup: setup } = useDocumentStore.getState();
@@ -1604,6 +1694,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // re-render through the projection setStates, so this never goes
   // stale; the derivation itself is cheap — one node(1) read). null
   // renders the margins-only ruler (headings/codeBlocks/lists).
+  // M-HEADER-FOOTER-2: ONE editor — band content rides the same PM
+  // state, so the ruler rules it identically (tab stops land in band
+  // paragraphs while the selection sits there).
   const rulerModel = editor && layout ? deriveRulerModel(editor.state) : null;
   const stackW = pageW;
   const stackH = result.pages.length * pageH + (result.pages.length - 1) * gap;
@@ -1620,7 +1713,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       spellBubble.from,
       spellBubble.to,
       metricsRef.current!,
-      gap
+      gap,
+      activeBandPage() // the bubble anchors the ACTIVE echo (the click's page)
     );
     const bounds = paintedBounds(exts);
     const stack = stackRef.current;
@@ -1734,6 +1828,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     const block = blocks.find((b) => b.id === group.blockId);
                     if (!block) return null;
                     const minY = group.lines[0].rect.y;
+                    // M-HEADER-FOOTER-2: band groups — muted ink unless
+                    // the selection sits in a band container (the
+                    // active-band signal, selection-driven).
+                    const bandWhich = group.lines[0].band;
                     return (
                       <BlockCanvas
                         key={group.blockId}
@@ -1744,6 +1842,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                         left={page.contentBox.x}
                         top={page.contentBox.y + minY}
                         width={page.contentBox.width}
+                        muted={bandWhich ? !inBand : undefined}
                         align={block.align}
                         runDecor={block.runDecor}
                         npc={showNonPrintingChars}
@@ -1840,6 +1939,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     defaultColor={docDefaultTextColor}
                   />
                 )}
+                {/* M-HEADER-FOOTER-2: the band CLICK SLOTS — dblclick
+                    targets where a region has no container. Band
+                    CONTENT is canvas paint (engine band lines —
+                    see the BlockCanvas muted pass), interaction is
+                    the ONE hidden view via hitTest's band-strip rule. */}
+                <HeaderFooterSlots pageIndex={page.index} geometry={page} editor={editor} />
               </PageSheet>
             );
           })}

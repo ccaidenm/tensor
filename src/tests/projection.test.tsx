@@ -278,7 +278,7 @@ describe('indented-block input', () => {
     const { result } = layoutBlocks(adapted.doc.blocks);
     // Gutter click: x = 5 (inside [0, 32)), y on the item's first line.
     const hit = hitTest(result, adapted.blocks, FakeMetrics, PAGE_GAP, CB.x + 5, CB.y + 4);
-    expect(hit).toEqual({ blockId: adapted.blocks[0].id, offset: 0 });
+    expect(hit).toMatchObject({ blockId: adapted.blocks[0].id, offset: 0 });
   });
 
   it('indents survive on BOTH sides of a page-fragmenting list item', async () => {

@@ -39,6 +39,40 @@ const CODE_BG_COLOR = '#f4f4f5';
 const RULE_COLOR = '#a1a1aa';
 const LIST_INDENT_PX = 32;
 
+/** M-HEADER-FOOTER-2: muted ink for INACTIVE band text (canvas has no
+ * theme — the muted-foreground prose look's pageless-look
+ * approximation, the NPC precedent's opacity family). */
+const MUTED_TEXT_COLOR = 'rgba(0, 0, 0, 0.55)';
+
+/**
+ * M-HEADER-FOOTER-3 — the DESATURATE ruling: an inactive band's ink
+ * keeps its LUMA and loses its HUE (grayscale at 55% opacity), never
+ * a flat gray. A colored header stays recognizable as the author's
+ * color choice; default black text desaturates to exactly the old
+ * MUTED_TEXT_COLOR. (The debate's answer: flat gray erases author
+ * intent — desaturation is honest "inactive" while preserving the
+ * document's color identity.) Unparseable colors fall back to the
+ * flat gray.
+ */
+export function mutedColorOf(color: string | undefined): string {
+  if (!color) return MUTED_TEXT_COLOR;
+  const hex = color.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(hex)) return MUTED_TEXT_COLOR;
+  const full =
+    hex.length === 3
+      ? hex
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : hex;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  // Rec.601 luma — the classic grayscale weightings.
+  const luma = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  return `rgba(${luma}, ${luma}, ${luma}, 0.55)`;
+}
+
 export interface PaintExtras {
   align: TextAlign;
   contentWidth: number;
@@ -77,6 +111,13 @@ export interface PaintExtras {
    *  (media/bitmapCache). Absent bitmap → the tinted placeholder;
    *  TERMINAL failure (getBitmapFailed) → the failed box. */
   resolveBitmap?: (sha: string) => HTMLImageElement | undefined;
+  /**
+   * M-HEADER-FOOTER-2: MUTED ink — the INACTIVE header/footer band
+   * look (grayed when not being edited). When true, text ink takes
+   * MUTED_TEXT_COLOR over decor color (decor.highlight/underline stay:
+   * they're the user's own content). Layout ink is untouched.
+   */
+  muted?: boolean;
   /** M-IMAGES-2.2: terminal-failure probe for the placeholder split
    *  (pending tint vs failed box) — same module as resolveBitmap. */
   bitmapFailed?: (sha: string) => boolean;
@@ -250,7 +291,12 @@ export function paintLines(
         ctx.fillRect(x, baselineY - ascent, width, ascent + descent);
       }
 
-      ctx.fillStyle = decor.color ?? DEFAULT_TEXT_COLOR;
+      // M-HEADER-FOOTER-3: muted band ink DESATURATES the run's own
+      // color (luma kept, hue dropped, 55% opacity) — never a flat
+      // gray that erases the author's color choice.
+      ctx.fillStyle = extras.muted
+        ? mutedColorOf(decor.color ?? DEFAULT_TEXT_COLOR)
+        : decor.color ?? DEFAULT_TEXT_COLOR;
       ctx.font = fontString(run.style);
       // SMALL-CAPS (M-STYLES): the same applyVariantCaps the metrics
       // singleton used to MEASURE this run — painted advances can
@@ -262,7 +308,11 @@ export function paintLines(
       // font (nskipping ink gaps, weight-scaled thickness) — the
       // typographic-fraction approximations below are the honest
       // starting point.
-      const decorationColor = decor.color ?? DEFAULT_TEXT_COLOR;
+      // M-HEADER-FOOTER-3: decorations desaturate with the text (the
+      // one muted-ink ruling, applied consistently).
+      const decorationColor = extras.muted
+        ? mutedColorOf(decor.color ?? DEFAULT_TEXT_COLOR)
+        : decor.color ?? DEFAULT_TEXT_COLOR;
       if (decor.underline || decor.strike) {
         const thickness = Math.max(1, Math.round(run.style.fontSize / 16));
         ctx.fillStyle = decorationColor;
@@ -375,6 +425,10 @@ export function assertContiguity(result: LayoutResult): void {
       // Table cell lines: lane content inside their band — the band's
       // rects carry the flow accounting below.
       if (line.tableCell) continue;
+      // M-HEADER-FOOTER-2: band lines sit in the MARGIN strips — never
+      // flow-track content (the body track starts at the content box,
+      // which the engine already inset by the band reservation).
+      if (line.band) continue;
       items.push({ y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
     }
     for (const pr of result.placed) {

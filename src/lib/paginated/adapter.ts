@@ -17,6 +17,7 @@ import { headingStyleId } from '@/lib/styles/types';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { lookupStyle } from '@/lib/styles/registry';
 import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
+import { regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
 import {
   baselineRunStyle,
   resolveBlockTier,
@@ -160,6 +161,17 @@ export interface RunDecor {
 export interface AdapterResult {
   doc: SemanticDoc;
   blocks: AdapterBlock[];
+  /**
+   * M-HEADER-FOOTER-2 — the BAND blocks (header/footer children), in
+   * document order. The SAME adapter objects ride `blocks` (they hold
+   * real PM positions — the paint/caret/hit-test sidecar's binary
+   * search needs them, and the walk emits them in `from` order); this
+   * sidecar carries the band MEMBERSHIP (muted ink, band hit-test
+   * routing, band-boundary selection clamps).
+   */
+  bandBlocks: AdapterBlock[];
+  /** M-HEADER-FOOTER-2 — block ids that belong to bands (the set form). */
+  bandBlockIds: Set<string>;
 }
 
 /**
@@ -1077,7 +1089,13 @@ function convertNode(
 export function pmDocToSemantic(
   pm: PMNode,
   baseStyle: TextStyle,
-  registry: StyleRegistrySnapshot = BUILTIN_REGISTRY
+  registry: StyleRegistrySnapshot = BUILTIN_REGISTRY,
+  /**
+   * M-HEADER-FOOTER-2 — band options read PER CALL (L4): the
+   * different-first-page flag travels in .wpdoc metadata; the caller
+   * (PaginatedView's relayout) reads it fresh from the document store.
+   */
+  bandOptions?: { differentFirstPage?: boolean },
 ): AdapterResult {
   // THE REGISTRY EPOCH (M-STYLES STEP 3): the shell-side mirror of the
   // engine's baseStyleHash. A baseStyle change OR any definition edit
@@ -1099,6 +1117,34 @@ export function pmDocToSemantic(
   const semantic: Block[] = [];
   const dropped = new Set<string>();
   let pendingBreakBefore = false;
+
+  // M-HEADER-FOOTER-2 — the band routing: children of headerBlock/
+  // footerBlock land in the engine's BandSet (never in flow order)
+  // while their AdapterBlocks ride BOTH `blocks` (the shared sidecar —
+  // real PM positions, emitted in `from` order) and `bandBlocks`.
+  const bandSemantic: {
+    header: Block[];
+    footer: Block[];
+    firstHeader: Block[];
+    firstFooter: Block[];
+  } = { header: [], footer: [], firstHeader: [], firstFooter: [] };
+  const bandBlocks: AdapterBlock[] = [];
+  const bandBlockIds = new Set<string>();
+  let sawBandNode = false;
+
+  /** Commit one band child: semantic → its region, adapter → both lists. */
+  const pushBand = (
+    conv: CachedConversion,
+    node: PMNode,
+    pos: number,
+    region: 'header' | 'footer' | 'firstHeader' | 'firstFooter',
+  ): void => {
+    bandSemantic[region].push(conv.semantic);
+    const adapter = { ...conv.adapter, from: pos, to: pos + node.nodeSize };
+    blocks.push(adapter);
+    bandBlocks.push(adapter);
+    bandBlockIds.add(adapter.id);
+  };
 
   /** Cache-aware projection of one PM node. Reuses the cached
    * conversion only when the sibling facts are unchanged (see
@@ -1235,6 +1281,32 @@ export function pmDocToSemantic(
   pm.forEach((node, offset) => {
     const name = node.type.name;
 
+    // M-HEADER-FOOTER-2 — the band containers: route their children OUT
+    // of the body flow into the engine's BandSet (never in flow order).
+    // Paragraph/heading children only — a structural child (table, …)
+    // throws the sentinel so the view falls back to pageless (which
+    // renders the container natively), the loud-throws family's law.
+    if (name === 'headerBlock' || name === 'footerBlock') {
+      sawBandNode = true;
+      const variant: HeaderFooterVariant = node.attrs?.variant === 'first' ? 'first' : 'default';
+      const region = regionOf(name, variant)!;
+      node.forEach((child: PMNode, rel: number) => {
+        const childName = child.type.name;
+        if (childName !== 'paragraph' && childName !== 'heading') {
+          throw new UnsupportedDocError(
+            `[adapter] unsupported band child '${childName}' inside ${name} at offset ${offset}: band content is paragraph/heading only`,
+          );
+        }
+        pushBand(
+          projected(child, { kind: childName, indentLeft: 0 }, offset + 1 + rel),
+          child,
+          offset + 1 + rel,
+          region,
+        );
+      });
+      return;
+    }
+
     if (name === 'pageBreak') {
       // Forced page break on the FOLLOWING block. A trailing pageBreak
       // (nothing follows) has no block to force — the engine derives
@@ -1357,5 +1429,19 @@ export function pmDocToSemantic(
 
   warnDroppedAttrs(dropped);
 
-  return { doc: { blocks: semantic, baseStyle }, blocks };
+  // M-HEADER-FOOTER-2 — assemble the BandSet (absent when no band nodes
+  // rode the doc: old files, nothing enabled — the engine then reserves
+  // nothing). differentFirstPage rides bandOptions (per call, L4); the
+  // engine picks the first-page vs rest regions off it.
+  const bands = sawBandNode
+    ? {
+        ...(bandSemantic.header.length ? { header: bandSemantic.header } : {}),
+        ...(bandSemantic.footer.length ? { footer: bandSemantic.footer } : {}),
+        ...(bandSemantic.firstHeader.length ? { firstHeader: bandSemantic.firstHeader } : {}),
+        ...(bandSemantic.firstFooter.length ? { firstFooter: bandSemantic.firstFooter } : {}),
+        ...(bandOptions?.differentFirstPage ? { differentFirstPage: true } : {}),
+      }
+    : undefined;
+
+  return { doc: { blocks: semantic, baseStyle, bands }, blocks, bandBlocks, bandBlockIds };
 }

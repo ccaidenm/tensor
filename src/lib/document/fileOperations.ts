@@ -6,6 +6,8 @@ import { useStyleRegistryStore } from '@/lib/styles/registry';
 import type { StyleDefinition } from '@/lib/styles/types';
 import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
 import { openWpdoc, saveWpdoc } from './wpdoc';
+import { isLegacyHeaderFooter, type HeaderFooterSettings } from './headerFooter';
+import { migrateLegacyHeaderFooter } from '@/lib/editor/headerFooterCommands';
 
 const FILE_FILTERS = [{ name: 'Word Processor Document', extensions: ['wpdoc'] }];
 
@@ -19,6 +21,8 @@ export interface SaveDocumentOptions {
   pageSetup: PageSetup;
   /** M-LINENUMS: absent/null = never set (old docs / gutter off). */
   lineNumbers?: LineNumbersSetting | null;
+  /** M-HEADER-FOOTER: absent/null = never enabled (old docs). */
+  headerFooter?: HeaderFooterSettings | null;
   /** M-META: written normalized — only non-empty fields land in the
    *  file (the lineNumbers conditional-spread precedent: absent means
    *  "never set", empty strings never write). */
@@ -29,7 +33,7 @@ export interface SaveDocumentOptions {
 
 /** THE metadata assembly (single source — see SaveDocumentOptions). */
 export function assembleDocumentFile(editor: Editor, options: SaveDocumentOptions): DocumentFile {
-  const { pageSetup, lineNumbers, coreProperties, originalPath } = options;
+  const { pageSetup, lineNumbers, headerFooter, coreProperties, originalPath } = options;
   return {
     version: CURRENT_DOCUMENT_VERSION,
     docJSON: editor.getJSON(),
@@ -43,6 +47,8 @@ export function assembleDocumentFile(editor: Editor, options: SaveDocumentOption
       // M-LINENUMS: absent when never set (old docs / gutter off by
       // default) — the styles optional-field precedent.
       ...(lineNumbers ? { lineNumbers } : {}),
+      // M-HEADER-FOOTER: same precedent — absent until first enabled.
+      ...(headerFooter ? { headerFooter } : {}),
       // M-META: absent means "never set" — whitespace-only values
       // drop out (normalizeCoreProperties).
       ...normalizeCoreProperties(coreProperties),
@@ -88,6 +94,9 @@ export interface OpenDocumentResult {
   /** M-META: the file's standard core properties, normalized;
    *  {} = the file predates them. */
   coreProperties: DocumentCoreProperties;
+  /** M-HEADER-FOOTER: the file's header/footer settings; null = the
+   *  file predates them (or never enabled them) — headers/footers off. */
+  headerFooter: HeaderFooterSettings | null;
 }
 
 export async function openDocument(editor: Editor): Promise<OpenDocumentResult | null> {
@@ -102,6 +111,14 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
   const file = await openWpdoc(path);
 
   editor.commands.setContent(file.docJSON);
+  // M-HEADER-FOOTER-2: the v1→v2 migration — a legacy metadata shape's
+  // per-region content docs translate into doc-level band containers
+  // (content rides docJSON now). The differentFirstPage flag rides the
+  // settings below; enabling without content has no v2 spelling.
+  const metaHF = file.metadata.headerFooter as unknown;
+  if (isLegacyHeaderFooter(metaHF)) {
+    migrateLegacyHeaderFooter(editor, metaHF);
+  }
   // M-IMAGES-1: legacy dim-less images backfill (measure → write attrs
   // → the standard PM-update relayout; see media/backfill.ts for the
   // lineage note). Fire-and-forget — pending images stay in the
@@ -110,11 +127,18 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
     backfillImageDims(editor),
   );
   const { title, author, subject, keywords, comments } = file.metadata;
+  const settings: HeaderFooterSettings | null = isLegacyHeaderFooter(metaHF)
+    ? {
+        scope: { kind: 'document' },
+        differentFirstPage: metaHF.differentFirstPage === true,
+      }
+    : (metaHF as HeaderFooterSettings | null) ?? null;
   return {
     path,
     pageSetup: file.metadata.pageSetup ?? null,
     styleDefinitions: file.metadata.styles?.definitions ?? [],
     lineNumbers: file.metadata.lineNumbers ?? null,
     coreProperties: normalizeCoreProperties({ title, author, subject, keywords, comments }),
+    headerFooter: settings,
   };
 }

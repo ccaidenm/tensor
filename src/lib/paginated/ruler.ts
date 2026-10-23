@@ -7,7 +7,7 @@ import {
   ptToPx,
   type MeasurementUnit,
 } from '@/lib/document/pageSetup';
-import { currentIndentLeft, normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
+import { currentIndentLeft, normalizeTabStops, caretEditableParagraph } from '@/lib/editor/ParagraphExtensions';
 
 /**
  * M-RULER — pure ruler math. No DOM, no React, no canvas: everything
@@ -195,15 +195,21 @@ export interface RulerModel {
  */
 export function deriveRulerModel(state: EditorState): RulerModel | null {
   const { $from } = state.selection;
-  if ($from.depth < 1) return null;
-  const block = $from.node(1);
-  if (!block || block.type.name !== 'paragraph') return null;
+  // M-HEADER-FOOTER-3: the caret's RULER-EDITABLE paragraph via the
+  // shared helper — `$from.node(1)` is the BAND CONTAINER for
+  // header/footer paragraphs, so the old spelling returned null and
+  // the ruler went margins-only there (every tab-stop click eaten by
+  // the !model guards; list/blockquote paragraphs stay margins-only
+  // by the helper's acceptance rule, unchanged).
+  const hit = caretEditableParagraph($from);
+  if (!hit) return null;
+  const block = hit.node as { attrs?: Record<string, unknown> };
   const num = (v: unknown): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : 0;
   return {
     indentLeft: currentIndentLeft(block),
-    indentRight: num(block.attrs.indentRight),
-    firstLineIndent: num(block.attrs.firstLineIndent),
-    tabStops: normalizeTabStops(block.attrs.tabStops) ?? [],
+    indentRight: num(block.attrs?.indentRight),
+    firstLineIndent: num(block.attrs?.firstLineIndent),
+    tabStops: normalizeTabStops(block.attrs?.tabStops) ?? [],
   };
 }

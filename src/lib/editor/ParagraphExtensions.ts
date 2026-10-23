@@ -252,6 +252,32 @@ export const HeadingWithExtras = Heading.extend({
   },
 });
 
+/**
+ * M-HEADER-FOOTER-3 — the caret's RULER-EDITABLE PARAGRAPH: the block
+ * whose attrs the ruler's tab-stop/indent writers target. Top-level
+ * paragraphs (body) and BAND-container children (headerBlock/footerBlock
+ * — M-3: `$from.before(1)` is the CONTAINER there, so the old spelling
+ * no-oped) qualify; list-item and blockquote paragraphs do NOT (Word:
+ * the ruler is margins-only there). Shared by the commands below and
+ * the ruler's model derivation (lib/paginated/ruler.ts) — one
+ * acceptance rule, no fork.
+ */
+export function caretEditableParagraph(
+  $from: { depth: number; node(d: number): { type: { name: string } } | null },
+): { pos: number; node: { type: { name: string } } } | null {
+  for (let d = $from.depth; d >= 1; d--) {
+    const node = $from.node(d);
+    if (!node || node.type.name !== 'paragraph') continue;
+    const parent = d - 1 === 0 ? { type: { name: 'doc' } } : $from.node(d - 1);
+    const parentName = parent?.type.name;
+    if (parentName === 'doc' || parentName === 'headerBlock' || parentName === 'footerBlock') {
+      // `before(depth)` = the position directly before this ancestor.
+      return { pos: ($from as unknown as { before(d: number): number }).before(d), node };
+    }
+  }
+  return null;
+}
+
 export const ParagraphExtraCommands = Extension.create({
   name: 'paragraphExtraCommands',
 
@@ -284,9 +310,12 @@ export const ParagraphExtraCommands = Extension.create({
           const { empty, from, to, $from } = tr.selection;
           const targets: Array<{ pos: number; node: any }> = [];
           if (empty) {
-            const pos = $from.before(1);
-            const node = state.doc.nodeAt(pos);
-            if (node?.type.name === 'paragraph') targets.push({ pos, node });
+            // M-HEADER-FOOTER-3: the caret's RULER-EDITABLE paragraph —
+            // `$from.before(1)` is the BAND CONTAINER for header/footer
+            // paragraphs, so the old spelling no-oped there (the
+            // "clicking the ruler never inserts" bug).
+            const hit = caretEditableParagraph($from);
+            if (hit) targets.push({ pos: hit.pos, node: hit.node });
           } else {
             state.doc.forEach((node: any, offset: number) => {
               if (node.type.name !== 'paragraph') return;
@@ -322,9 +351,9 @@ export const ParagraphExtraCommands = Extension.create({
           const { empty, from, to, $from } = tr.selection;
           const targets: Array<{ pos: number; node: any }> = [];
           if (empty) {
-            const pos = $from.before(1);
-            const node = state.doc.nodeAt(pos);
-            if (node?.type.name === 'paragraph') targets.push({ pos, node });
+            // M-HEADER-FOOTER-3: band-aware (see setTabStops).
+            const hit = caretEditableParagraph($from);
+            if (hit) targets.push({ pos: hit.pos, node: hit.node });
           } else {
             state.doc.forEach((node: any, offset: number) => {
               if (node.type.name !== 'paragraph') return;

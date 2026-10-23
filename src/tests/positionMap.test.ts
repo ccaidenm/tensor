@@ -154,3 +154,103 @@ describe('textRangeLineRects (selection/search projection)', () => {
     expect(g2).toEqual({ pageIndex: 1, x: 0, y: 0, height: 16.2 });
   });
 });
+
+// ─── M-HEADER-FOOTER-3: the ECHO RULES ────────────────────────────────────
+// Band blocks echo on every page with IDENTICAL blockId AND
+// rangeStart/rangeEnd — the pre-fix projections resolved the FIRST
+// echo (caret landed on page 0 no matter the click) and full-widthed
+// middle echoes (the "one big spell bar under the whole header" bug).
+// These pin the three rules: active-page filtering (selection/caret),
+// per-echo partial-x (spell/search), and the cross-surface clamp.
+
+import {
+  textRangeUnderlineRects,
+  textRangeTextExtents,
+} from '@/lib/paginated/positionMap';
+
+describe('band echo rules (M-HEADER-FOOTER-3)', () => {
+  // A band block 'h' (echoed on pages 0 and 1 at y=-48 content-box-
+  // relative — the 48px anchor above a 96px margin) + a body block 'z'.
+  const hText = 'hello';
+  const zText = 'world';
+  const echoBlocks: AdapterBlock[] = [
+    { id: 'h', runs: [{ text: hText, style: STYLE }], text: hText, from: 0, to: 7, align: 'left', runDecor: [] },
+    { id: 'z', runs: [{ text: zText, style: STYLE }], text: zText, from: 7, to: 14, align: 'left', runDecor: [] },
+  ];
+  const echoOf = (page: number): LineBox => ({
+    blockId: 'h',
+    lineIndex: 0,
+    pageIndex: page,
+    rect: { x: 0, y: -48, width: 50, height: 16 },
+    baseline: 13,
+    rangeStart: 0,
+    rangeEnd: 5,
+    segments: [{ runIndex: 0, start: 0, end: 5, x: 0 }],
+    band: 'header',
+  });
+  const echoResult: LayoutResult = {
+    placed: [],
+    pages: [
+      { index: 0, size: { x: 0, y: 0, width: 816, height: 1056 }, contentBox: { x: 96, y: 96, width: 624, height: 864 } },
+      { index: 1, size: { x: 0, y: 0, width: 816, height: 1056 }, contentBox: { x: 96, y: 96, width: 624, height: 864 } },
+    ],
+    lines: [
+      echoOf(0),
+      echoOf(1),
+      makeLine('z', 0, 0, 0, 5, 0),
+    ],
+    breaks: [],
+    version: 1,
+  };
+  const bandIds = new Set(['h']);
+
+  it('selection rects resolve ONLY the active page echo (bandPage)', () => {
+    // PM range over the whole band text: pos 1..6 inside 'h'.
+    const rects = textRangeLineRects(echoBlocks, echoResult, 1, 6, FakeMetrics, 32, 1);
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toMatchObject({ pageIndex: 1, top: 1088 + 96 - 48, width: 50 });
+  });
+
+  it('spell underlines paint EVERY echo, each PARTIAL-x (never a full-width bar)', () => {
+    const bars = textRangeUnderlineRects(echoBlocks, echoResult, 1, 6, FakeMetrics, 32);
+    expect(bars).toHaveLength(2); // both pages' echoes
+    expect(bars.map((b) => b.pageIndex)).toEqual([0, 1]);
+    for (const bar of bars) {
+      expect(bar.width).toBe(50); // the flagged span's width — NOT 624
+    }
+  });
+
+  it('search extents paint every echo partial-x too', () => {
+    const exts = textRangeTextExtents(echoBlocks, echoResult, 1, 6, FakeMetrics, 32);
+    expect(exts).toHaveLength(2);
+    for (const e of exts) expect(e.width).toBe(50);
+  });
+
+  it('caret resolves the active page echo; the page-0 fallback is documented', () => {
+    const active = caretGeometry(echoBlocks, echoResult, 3, FakeMetrics, 1)!;
+    expect(active.pageIndex).toBe(1);
+    // No bandPage → the FIRST echo (pre-fix behavior kept as fallback).
+    const fallback = caretGeometry(echoBlocks, echoResult, 3, FakeMetrics)!;
+    expect(fallback.pageIndex).toBe(0);
+  });
+
+  it('cross-surface selection clamps the PAINT to the anchor side (PM state untouched)', () => {
+    // A PM range spanning band (head 3 in 'h') to body (anchor 10 in
+    // 'z') — normalized from<to, as PM always delivers. Anchor = body.
+    const rects = textRangeLineRects(
+      echoBlocks, echoResult, 3, 10, FakeMetrics, 32,
+      undefined, 'body', bandIds,
+    );
+    // Only the BODY side paints — one rect on 'z''s line [0,2), never
+    // a band echo.
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toMatchObject({ pageIndex: 0, top: 96, width: 20 });
+    // The BAND-anchor mirror: only the active echo paints ([2,5) of h).
+    const bandSide = textRangeLineRects(
+      echoBlocks, echoResult, 3, 10, FakeMetrics, 32,
+      0, 'band', bandIds,
+    );
+    expect(bandSide).toHaveLength(1);
+    expect(bandSide[0]).toMatchObject({ pageIndex: 0, top: 48, width: 30 });
+  });
+});

@@ -24,6 +24,9 @@ import { BlockIdExtension } from '@/lib/editor/BlockIdExtension';
 import { CharStyleMark, StyleCommandsExtension } from '@/lib/styles/styleExtensions';
 import { ScrollGuardExtension } from '@/lib/paginated/ScrollGuardExtension';
 import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
+// M-HEADER-FOOTER-2: the doc-level header/footer containers — content
+// rides the ONE PM doc (L3); the adapter routes them into doc.bands.
+import { FooterBlock, HeaderBlock } from '@/lib/editor/HeaderFooterNodes';
 import { ImageNode } from '@/lib/editor/ImageNode';
 import { InlineImageNode } from '@/lib/editor/InlineImageNode';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
@@ -85,6 +88,9 @@ export function tensorExtensions(): Extensions {
     // borderStyle/backgroundColor attrs. Pages mode falls back to the
     // pageless render until the engine grows the TableBlock kind.
     ...TensorTableKit,
+    // M-HEADER-FOOTER-2: the header/footer container nodes.
+    HeaderBlock,
+    FooterBlock,
     // M-EQ: display equations — a block atom (the ImageNode family);
     // latex is the node's only document data, rendering is a
     // projection (lib/equations), paginated layout rides the engine's
