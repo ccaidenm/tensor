@@ -238,12 +238,29 @@ export function inlineObjectRect(
 }
 
 /** The span walk shared by every range-rect derivation: PM range ->
- * per-line {line, [s,e), block} spans. ONE derivation, no forks. */
+ * per-line {line, [s,e), block} spans. ONE derivation, no forks.
+ *
+ * M-HEADER-FOOTER-3 — THE ECHO RULES (the band-ambiguity fix):
+ *  - `bandPage` (selection/caret callers): a band block's lines resolve
+ *    ONLY on the ACTIVE page's echo — echoes share blockId AND
+ *    rangeStart/rangeEnd (the engine re-emits per page), so an
+ *    unfiltered walk paints selection on EVERY page and mis-orders
+ *    partial-x. Absent (spell/search callers): all echoes pass, and
+ *    the rect builders treat each echo as its own first/last.
+ *  - `surface` (the cross-surface clamp): a selection whose ends sit
+ *    on different surfaces (band container vs body — reachable via
+ *    shift+click) paints ONLY the anchor's surface. PM state is
+ *    untouched — the clamp is on what we PAINT (the tablePosToOffset
+ *    precedent: honest projection of an awkward selection).
+ */
 function matchSpans(
   blocks: readonly AdapterBlock[],
   result: LayoutResult,
   from: number,
-  to: number
+  to: number,
+  bandPage?: number,
+  surface?: 'band' | 'body',
+  bandBlockIds?: ReadonlySet<string>
 ): { line: LineBox; s: number; e: number; block: AdapterBlock }[] {
   if (to <= from) return [];
   const a = pmPosToBlockOffset(blocks, from);
@@ -254,11 +271,18 @@ function matchSpans(
   const bi = blocks.indexOf(b.block);
   for (let i = ai; i <= bi; i++) {
     const block = blocks[i];
+    // The cross-surface clamp: skip blocks of the other surface.
+    if (surface != null && bandBlockIds != null) {
+      const isBand = bandBlockIds.has(block.id);
+      if (surface === 'band' ? !isBand : isBand) continue;
+    }
     const startOff = i === ai ? a.offset : 0;
     const endOff = i === bi ? b.offset : block.text.length;
     if (endOff <= startOff) continue;
     for (const line of result.lines) {
       if (line.blockId !== block.id) continue;
+      // The echo rule: an active-page filter for band lines.
+      if (line.band != null && bandPage != null && line.pageIndex !== bandPage) continue;
       const s = Math.max(startOff, line.rangeStart);
       const e = Math.min(endOff, line.rangeEnd);
       if (e > s) spans.push({ line, s, e, block });
@@ -270,16 +294,23 @@ function matchSpans(
 /** PM range -> per-line painted rects: partial x-range on the selection's
  * first/last line, full content width on middle lines. Stack-local,
  * pre-zoom — the caller renders inside the transform (zoom law: no
- * compensation). */
+ * compensation).
+ *
+ * M-HEADER-FOOTER-3: `bandPage` restricts band echoes to the active
+ * page (selection callers); the `surface`/`bandBlockIds` pair clamps
+ * cross-surface selections to the anchor's side. */
 export function textRangeLineRects(
   blocks: readonly AdapterBlock[],
   result: LayoutResult,
   from: number,
   to: number,
   metrics: TextMetrics,
-  pageGap: number
+  pageGap: number,
+  bandPage?: number,
+  surface?: 'band' | 'body',
+  bandBlockIds?: ReadonlySet<string>
 ): PaintedRect[] {
-  const spans = matchSpans(blocks, result, from, to);
+  const spans = matchSpans(blocks, result, from, to, bandPage, surface, bandBlockIds);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
   const cb = page0.contentBox;
@@ -332,17 +363,23 @@ export function textRangeTextExtents(
   from: number,
   to: number,
   metrics: TextMetrics,
-  pageGap: number
+  pageGap: number,
+  /** M-HEADER-FOOTER-3: the active band page (bubble anchors); absent
+   *  paints every echo (search highlights — the text is on every page). */
+  bandPage?: number
 ): PaintedRect[] {
-  const spans = matchSpans(blocks, result, from, to);
+  const spans = matchSpans(blocks, result, from, to, bandPage);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
   const cb = page0.contentBox;
   const stride = page0.size.height + pageGap;
 
   return spans.map(({ line, s, e, block }, idx) => {
-    const first = idx === 0;
-    const last = idx === spans.length - 1;
+    // M-HEADER-FOOTER-3 — the ECHO rule (search highlights): a band
+    // line is ALWAYS a first/last (partial x); see the underline
+    // builder for the full rationale.
+    const first = idx === 0 || line.band != null;
+    const last = idx === spans.length - 1 || line.band != null;
     const off =
       first || last
         ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
@@ -421,8 +458,13 @@ export function textRangeUnderlineRects(
   const stride = page0.size.height + pageGap;
 
   return spans.map(({ line, s, e, block }, idx) => {
-    const first = idx === 0;
-    const last = idx === spans.length - 1;
+    // M-HEADER-FOOTER-3 — the ECHO rule: a band line is ALWAYS a
+    // first/last (partial x). Spell/search paint on EVERY echo (the
+    // text renders on every page), and the plain first/middle/last
+    // walk would full-width the middle echoes — the "one big bar under
+    // the whole header" bug. Each echo is its own line sequence.
+    const first = idx === 0 || line.band != null;
+    const last = idx === spans.length - 1 || line.band != null;
     const off =
       first || last
         ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
@@ -500,11 +542,21 @@ export function caretGeometry(
   blocks: readonly AdapterBlock[],
   result: LayoutResult,
   head: number,
-  metrics: TextMetrics
+  metrics: TextMetrics,
+  /** M-HEADER-FOOTER-3: the active band page — a band block's echoes
+   *  share rangeStart/rangeEnd, so lineForOffset would resolve the
+   *  FIRST echo (page 0) no matter where the caret was placed. Passing
+   *  the active page filters to that page's echo; absent = page-0 echo
+   *  (the pre-fix fallback, unchanged for body blocks). */
+  bandPage?: number
 ): CaretGeometry | null {
   const bo = pmPosToBlockOffset(blocks, head);
   if (!bo) return null;
-  const lines = result.lines.filter((l) => l.blockId === bo.block.id);
+  const lines = result.lines.filter(
+    (l) =>
+      l.blockId === bo.block.id &&
+      (l.band == null || bandPage == null || l.pageIndex === bandPage)
+  );
   const line = lineForOffset(lines, bo.offset);
   const page0 = result.pages[0];
   if (!line || !page0) return null;

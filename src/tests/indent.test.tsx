@@ -458,13 +458,13 @@ describe('indent input geometry (paginated)', () => {
     expect(line.rect.x).toBe(step);
 
     // Left gutter click (x=4, left of rect.x 32): line start.
-    expect(hitTest(result, [b], FakeMetrics, PAGE_GAP, CB.x + 4, CB.y + 4)).toEqual({
+    expect(hitTest(result, [b], FakeMetrics, PAGE_GAP, CB.x + 4, CB.y + 4)).toMatchObject({
       blockId: 'a',
       offset: 0,
     });
     // Between text end (32+300=332) and the narrowed right edge: the
     // line's END position (offset 30 = rangeEnd), like the trailing rule.
-    expect(hitTest(result, [b], FakeMetrics, PAGE_GAP, CB.x + 500, CB.y + 4)).toEqual({
+    expect(hitTest(result, [b], FakeMetrics, PAGE_GAP, CB.x + 500, CB.y + 4)).toMatchObject({
       blockId: 'a',
       offset: 30,
     });

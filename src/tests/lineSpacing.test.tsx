@@ -253,11 +253,11 @@ describe('leading-box overlays', () => {
     // to y 16 (12.8+3.2); the whole 16px leading is BELOW, y 16..32.
     const top = hitTest(result, [block], FakeMetrics, PAGE_GAP, CB.x + 2, CB.y + 4);
     const belowLeading = hitTest(result, [block], FakeMetrics, PAGE_GAP, CB.x + 2, CB.y + 28);
-    expect(top).toEqual({ blockId: 'a', offset: 0 });
-    expect(belowLeading).toEqual({ blockId: 'a', offset: 0 });
+    expect(top).toMatchObject({ blockId: 'a', offset: 0 });
+    expect(belowLeading).toMatchObject({ blockId: 'a', offset: 0 });
     // The box boundary belongs to the next line (nearest-line rule).
     const nextLine = hitTest(result, [block], FakeMetrics, PAGE_GAP, CB.x + 2, CB.y + 32);
-    expect(nextLine).toEqual({ blockId: 'a', offset: 62 });
+    expect(nextLine).toMatchObject({ blockId: 'a', offset: 62 });
   });
 });
 

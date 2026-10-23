@@ -55,6 +55,13 @@ interface BlockCanvasProps {
   /** M-IMAGES-2.1: bumps when ANY bitmap lands — rides boxKey so the
    *  inline paint repaints ONCE on arrival (the arrival law). */
   bitmapEpoch: number;
+  /**
+   * M-HEADER-FOOTER-2: MUTED ink — the INACTIVE band look (grayed
+   * while the selection sits outside the band containers). Passed to
+   * paintLines' extras; rides boxKey (a mute flip repaints, the
+   * styleEpoch precedent).
+   */
+  muted?: boolean;
 }
 
 /**
@@ -72,7 +79,7 @@ interface BlockCanvasProps {
  * their pixels. Falls back to full repaint on canvas resize, first-line
  * edits, or style changes (the fallback cost = the old behavior).
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -88,7 +95,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
 
     const decorKey = runDecor.map((d) => `${d.color}|${d.highlight}|${d.underline}|${d.strike}`).join(';');
     const paintKey = paint ? JSON.stringify(paint) : '';
-    const boxKey = `${left}|${top}|${width}|${align}|${decorKey}|${npc === true ? 'npc' : ''}|${paintKey}|ep${styleEpoch}|cap${showCaptions ? '1' : '0'}|bmp${bitmapEpoch}`;
+    const boxKey = `${left}|${top}|${width}|${align}|${decorKey}|${npc === true ? 'npc' : ''}|${paintKey}|ep${styleEpoch}|cap${showCaptions ? '1' : '0'}|bmp${bitmapEpoch}|muted${muted ? '1' : '0'}`;
     // boxKey carries the registry epoch: ANY definition edit breaks
     // the boxKey comparison and forces the repaint below — even when
     // the engine spliced (same LineBox references, blocksWalked = 0)
@@ -139,7 +146,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
       const damageTop = lines[damageFrom].rect.y - first.rect.y;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, damageTop, width, height - damageTop);
-      paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed });
+      paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted });
       // Receipt: px² actually rasterized (cleared + repainted region).
       __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
     } else {
@@ -148,7 +155,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
       canvas.width = newW;
       canvas.height = newH;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed });
+      paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted });
       // Receipt: full canvas.
       __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
     }
@@ -158,12 +165,15 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     prevBoxRef.current = boxKey;
   // showCaptions + wrapWidth + bitmapEpoch ride the repaint KEY —
   // each flips the paint when it changes (the arrival repaint).
-  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch]);
+  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted]);
 
   return (
     <canvas
       ref={canvasRef}
       data-block-id={lines[0].blockId}
+      // M-HEADER-FOOTER-2: band canvases carry their band identity (test
+      // surface + future per-band ink routing).
+      data-band={lines[0].band}
       role="presentation"
       className="absolute"
       style={{ left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` }}

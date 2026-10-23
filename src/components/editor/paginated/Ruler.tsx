@@ -4,6 +4,7 @@ import type { PageGeometry, TabStop } from '@tensor-editor/engine';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
+import { useEditorState } from '@tiptap/react';
 import { MoveHorizontal, MoveLeft, MoveRight } from 'lucide-react';
 import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
 import { pxToPt, ptToPx } from '@/lib/document/pageSetup';
@@ -1116,6 +1117,24 @@ export function VerticalRuler({
   const barRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mutedProbeRef = useRef<HTMLSpanElement>(null);
+  // M-HEADER-FOOTER: the accent probe for the active-band highlight.
+  const primaryProbeRef = useRef<HTMLSpanElement>(null);
+  // M-HEADER-FOOTER-2: the active band signal — selection-driven (a
+  // band container in the selection's ancestry), the one-PM-doc law.
+  const editorForBand = useDocumentStore((s) => s.editor);
+  const hfSurface = useEditorState({
+    editor: editorForBand,
+    selector: ({ editor: e }): 'header' | 'footer' | null => {
+      if (!e) return null;
+      const { $from } = e.state.selection;
+      for (let d = $from.depth; d > 0; d--) {
+        const name = $from.node(d).type.name;
+        if (name === 'headerBlock') return 'header';
+        if (name === 'footerBlock') return 'footer';
+      }
+      return null;
+    },
+  });
 
   const pageH = geometry.size.height;
   const pageHz = pageH * zoom;
@@ -1187,6 +1206,19 @@ export function VerticalRuler({
       ctx.fillRect(0, pageTop, RULER_WIDTH, topMs - pageTop);
       ctx.fillRect(0, botMs, RULER_WIDTH, pageTop + pageHz - botMs);
 
+      // M-HEADER-FOOTER: the ACTIVE band's margin strip wears the
+      // accent wash (a focused header tints the top strip, a footer
+      // the bottom) — the ruler's active-region cue.
+      if (hfSurface !== null && primaryProbeRef.current) {
+        const primary = getComputedStyle(primaryProbeRef.current).color;
+        if (primary) {
+          ctx.fillStyle = primary;
+          ctx.globalAlpha = 0.18;
+          if (hfSurface === 'header') ctx.fillRect(0, pageTop, RULER_WIDTH, topMs - pageTop);
+          else ctx.fillRect(0, botMs, RULER_WIDTH, pageTop + pageHz - botMs);
+        }
+      }
+
       // The page's tick field: functional (fg) inside the content span,
       // muted short ticks in the margin spans; majors numbered 0 from
       // the page's top edge (Word's vertical numbering), rendered
@@ -1238,6 +1270,7 @@ export function VerticalRuler({
     contentB,
     contentH,
     contentY,
+    hfSurface,
     pageCount,
     pageH,
     pageHz,
@@ -1362,6 +1395,15 @@ export function VerticalRuler({
           ref={mutedProbeRef}
           aria-hidden
           className="invisible absolute text-muted-foreground"
+        />
+        {/* M-HEADER-FOOTER: the primary-ink probe for the active-band
+            highlight (the muted probe's pattern; --primary is fine HERE
+            — the band highlight is SUPPOSED to wear the accent, unlike
+            ticks). */}
+        <span
+          ref={primaryProbeRef}
+          aria-hidden
+          className="invisible absolute text-primary"
         />
         <canvas
           ref={canvasRef}

@@ -9,10 +9,23 @@ import { alignOffset, blockWrapWidth } from './positionMap';
 // The spacer/gap geometry that made the legacy clicks ambiguous no
 // longer exists; this is clamping, never correction.
 
+/** M-HEADER-FOOTER-3: the band-extent rule's slack — the painted band
+ * rect grown by this many px is the click target (aiming slack; outside
+ * it, margin clicks fall through to the body's nearest-line clamp). */
+const BAND_HIT_PAD = 6;
+
 export interface HitResult {
   blockId: string;
   /** Offset into the block's concatenated run text. */
   offset: number;
+  /**
+   * M-HEADER-FOOTER-3: the hit's page (the sheet the click resolved
+   * against — gap-half ownership applied) and, IFF the hit is band
+   * content, which band. The shell's active-band-page tracking rides
+   * these (echo projections resolve the clicked page's echo).
+   */
+  pageIndex: number;
+  band?: 'header' | 'footer';
 }
 
 /** @param localX/localY stack-local (pre-zoom) px. */
@@ -40,13 +53,64 @@ export function hitTest(
   const pageLines = result.lines.filter((l) => l.pageIndex === pageIndex);
   if (pageLines.length === 0) return null;
 
-  const first = pageLines[0];
-  const last = pageLines[pageLines.length - 1];
-  const y = localY - pageIndex * stride - cb.y;
-  if (y < first.rect.y) return { blockId: first.blockId, offset: first.rangeStart };
-  if (y >= last.rect.y + last.rect.height) return { blockId: last.blockId, offset: last.rangeEnd };
+  // M-HEADER-FOOTER-2 — the FLOW track: band lines never join the
+  // nearest-line clamps (their rects sit OUTSIDE the content box:
+  // negative-y headers, below-box footers — mixing them into the
+  // first/last flow clamps would misplace every margin click).
+  const flowLines = pageLines.filter((l) => !l.band);
 
+  const y = localY - pageIndex * stride - cb.y;
+  // Declared BEFORE the band rule: the hoisted glyphWalk closes over
+  // it, and the band rule calls glyphWalk — a TDZ violation here was
+  // the every-band-click crash (caught by the M-3 caret test).
   const x = localX - cb.x;
+
+  // M-HEADER-FOOTER-3 — THE BAND-EXTENT RULE (tightened from the v2
+  // strip rule): a click routes to the band ONLY within the band's
+  // PAINTED EXTENT (its first line's top to its last line's bottom,
+  // ± BAND_HIT_PAD). The v2 rule claimed the ENTIRE margin strip, so a
+  // single click in the margin below the header (or above the footer)
+  // "triggered" the band instead of the body's nearest-line clamp —
+  // Word routes margin clicks to the body; band clicks to the band.
+  // Outside the extent (or no band on the page) → the body clamps.
+  const headerStrip = y < 0;
+  const footerStrip = y >= cb.height;
+  if (headerStrip || footerStrip) {
+    const which: 'header' | 'footer' = headerStrip ? 'header' : 'footer';
+    const bandLines = pageLines
+      .filter((l) => l.band === which)
+      .sort((a, b) => a.rect.y - b.rect.y);
+    if (bandLines.length > 0) {
+      const bandFirst = bandLines[0]!;
+      const bandLast = bandLines[bandLines.length - 1]!;
+      const inExtent =
+        y >= bandFirst.rect.y - BAND_HIT_PAD &&
+        y <= bandLast.rect.y + bandLast.rect.height + BAND_HIT_PAD;
+      if (inExtent) {
+        const line =
+          y < bandFirst.rect.y
+            ? bandFirst
+            : bandLines.find((l) => y >= l.rect.y && y < l.rect.y + l.rect.height) ?? bandLast;
+        const block = blocks.find((b) => b.id === line.blockId);
+        if (!block) return null;
+        const hit = glyphWalk(line, block);
+        return hit ? { ...hit, pageIndex, band: which } : null;
+      }
+    }
+  }
+
+  // Flow clamps (body lines only — a band-only page has none, and its
+  // clicks are owned by the band rule above).
+  if (flowLines.length > 0) {
+    const first = flowLines[0]!;
+    const last = flowLines[flowLines.length - 1]!;
+    if (y < first.rect.y)
+      return { blockId: first.blockId, offset: first.rangeStart, pageIndex };
+    if (y >= last.rect.y + last.rect.height) {
+      return { blockId: last.blockId, offset: last.rangeEnd, pageIndex };
+    }
+  }
+  const bodyLast = flowLines[flowLines.length - 1];
 
   // M-TABLES — THE CELL-FIRST RULE: a click inside a tableCell rect
   // resolves within THAT cell (the lane's own lines, y-clamped),
@@ -60,7 +124,9 @@ export function hitTest(
     (pr) =>
       x >= pr.rect.x && x <= pr.rect.x + pr.rect.width && y >= pr.rect.y && y <= pr.rect.y + pr.rect.height,
   );
-  const glyphWalk = (line: (typeof pageLines)[number], block: AdapterBlock): HitResult | null => {
+  // Hoisted (function declaration): the band-strip rule above and the
+  // cell-first rule below both call it.
+  function glyphWalk(line: (typeof pageLines)[number], block: AdapterBlock): HitResult | null {
     // Same offset the painter and caret use — the indent-narrowed box
     // (rect.x IS indentLeft). A click in the marker GUTTER (x < indent)
     // falls through the nearest-glyph loop and resolves to the item's
@@ -85,7 +151,7 @@ export function hitTest(
         // wrap width — the SAME inputs the engine's clamp used.
         const wrap = line.tableCell ? line.tableCell.width : blockWrapWidth(cb.width, block);
         const dims = fitDownImage(run.width, run.height, wrap, Infinity);
-        if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start };
+        if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start, pageIndex };
         continue;
       }
       const isTab = seg.end === seg.start + 1 && block.text[seg.start] === '\t';
@@ -94,12 +160,12 @@ export function hitTest(
         const w = isTab
           ? (nextSeg ? nextSeg.x : line.rect.width) - seg.x
           : metrics.measure(block.text[i]!, run.style);
-        if (x < cursor + w / 2) return { blockId: line.blockId, offset: i };
+        if (x < cursor + w / 2) return { blockId: line.blockId, offset: i, pageIndex };
         cursor += w;
       }
     }
-    return { blockId: line.blockId, offset: line.rangeEnd };
-  };
+    return { blockId: line.blockId, offset: line.rangeEnd, pageIndex };
+  }
   if (hitCell?.cell) {
     const block = blocks.find((b) => b.id === hitCell.blockId);
     if (block) {
@@ -122,17 +188,24 @@ export function hitTest(
           y < laneFirst.rect.y
             ? laneFirst
             : laneLines.find((l) => y >= l.rect.y && y < l.rect.y + l.rect.height) ?? laneLast;
-        return glyphWalk(line, block);
+        const hit = glyphWalk(line, block);
+        return hit ? { ...hit, pageIndex } : null;
       }
     }
   }
 
   // Lines tile the content box (band-wise contiguity) — table cell
   // lines are lane content (skipped: the cell-first rule above owns
+  // them); band lines are band content (the strip rule above owns
   // them); exactly one flow line contains y.
-  const line = pageLines.find((l) => !l.tableCell && y >= l.rect.y && y < l.rect.y + l.rect.height) ?? last;
+  const line =
+    pageLines.find(
+      (l) => !l.tableCell && !l.band && y >= l.rect.y && y < l.rect.y + l.rect.height,
+    ) ?? bodyLast;
+  if (!line) return null;
 
   const block = blocks.find((b) => b.id === line.blockId);
   if (!block) return null;
-  return glyphWalk(line, block);
+  const hit = glyphWalk(line, block);
+  return hit ? { ...hit, pageIndex } : null;
 }

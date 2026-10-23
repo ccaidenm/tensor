@@ -34,7 +34,9 @@ import { nanoid } from 'nanoid';
 // on the table node alone (rows/cells are positional inside it).
 // M-EQ: the equation joins too (one EquationBlock per node; PlacedRect
 // echoes the same id — the edit-survival contract's atomic family).
-const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table'];
+// M-HEADER-FOOTER-2: the header/footer containers' INNER paragraphs —
+// the band blocks carry the same id contract (stable across edits).
+const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table', 'headerBlock', 'footerBlock'];
 
 /**
  * Mint ids for missing/duplicate ID-bearing blocks INTO `tr` (positions

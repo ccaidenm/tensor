@@ -29,6 +29,11 @@ export const ConfigSchema = z.object({
      *  presentation-only ink, both modes; the model is untouched and
      *  ToF reads captions regardless). Default: captions visible. */
     showCaptions: z.boolean().default(true),
+    /** M-HEADER-FOOTER: header/footer band DISPLAY toggle (the captions
+     *  NPC precedent — presentation-only; the settings/model are
+     *  untouched and saves round-trip regardless). Default: bands
+     *  visible, matching Word/GDocs. Pages mode only. */
+    showHeadersFooters: z.boolean().default(true),
     /** M-RULER: the ruler bars — per-axis display toggles (the command
      *  palette's show/hide surface). Pages mode only (pageless has no
      *  page geometry to rule). Defaults: visible, matching Word/GDocs. */
@@ -54,6 +59,7 @@ export const ConfigSchema = z.object({
     customColors: [],
     showNonPrintingChars: false,
     showCaptions: true,
+    showHeadersFooters: true,
     showHorizontalRuler: true,
     showVerticalRuler: true,
     zoomLevel: 100,

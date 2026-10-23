@@ -7,6 +7,7 @@ import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
 import type { PageSetup } from './pageSetup';
 import type { LineNumbersSetting } from './schema';
+import type { HeaderFooterSettings } from './headerFooter';
 import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
 
 function defaultPageSetup(): PageSetup {
@@ -38,6 +39,11 @@ interface DocumentStore {
    *  on write: the store never holds empty strings. */
   coreProperties: DocumentCoreProperties;
   setCoreProperties: (props: DocumentCoreProperties) => void;
+  /** M-HEADER-FOOTER: the document's header/footer settings; null =
+   *  never set (old files) = headers/footers off. Writing marks the
+   *  doc dirty — it travels in .wpdoc metadata like pageSetup. */
+  headerFooter: HeaderFooterSettings | null;
+  setHeaderFooter: (settings: HeaderFooterSettings | null) => void;
   save: () => Promise<void>;
   saveAs: () => Promise<void>;
   openFile: () => Promise<void>;
@@ -70,22 +76,42 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       revision: state.revision + 1,
     })),
 
+  headerFooter: null,
+  setHeaderFooter: (settings) =>
+    set((state) => ({
+      headerFooter: settings,
+      isDirty: true,
+      revision: state.revision + 1,
+    })),
+
   save: async () => {
-    const { editor, filePath, pageSetup, lineNumbers, coreProperties } = get();
+    const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } = get();
     if (!editor) return;
     if (!filePath) {
       await get().saveAs();
       return;
     }
-    await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties });
+    await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
     await clearRecoveryCopy(filePath);
     set({ isDirty: false });
   },
 
   saveAs: async () => {
-    const { editor, filePath: oldPath, pageSetup, lineNumbers, coreProperties } = get();
+    const {
+      editor,
+      filePath: oldPath,
+      pageSetup,
+      lineNumbers,
+      coreProperties,
+      headerFooter,
+    } = get();
     if (!editor) return;
-    const newPath = await saveDocumentAs(editor, { pageSetup, lineNumbers, coreProperties });
+    const newPath = await saveDocumentAs(editor, {
+      pageSetup,
+      lineNumbers,
+      coreProperties,
+      headerFooter,
+    });
     if (newPath) {
       await clearRecoveryCopy(oldPath);
       set({ filePath: newPath, isDirty: false });
@@ -109,6 +135,10 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           lineNumbers: result.lineNumbers ?? null,
           // M-META: normalized in openDocument — {} for old files.
           coreProperties: result.coreProperties,
+          // M-HEADER-FOOTER: null = the file predates them / never
+          // enabled them. The headerFooter store re-syncs its editor
+          // instances off this write (its own subscription).
+          headerFooter: result.headerFooter,
         });
       }
     } catch (err) {

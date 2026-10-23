@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { DocumentCoreProperties } from './coreProperties';
 import type { PageSetup } from './pageSetup';
+import type { HeaderFooterSettings } from './headerFooter';
 import { StyleDefinitionSchema, type StyleDefinition } from '@/lib/styles/types';
 
 export const CURRENT_DOCUMENT_VERSION = 1;
@@ -48,6 +49,61 @@ export const LineNumbersSchema = z.object({
 export type LineNumbersSetting = z.infer<typeof LineNumbersSchema>;
 
 /**
+ * M-HEADER-FOOTER-2: the document's header/footer SETTINGS (enables,
+ * different-first-page). Optional — old files predate them and open
+ * with headers/footers off (the styles/lineNumbers precedent). The
+ * CONTENT rides docJSON (headerBlock/footerBlock nodes). The schema
+ * is compile-checked against the model type, so the two can't drift.
+ * The v1 shape (per-region content docs) is recognized by the open
+ * path's migration — see lib/document/headerFooter.ts.
+ */
+export const HeaderFooterSchema = z.object({
+  scope: z.object({ kind: z.literal('document') }),
+  differentFirstPage: z.boolean(),
+}) satisfies z.ZodType<HeaderFooterSettings>;
+
+/**
+ * M-HEADER-FOOTER-2: the v1 shape (per-region TipTap JSON docs) —
+ * kept ONLY so the open path can SEE it (zod strips unknown keys;
+ * without this union the legacy content fields would vanish before
+ * the migration reads them) and translate it into doc-level nodes.
+ * Never written by saves.
+ *
+ * UNION ORDER MATTERS: z.union picks the FIRST success, and the plain
+ * settings object schema SUCCEEDS on legacy input by stripping — so
+ * legacy must come FIRST, and must be distinguishable: the refine
+ * requires at least one region CONTENT doc (new settings files have
+ * none; a legacy file with all-empty regions migrates as settings
+ * with no content, which is exactly its meaning).
+ */
+const LegacyHfRegionSchema = z
+  .object({ doc: z.any().nullable().optional() })
+  .nullable()
+  .optional();
+
+export const LegacyHeaderFooterSchema = z
+  .object({
+    scope: z.object({ kind: z.literal('document') }).optional(),
+    headerEnabled: z.boolean().optional(),
+    footerEnabled: z.boolean().optional(),
+    differentFirstPage: z.boolean().optional(),
+    header: LegacyHfRegionSchema,
+    footer: LegacyHfRegionSchema,
+    firstHeader: LegacyHfRegionSchema,
+    firstFooter: LegacyHfRegionSchema,
+  })
+  .refine(
+    (v) =>
+      v.header != null || v.footer != null || v.firstHeader != null || v.firstFooter != null,
+    { message: 'no legacy region content' },
+  );
+
+export type LegacyHeaderFooterMetadata = z.infer<typeof LegacyHeaderFooterSchema>;
+export type HeaderFooterMetadata =
+  | z.infer<typeof HeaderFooterSchema>
+  | LegacyHeaderFooterMetadata;
+
+/**
  * M-META: the document's standard core properties — the fields the
  * Properties dialog edits and the exporters embed (DOCX #37 / PDF #39
  * consume the mappings in lib/document/coreProperties.ts). All
@@ -76,6 +132,7 @@ export const DocumentFileSchema = z.object({
     pageSetup: PageSetupSchema.optional(),
     styles: DocStylesSchema.optional(),
     lineNumbers: LineNumbersSchema.optional(),
+    headerFooter: z.union([LegacyHeaderFooterSchema, HeaderFooterSchema]).optional(),
   }).default({}),
 });
 
