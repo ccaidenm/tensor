@@ -56,6 +56,19 @@ export function imageSelected(editor: Editor | null): boolean {
   return selection.node.type.name === 'image' || selection.node.type.name === 'inlineImage';
 }
 
+/** True while the selection sits inside a referenceTable container (or
+ *  a NodeSelection on one) — the contextual tab's producer (M-REFS). */
+export function selectionInReferenceTable(editor: Editor | null): boolean {
+  if (!editor) return false;
+  const { selection } = editor.state;
+  if (isNodeSelection(selection) && selection.node.type.name === 'referenceTable') return true;
+  const { $from } = selection;
+  for (let d = $from.depth; d > 0; d--) {
+    if ($from.node(d).type.name === 'referenceTable') return true;
+  }
+  return false;
+}
+
 function isNodeSelection(selection: unknown): selection is NodeSelection {
   return (
     typeof selection === 'object' &&
@@ -92,4 +105,12 @@ export function useSelectionContexts(editor: Editor | null) {
     selector: ({ editor: e }) => selectionInBand(e ?? null),
   });
   useRibbonContext('headerFooter', inBand ?? false);
+
+  // M-REFS: the referenceTable producer — inside a collection (or a
+  // NodeSelection on one) enters the Reference Table context.
+  const inRefTable = useEditorState({
+    editor,
+    selector: ({ editor: e }) => selectionInReferenceTable(e ?? null),
+  });
+  useRibbonContext('referenceTable', inRefTable ?? false);
 }

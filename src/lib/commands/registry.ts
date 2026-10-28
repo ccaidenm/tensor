@@ -47,6 +47,9 @@ import {
   Squircle,
   Table,
   TableProperties,
+  BookmarkMinus,
+  BookmarkPlus,
+  BookOpen,
   WrapText,
   BringToFront,
   SendToBack,
@@ -60,7 +63,8 @@ import {
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
-import { enableRegion, hasBandContainer } from '@/lib/editor/headerFooterCommands';
+import { enableRegion, hasBandContainer, selectionInBand } from '@/lib/editor/headerFooterCommands';
+import { findTableUnderSelection } from '@/lib/editor/TableExtensions';
 import { cloneHeaderFooterSettings, defaultHeaderFooterSettings } from '@/lib/document/headerFooter';
 import { runEditorCommand } from '@/lib/editor/editorCommands';
 import { focusedTextControl } from '@/lib/editor/domUtils';
@@ -78,6 +82,9 @@ import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
 import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
+import { useInsertReferenceTableStore } from '@/components/dialogs/InsertReferenceTableDialog';
+import { insertReferenceTableAtSelection } from '@/lib/editor/ReferenceTableNode';
+import { indexEntryActive } from '@/lib/editor/IndexMark';
 import { useSpellStore } from '@/lib/editor/spell/store';
 import { spellCheckActive } from '@/lib/config/schema';
 
@@ -130,6 +137,14 @@ export interface CommandAction {
 
 const doc = () => useDocumentStore.getState();
 const cfg = () => useConfigStore.getState();
+
+/** M-REFS: the insert trio's shared enablement — editor present AND
+ * the insertion not refused (bands/cells — the same facts the ONE
+ * insertion helper toasts on; a disabled button must never write). */
+const canInsertReferenceTable = () => {
+  const editor = doc().editor;
+  return !!editor && !selectionInBand(editor) && !findTableUnderSelection(editor.state);
+};
 
 /** enablement: cheap + sync (store reads, editor.can()). */
 const canUndo = () => doc().editor?.can().undo() ?? false;
@@ -562,6 +577,69 @@ export const COMMANDS: CommandAction[] = [
       }
     },
   },
+  // ─── M-REFS: the reference-table commands (palette + menu share
+  // the SAME runs — the M-PALETTE law). The insert trio routes through
+  // the ONE insertion helper (refusal checks + toast + command); the
+  // mark pair dispatches the schema commands. Enablement is honest and
+  // cheap: editor presence + the refusal facts + selection shape. ───
+  {
+    id: 'insertTableOfContents',
+    title: 'Insert Table of Contents',
+    icon: List,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'table of contents', 'toc', 'contents', 'headings', 'reference'],
+    enablement: () => canInsertReferenceTable(),
+    run: () => useInsertReferenceTableStore.getState().open(),
+  },
+  {
+    id: 'insertTableOfFigures',
+    title: 'Insert Table of Figures',
+    icon: ImageIcon,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'table of figures', 'figures', 'captions', 'images', 'reference'],
+    enablement: () => canInsertReferenceTable(),
+    run: () => {
+      const editor = doc().editor;
+      if (editor) insertReferenceTableAtSelection(editor, 'figures');
+    },
+  },
+  {
+    id: 'insertIndex',
+    title: 'Insert Index',
+    icon: BookOpen,
+    group: 'actions',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['insert', 'index', 'terms', 'marked', 'reference', 'alphabetical'],
+    enablement: () => canInsertReferenceTable(),
+    run: () => {
+      const editor = doc().editor;
+      if (editor) insertReferenceTableAtSelection(editor, 'index');
+    },
+  },
+  {
+    id: 'markIndexEntry',
+    title: 'Mark as Index Entry',
+    icon: BookmarkPlus,
+    group: 'format',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['index', 'mark', 'entry', 'term', 'keyword', 'reference'],
+    // The mark's whole contract: a non-empty selection.
+    enablement: () => !!doc().editor && !doc().editor!.state.selection.empty,
+    run: () => doc().editor?.chain().focus().setIndexEntry().run(),
+  },
+  {
+    id: 'removeIndexEntry',
+    title: 'Remove Index Entry Mark',
+    icon: BookmarkMinus,
+    group: 'format',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['index', 'remove', 'unmark', 'entry', 'term', 'mark'],
+    enablement: () => !!doc().editor && indexEntryActive(doc().editor!.state),
+    run: () => doc().editor?.chain().focus().unsetIndexEntry().run(),
+  },
+
   {
     id: 'toggleNPC',
     title: 'Toggle Non-Printing Characters',

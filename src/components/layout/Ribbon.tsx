@@ -165,7 +165,7 @@ export function Ribbon() {
           <div className="flex h-full items-center">
             <PagesGroup />
             <IllustrationsGroup editor={editor} />
-            <ReferenceTablesGroup />
+            <ReferenceTablesGroup editor={editor} />
             <BreaksGroup editor={editor} />
             <TextGroup editor={editor} />
           </div>
