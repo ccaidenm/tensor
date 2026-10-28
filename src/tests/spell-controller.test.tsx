@@ -320,3 +320,30 @@ describe('SpellController', () => {
     expect(getSpellErrors(editor.state)).toHaveLength(1);
   });
 });
+
+// M-REFS-7 — the LEADER DOTS are INK, never language: the refLeader-
+// marked spans (the ToC rows' dots) are excluded from the check text —
+// LanguageTool flags '....' as grammar noise and the rows are
+// generator-owned. Marked INDEX TERMS are NOT excluded (real words).
+describe('the leader dots are excluded from the spell text', () => {
+  it('buildPiece skips refLeader-marked spans', async () => {
+    const { buildPiece } = await import('@/lib/editor/spell/controller');
+    const { renderTensor } = await import('./harness');
+    const { act } = await import('@testing-library/react');
+    const { editor } = renderTensor('');
+    act(() => {
+      editor.commands.insertContentAt(0, {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Alpha' },
+          { type: 'text', marks: [{ type: 'refLeader' }], text: '.'.repeat(12) },
+          { type: 'text', text: ' tail' },
+        ],
+      });
+    });
+    const para = editor.state.doc.firstChild!;
+    const piece = buildPiece(para, 0);
+    // The dots are GONE from the check text; the rest remains.
+    expect(piece?.text).toBe('Alpha tail');
+  });
+});
