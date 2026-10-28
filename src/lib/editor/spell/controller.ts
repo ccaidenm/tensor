@@ -56,7 +56,9 @@ interface Piece {
   to: number;
 }
 
-function buildPiece(node: PMNode, offset: number): Piece | null {
+/** M-REFS-7: exported for the dots-exclusion test (the internal
+ * seam precedent). */
+export function buildPiece(node: PMNode, offset: number): Piece | null {
   let text = '';
   const posMap: number[] = [];
   // NOTE: node.descendants positions are CONTENT-relative (the first
@@ -65,6 +67,15 @@ function buildPiece(node: PMNode, offset: number): Piece | null {
   // per-node walk does. Pinned by spell-controller tests.
   node.descendants((child, pos) => {
     if (child.isText) {
+      // M-REFS: the LEADER DOTS span (refLeader-marked) is INK, never
+      // language — LanguageTool flags '....' as a grammar issue and
+      // the row text is generator-owned. Same for the invisible
+      // indexEntry mark? NO — marked TERMS are real words the user
+      // wants checked; only the dots are excluded.
+      if (child.marks.some((m) => m.type.name === 'refLeader')) {
+        posMap.push(offset + 1 + pos); // keep a boundary anchor
+        return false;
+      }
       const t = child.text ?? '';
       for (let i = 0; i < t.length; i++) posMap.push(offset + 1 + pos + i);
       text += t;

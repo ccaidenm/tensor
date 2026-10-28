@@ -1,8 +1,9 @@
 import type { ComponentType } from 'react';
-import { PanelTop, Table as TableIcon, Image as ImageIcon } from 'lucide-react';
+import { PanelTop, Table as TableIcon, Image as ImageIcon, BookMarked } from 'lucide-react';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '@/components/layout/IconButton';
 import { HeaderFooterTools } from '@/components/layout/ribbon/contextual/HeaderFooterTools';
+import { ReferenceTableTools } from '@/components/layout/ribbon/contextual/ReferenceTableTools';
 
 /**
  * M-CONTEXTUAL-RIBBON — the contextual tab registry.
@@ -29,7 +30,7 @@ import { HeaderFooterTools } from '@/components/layout/ribbon/contextual/HeaderF
  * a `useRibbonContext(id, …)` producer can only announce an id that has
  * a tab definition in the registry below.
  */
-export type RibbonContextId = 'table' | 'image' | 'headerFooter';
+export type RibbonContextId = 'table' | 'image' | 'headerFooter' | 'referenceTable';
 
 export interface ContextualTabDef {
   /** Matches a contextStore id — enforced by the RibbonContextId union. */
@@ -87,5 +88,13 @@ export const CONTEXTUAL_TABS = {
     // M-HEADER-FOOTER: the real groups (options / navigation / close).
     // Formatting rides the Home tab via useActiveEditor routing.
     content: HeaderFooterTools,
+  },
+  referenceTable: {
+    id: 'referenceTable',
+    label: 'Reference Table',
+    icon: BookMarked,
+    // M-REFS: Refresh + Select Table (the GDocs-style affordances over
+    // the same-tick auto-update; the kind's identity chip inside).
+    content: ReferenceTableTools,
   },
 } satisfies Record<RibbonContextId, ContextualTabDef>;

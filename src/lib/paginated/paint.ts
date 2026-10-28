@@ -36,6 +36,10 @@ const NPC_COLOR = 'rgba(0, 0, 0, 0.45)';
 const QUOTE_BORDER_COLOR = '#d4d4d8';
 const QUOTE_BG_COLOR = 'rgba(0, 0, 0, 0.04)';
 const CODE_BG_COLOR = '#f4f4f5';
+/** M-REFS: the GDocs-style field border — light gray, 1px, rounded.
+ * Concrete hex by law (canvas cannot resolve theme variables — the
+ * hyperlink-seed ruling family). */
+const REF_BORDER_COLOR = '#d4d4d8';
 const RULE_COLOR = '#a1a1aa';
 const LIST_INDENT_PX = 32;
 
@@ -94,6 +98,26 @@ export interface PaintExtras {
   /** Block paint hints (adapter BlockPaint): list marker, blockquote
    * border/tint, rule line. Absent = plain block, nothing extra. */
   paint?: BlockPaint;
+  /**
+   * M-REFS — the reference-table FIELD BORDER is SELECTION-DRIVEN (the
+   * user's ruling: the gray outline shows only while the caret sits
+   * inside the table). `paint.reference` is the KIND fact; this flag
+   * is the SELECTION fact the shell computes per projection — the
+   * border paints only when BOTH hold. Rides BlockCanvas's boxKey (a
+   * flip repaints the block once).
+   */
+  referenceBorder?: boolean;
+  /**
+   * M-REFS-8 — the container's sidecar entries (leaderLen per row):
+   * the LEADER INK's tag. For each line belonging to a leader row,
+   * extra dots are drawn after the row's refLeader span — at the
+   * SPAN'S OWN MEASURED STYLE (a smaller font ⇒ narrower dots ⇒ MORE
+   * of them fill the same gap — the user's "always 100% of the gap,
+   * responding to formatting" ruling) — up to the page number. Pure
+   * ink: the block-text contract holds (the engine never rewrites
+   * run text — the round-8 stretch revert).
+   */
+  referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
   /** The marker's font — resolved by the caller from the block's first
    *  run, falling back to the document default for empty items
    *  ("style from the block's runs"). */
@@ -203,6 +227,39 @@ export function paintLines(
   if (paint?.caption && extras.showCaptions === false) return;
   const markerStyle = extras.markerStyle;
 
+  // M-REFS — the FIELD BORDER (GDocs-style): one light gray rounded box
+  // around the block's per-page fragment, pure ink behind the text. A
+  // table fragmenting across pages gets one box per page. CANVAS-LOCAL
+  // LAW: BlockCanvas's bitmap spans exactly [0, width] × [0, height]
+  // of the block's line extent — coordinates outside that (the first
+  // version's −6.5/−4 padding) CLIP to nothing, which is why the
+  // border never showed (the reported bug). The box hugs the INSIDE
+  // edge, 0.5px in for a crisp 1px stroke. FULL EXTENT ONLY: the
+  // damage path passes a mid-block SLICE (lines starting below the
+  // block's first line) — a box around a slice would be garbage; the
+  // slice's cleared region doesn't touch the border pixels anyway.
+  // SELECTION-DRIVEN: only while the caret sits inside (the
+  // referenceBorder fact — the user's GDocs ruling).
+  if (paint?.reference && extras.referenceBorder && lines.length > 0 && lines[0].rect.y === minY) {
+    let bottom = -Infinity;
+    for (const line of lines) {
+      bottom = Math.max(bottom, line.rect.y + line.rect.height - minY);
+    }
+    const prevStroke = ctx.strokeStyle;
+    const prevWidth = ctx.lineWidth;
+    ctx.strokeStyle = REF_BORDER_COLOR;
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.beginPath();
+      ctx.roundRect(0.5, 0.5, contentWidth - 1, bottom - 0.5, 4);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(0.5, 0.5, contentWidth - 1, bottom - 0.5);
+    }
+    ctx.strokeStyle = prevStroke;
+    ctx.lineWidth = prevWidth;
+  }
+
   for (const line of lines) {
     const off = alignOffset(align, line.rect.width, contentWidth - line.rect.x);
     const baselineY = line.rect.y - minY + line.baseline;
@@ -223,6 +280,68 @@ export function paintLines(
       ctx.fillRect(0, line.rect.y - minY, contentWidth, line.rect.height);
       ctx.fillStyle = prev;
     }
+    // M-REFS-8 — THE LEADER INK (gap-filling dots): for a leader row
+    // (sidecar leaderLen > 0), the refLeader span's own text paints
+    // via the segment loop below (real text, the user's style); the
+    // REMAINING gap to the page number is filled with EXTRA dots at
+    // the span's own measured style — a smaller font ⇒ narrower dots
+    // ⇒ MORE dots fill the same gap (the user's ruling: the leader is
+    // always ~100% of the gap, responding to formatting). Pure ink:
+    // found from the line's OWN placed segments (the span's last
+    // segment = the one ending at the tab; the number = the first
+    // non-empty segment after the tab). No number (unresolved) ⇒ no
+    // extra dots (the seed stands alone).
+    if (paint?.reference && extras.referenceEntries && line.segments.length > 1) {
+      const segText = (s: (typeof line.segments)[number]) => text.slice(s.start, s.end);
+      const tabIdx = line.segments.findIndex((s) => segText(s) === '\t');
+      if (tabIdx > 0) {
+        // The row containing this line (sidecar tiles the block text).
+        const row = extras.referenceEntries.find(
+          (e) => line.rangeStart >= e.textStart && line.rangeStart < e.textStart + e.textLen
+        );
+        const numberSeg = line.segments
+          .slice(tabIdx + 1)
+          .find((s) => segText(s) !== '' && segText(s) !== '\t');
+        if (row && row.leaderLen > 0 && numberSeg) {
+          // The leader span's LAST segment (its text ends at the tab).
+          const leaderSeg = line.segments[tabIdx - 1]!;
+          const leaderRun = runs[leaderSeg.runIndex];
+          if (leaderRun && leaderRun.kind !== 'inlineImage') {
+            const style = leaderRun.style;
+            const dotW = metrics.measure('.', style);
+            if (dotW > 0) {
+              // NO PADS (round 9 — the user's "one visible space"
+              // report): the fill dots start EXACTLY at the seed's
+              // last glyph and stop at the number's first — the seam
+              // between the real text and the fill ink is invisible.
+              const gapStart = baseX + leaderSeg.x + metrics.measure(segText(leaderSeg), style);
+              const gapEnd = baseX + numberSeg.x;
+              const gap = gapEnd - gapStart;
+              const n = Math.max(0, Math.min(Math.floor(gap / dotW), 500));
+              if (n > 0) {
+                // Paint n dots as ONE string at the span's style — the
+                // same font derivation the segment loop uses
+                // (fontString of the run's resolved style), and the
+                // run's own ink color (runDecor; default black).
+                const decor = runDecor[leaderSeg.runIndex] ?? {};
+                const prevFont = ctx.font;
+                const prevFill = ctx.fillStyle;
+                ctx.font = fontString(style);
+                ctx.fillStyle = decor.color ?? '#000000';
+                ctx.fillText('.'.repeat(n), gapStart, baselineY);
+                ctx.fillStyle = prevFill;
+                ctx.font = prevFont;
+              }
+            }
+          }
+        }
+      }
+    }
+    // M-REFS-5 — THE LEADER IS REAL TEXT NOW (round 5): the dots are a
+    // real run in the entry (refLeader-marked, user-formattable,
+    // normal ink) that the ENGINE stretches to fill the gap at the
+    // run's own style — painted by the ordinary segment path below.
+    // The old painted-leader ink (muted gray, unselectable) is GONE.
 
     for (const segment of line.segments) {
       const run = runs[segment.runIndex];

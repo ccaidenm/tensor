@@ -321,6 +321,16 @@ body {
   margin-left: 2px;
 }
 
+/* M-REFS — the index-mark NPC affordance (the pilcrow law, applied to
+   a mark): indexEntry spans are INVISIBLE in reading mode (the Index
+   itself is the feedback); with non-printing characters ON, they show
+   a dotted underline so authors can audit their marks. */
+.show-non-printing span[data-tensor-index='true'] {
+  text-decoration: underline dotted;
+  text-decoration-color: theme(colors.muted-foreground);
+  text-underline-offset: 3px;
+}
+
 .tensor-search-match {
   background-color: var(--color-search-highlight);
   color: var(--color-search-highlight-foreground);
@@ -524,3 +534,17 @@ body {
 /* The placeholder glyphs inside the editor surface (the #? slots) get
    MathLive's own prompt style — leave it; only the chrome above is
    ours. */
+
+
+/* M-REFS-7 — the NodeView is RESTORED (the user's ruling): the
+   bordered field frame is the React surface's (ReferenceTableNodeView);
+   this native-render block shipped with the round-6 experiment only. */
+
+/* M-REFS-11 — the reference-table rows' SEMANTIC links: invisible in
+   the editor (the user's ruling — Ctrl+click follows, the styling
+   never shouts). The link mark renders <a href="tensor-ref:...">. */
+.tensor-ref-table-entries a,
+.tensor-ref-table a {
+  color: inherit;
+  text-decoration: none;
+}

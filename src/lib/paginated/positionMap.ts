@@ -72,6 +72,36 @@ function tableOffsetToPmPos(block: AdapterBlock, offset: number): number {
   return block.from + found.relStart + delta;
 }
 
+// M-REFS: the ENTRY map bridge — the table cell map's shape, ONE lane
+// per entry (the container's children are real paragraphs; a plain
+// click/caret/selection inside an entry line resolves to the TRUE PM
+// position inside it). The synthetic tab/number suffix past an
+// entry's textLen clamps to that entry's end (the number is a LAYOUT
+// fact with no PM position).
+function refPosToOffset(block: AdapterBlock, pos: number): number {
+  const entries = block.reference!.entries;
+  let found = null as (typeof entries)[number] | null;
+  for (const e of entries) {
+    if (block.from + e.relStart <= pos) found = e;
+    else break;
+  }
+  if (!found) return entries[0]?.textStart ?? 0;
+  const rel = pos - (block.from + found.relStart);
+  return Math.min(found.textStart + rel, found.textStart + found.textLen);
+}
+
+function refOffsetToPmPos(block: AdapterBlock, offset: number): number {
+  const entries = block.reference!.entries;
+  let found = null as (typeof entries)[number] | null;
+  for (const e of entries) {
+    if (e.textStart <= offset) found = e;
+    else break;
+  }
+  if (!found) return block.from + 1;
+  const delta = Math.min(Math.max(offset - found.textStart, 0), found.textLen);
+  return block.from + found.relStart + delta;
+}
+
 /** PM pos -> (block, text offset). Boundaries: pos at a block's start
  * maps to offset 0; pos at/after a block's end clamps to its text end
  * (a selection ending at the next block's start projects onto this
@@ -90,6 +120,10 @@ export function pmPosToBlockOffset(
     if (pos > b.from && pos <= b.to) {
       // M-TABLES: a table's pos resolves through the cell-paragraph map.
       if (b.table) return { block: b, offset: tablePosToOffset(b, pos) };
+      // M-REFS: a reference table's pos resolves through the ENTRY
+      // map (the container's children are real paragraphs — the
+      // caret lives INSIDE entry text, same bridge as cells).
+      if (b.reference) return { block: b, offset: refPosToOffset(b, pos) };
       return { block: b, offset: Math.min(pos - (b.from + 1), b.text.length) };
     }
     if (pos <= b.from) hi = mid - 1;
@@ -101,6 +135,9 @@ export function pmPosToBlockOffset(
 export function blockOffsetToPmPos(block: AdapterBlock, offset: number): number {
   // M-TABLES: through the cell-paragraph map.
   if (block.table) return tableOffsetToPmPos(block, offset);
+  // M-REFS: through the ENTRY map (real entry text — a plain click in
+  // an entry line places the caret at the true position).
+  if (block.reference) return refOffsetToPmPos(block, offset);
   return block.from + 1 + offset;
 }
 

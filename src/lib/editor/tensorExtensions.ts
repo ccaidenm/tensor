@@ -31,6 +31,15 @@ import { ImageNode } from '@/lib/editor/ImageNode';
 import { InlineImageNode } from '@/lib/editor/InlineImageNode';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
 import { EquationNode } from '@/lib/editor/EquationNode';
+// M-REFS: the reference-table node (ToC/ToF/Index — one generic block
+// container; entries are real paragraphs the generator maintains) +
+// the invisible indexEntry mark + the debounced rescan seam + THE
+// GENERATOR (the container's reconciliation engine).
+import { ReferenceTableNode } from '@/lib/editor/ReferenceTableNode';
+import { IndexMark } from '@/lib/editor/IndexMark';
+import { RefLeaderMark } from '@/lib/editor/RefLeaderMark';
+import { ReferenceScanExtension } from '@/lib/references/store';
+import { ReferenceGeneratorExtension } from '@/lib/references/generator';
 
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
@@ -96,6 +105,15 @@ export function tensorExtensions(): Extensions {
     // projection (lib/equations), paginated layout rides the engine's
     // EquationBlock + EquationMetrics port.
     EquationNode,
+    // M-REFS: the reference tables (ToC/ToF/Index) — the generic
+    // collection container (kind/depth attrs only; entries are real
+    // paragraphs the generator keeps in sync) + the invisible index
+    // mark + the debounced rescan publisher + the generator itself.
+    ReferenceTableNode,
+    IndexMark,
+    RefLeaderMark,
+    ReferenceScanExtension,
+    ReferenceGeneratorExtension,
     // Stable block ids (engine edit-survival contract) + the
     // paginated-mode scroll guard (L3).
     BlockIdExtension,

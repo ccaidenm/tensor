@@ -36,7 +36,9 @@ import { nanoid } from 'nanoid';
 // echoes the same id — the edit-survival contract's atomic family).
 // M-HEADER-FOOTER-2: the header/footer containers' INNER paragraphs —
 // the band blocks carry the same id contract (stable across edits).
-const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table', 'headerBlock', 'footerBlock'];
+// M-REFS: the referenceTable atom joins (one engine block per node —
+// the paginated arm's sidecar + two-pass page resolution key on it).
+const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table', 'headerBlock', 'footerBlock', 'referenceTable'];
 
 /**
  * Mint ids for missing/duplicate ID-bearing blocks INTO `tr` (positions

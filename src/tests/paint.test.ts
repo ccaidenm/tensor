@@ -394,3 +394,210 @@ describe('mutedColorOf (the desaturate ruling)', () => {
     expect(mutedColorOf('')).toBe('rgba(0, 0, 0, 0.55)');
   });
 });
+
+// M-REFS — the field border (the GDocs bounds box): drawn CANVAS-LOCAL
+// (the first version's negative-x/y padding clipped to nothing — the
+// "no gray outline" report), full-extent only (a damage slice skips
+// it: lines[0] sits below the block's first line).
+describe('reference-table field border', () => {
+  const refPaint: BlockPaint = { reference: true };
+
+  /** makeCtx's recorder, with a roundRect stub (jsdom ctx has none). */
+  function ctxWithRoundRect(): { ctx: Ctx; recorded: Op[] } {
+    const ctx = makeCtx();
+    const recorded = (ctx as unknown as { ops: Op[] }).ops;
+    (ctx as unknown as { roundRect: unknown }).roundRect = function (
+      x: number,
+      y: number,
+      w: number,
+      h: number
+    ) {
+      recorded.push({ op: 'roundRect', args: [x, y, w, h] });
+    };
+    (ctx as unknown as { beginPath: unknown }).beginPath = () => {};
+    (ctx as unknown as { stroke: unknown }).stroke = () => {
+      recorded.push({ op: 'stroke', args: [] });
+    };
+    return { ctx, recorded };
+  }
+
+  it('draws one rounded box spanning the canvas extent, 0.5px inset (never clipped) — only while the SELECTION is inside', () => {
+    const { ctx, recorded } = ctxWithRoundRect();
+    const lines = [line(80)];
+    paintLines(ctx as unknown as CanvasRenderingContext2D, lines, runs, text, lines[0].rect.y, FakeMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      referenceBorder: true,
+    });
+    const rect = recorded.find((o) => o.op === 'roundRect');
+    expect(rect).toBeDefined();
+    // Canvas-local: [0.5, 0.5] to [contentWidth−0.5, lineBottom−0.5] —
+    // INSIDE the bitmap (the negative-padding version clipped to
+    // nothing — the reported invisible border).
+    expect(rect!.args).toEqual([0.5, 0.5, LEFT.contentWidth - 1, lines[0].rect.height - 0.5]);
+  });
+
+  it('NO border without the selection fact (the caret-driven ruling)', () => {
+    const { ctx, recorded } = ctxWithRoundRect();
+    const lines = [line(80)];
+    paintLines(ctx as unknown as CanvasRenderingContext2D, lines, runs, text, lines[0].rect.y, FakeMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      // referenceBorder omitted — the caret is elsewhere.
+    });
+    expect(recorded.some((o) => o.op === 'roundRect' || o.op === 'strokeRect')).toBe(false);
+  });
+
+  it('skips the border for a damage slice (mid-block lines)', () => {
+    const { ctx, recorded } = ctxWithRoundRect();
+    const first = line(80);
+    const second: LineBox = { ...line(80), lineIndex: 1, rect: { ...first.rect, y: first.rect.y + 16 } };
+    // The slice starts BELOW the block's first line (minY = the first
+    // line's y) — no border around the slice.
+    paintLines(ctx as unknown as CanvasRenderingContext2D, [second], runs, text, first.rect.y, FakeMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      referenceBorder: true,
+    });
+    expect(recorded.some((o) => o.op === 'roundRect' || o.op === 'strokeRect')).toBe(false);
+  });
+
+  // M-REFS-5: the painted-leader tests are GONE with the painted
+  // leader — the dots are a REAL run now (refLeader-marked text,
+  // engine-stretched at the run's own style; engine
+  // tests/referenceTable.test.ts pins the stretch math).
+});
+
+// M-REFS-8 — the LEADER INK (gap-filling dots): the span's own text
+// paints via the segment loop; the PAINTER draws extra dots after it
+// — at the span's own measured style — up to the page number. A
+// smaller font ⇒ narrower dots ⇒ MORE dots fill the same gap (the
+// user's ruling: the leader is always ~100% of the gap).
+describe('reference-table leader ink (round 8)', () => {
+  const refPaint: BlockPaint = { reference: true };
+  const STYLE16 = { fontFamily: 'Test Sans', fontSize: 16 };
+
+  /** A one-row reference line: 'Alpha' + 12 dots + tab + '7'. */
+  function refLine(dotStyle: import('@tensor-editor/engine').TextStyle) {
+    const text = 'Alpha............\t7';
+    const runs: Run[] = [
+      { text: 'Alpha', style: STYLE16 },
+      { text: '.'.repeat(12), style: dotStyle },
+      { text: '\t', style: STYLE16 },
+      { text: '7', style: STYLE16 },
+    ];
+    const segs = [
+      { runIndex: 0, start: 0, end: 5, x: 0 },
+      { runIndex: 1, start: 5, end: 17, x: 50 },
+      { runIndex: 2, start: 17, end: 18, x: 170 },
+      { runIndex: 3, start: 18, end: 19, x: 614 },
+    ];
+    const line: LineBox = {
+      blockId: 'toc',
+      lineIndex: 0,
+      pageIndex: 0,
+      rect: { x: 0, y: 0, width: 624, height: 16 },
+      baseline: 13,
+      rangeStart: 0,
+      rangeEnd: text.length,
+      segments: segs,
+    };
+    return { runs, text, line };
+  }
+
+  function ctxWithText() {
+    const ctx = makeCtx();
+    const recorded = (ctx as unknown as { ops: Op[] }).ops;
+    return { ctx, recorded };
+  }
+
+  it('draws extra dots in the gap at the span\'s own style', () => {
+    const { ctx, recorded } = ctxWithText();
+    const { runs, text, line } = refLine(STYLE16);
+    paintLines(ctx as unknown as CanvasRenderingContext2D, [line], runs, text, 0, FakeMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      referenceEntries: [{ relStart: 1, leaderLen: 12, textStart: 0, textLen: 17, targets: [1] }],
+    });
+    // FakeMetrics: 10px/char. The seed dots end at x = 50 + 120 = 170
+    // (already painted by the segment loop); the number starts at 614.
+    // NO PADS (the seam fix): the gap [170, 614] = 444px at the
+    // span's 10px/dot → 44 dots, starting EXACTLY at the seed's end
+    // (the user's "one visible space" — the old +4 pad's hole).
+    // The SEGMENT loop paints the seed ('............' at x 50); the
+    // GAP ink is the dots call at the gapStart x (170).
+    const gapDots = recorded.filter(
+      (o) => o.op === 'fillText' && String(o.args[0]).match(/^\.{2,}$/) && o.args[1] === 170,
+    );
+    expect(gapDots).toHaveLength(1);
+    expect(String(gapDots[0]!.args[0]).length).toBe(44);
+  });
+
+  it('RESPONDS TO THE SPAN\'S STYLE: a smaller font ⇒ MORE dots in the same gap', () => {
+    const smallStyle = { fontFamily: 'Test Sans', fontSize: 8 };
+    const { ctx, recorded } = ctxWithText();
+    // The span's own advance at 8px: 12 dots × 5px = 60px (FakeMetrics
+    // scales by fontSize/16 in the real pipeline; this fake measures
+    // f(text) — so use a style-aware local fake via the metrics param).
+    const scaledMetrics = {
+      ...FakeMetrics,
+      measure: (t: string, s: { fontSize: number }) => t.length * 10 * (s.fontSize / 16),
+    } as typeof FakeMetrics;
+    const { runs, text, line } = refLine(smallStyle);
+    // The line's segment x values were laid out at 16px — recompute the
+    // leader/number positions for the 8px layout: seed ends 50+60=110,
+    // number still right-aligned at 614.
+    line.segments = [
+      { runIndex: 0, start: 0, end: 5, x: 0 },
+      { runIndex: 1, start: 5, end: 17, x: 50 },
+      { runIndex: 2, start: 17, end: 18, x: 110 },
+      { runIndex: 3, start: 18, end: 19, x: 614 },
+    ];
+    paintLines(ctx as unknown as CanvasRenderingContext2D, [line], runs, text, 0, scaledMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      referenceEntries: [{ relStart: 1, leaderLen: 12, textStart: 0, textLen: 17, targets: [1] }],
+    });
+    const gapDots = recorded.filter(
+      (o) => o.op === 'fillText' && String(o.args[0]).match(/^\.{2,}$/) && o.args[1] === 110,
+    );
+    expect(gapDots).toHaveLength(1);
+    // NO PADS: the gap [110, 614] = 504px at 5px/dot (8px font) →
+    // 100 dots — MORE than the 16px font's 44 in the same gap.
+    expect(String(gapDots[0]!.args[0]).length).toBe(100);
+  });
+
+  it('no extra dots without a number (unresolved rows)', () => {
+    const { ctx, recorded } = ctxWithText();
+    const text = 'Alpha............\t';
+    const runs: Run[] = [
+      { text: 'Alpha', style: STYLE16 },
+      { text: '.'.repeat(12), style: STYLE16 },
+      { text: '\t', style: STYLE16 },
+    ];
+    const line: LineBox = {
+      blockId: 'toc',
+      lineIndex: 0,
+      pageIndex: 0,
+      rect: { x: 0, y: 0, width: 624, height: 16 },
+      baseline: 13,
+      rangeStart: 0,
+      rangeEnd: text.length,
+      segments: [
+        { runIndex: 0, start: 0, end: 5, x: 0 },
+        { runIndex: 1, start: 5, end: 17, x: 50 },
+        { runIndex: 2, start: 17, end: 18, x: 170 },
+      ],
+    };
+    paintLines(ctx as unknown as CanvasRenderingContext2D, [line], runs, text, 0, FakeMetrics, {
+      ...LEFT,
+      paint: refPaint,
+      referenceEntries: [{ relStart: 1, leaderLen: 12, textStart: 0, textLen: 17, targets: [] }],
+    });
+    // No gap ink at all: the only dots call is the seed's own segment.
+    const dotCalls = recorded.filter(
+      (o) => o.op === 'fillText' && String(o.args[0]).match(/^\.+$/),
+    );
+    expect(dotCalls.every((o) => String(o.args[0]) === '.'.repeat(12))).toBe(true);
+  });
+});

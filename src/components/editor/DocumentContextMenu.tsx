@@ -7,6 +7,7 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  BookmarkPlus,
   ClipboardPaste,
   Copy,
   Frame,
@@ -316,6 +317,14 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
         </ContextMenuItem>
         <ContextMenuItem data-testid="ctx-paste" onClick={() => void pasteFromSystemClipboard(editor)}>
           <ClipboardPaste size={14} /> Paste
+        </ContextMenuItem>
+        {/* M-REFS: the index mark lives here — the STRUCTURAL ops home
+            (the floating toolbar keeps formatting). The marked span is
+            the term; the same command the palette runs (never a
+            re-implementation). */}
+        <ContextMenuSeparator />
+        <ContextMenuItem data-testid="ctx-mark-index" onClick={() => void getCommand('markIndexEntry')?.run()}>
+          <BookmarkPlus size={14} /> Mark as Index Entry
         </ContextMenuItem>
         {developerItems}
       </>

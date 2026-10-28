@@ -5,6 +5,24 @@ mod spell;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // M-REFS-8 — THE GHOST + THE WEBPROCESS SIGABRT (Linux/WebKitGTK):
+    // the crashed WebProcess's stack resolved to
+    // `WebKit::crashAfter10Seconds(IPC::Connection*)` — the watchdog
+    // that aborts the web process 10 seconds after it loses the UI
+    // process — i.e. the UI side STALLED first. Combined with the
+    // reported symptoms (canvas regions painting stale text until the
+    // next repaint; the whole app freezing) on an AMD iGPU, this is
+    // the WebKitGTK DMABUF renderer's buffer-handoff bug class: the
+    // GPU texture handoff between the web process and the UI process
+    // stalls, frames go stale, and the watchdog eventually fires.
+    // THE FIX (the standard Tauri-on-Linux mitigation): force WebKit's
+    // shared-memory rendering fallback. Must be set BEFORE any webview
+    // exists. A user-set value is respected (A/B testing: unset = the
+    // old behavior).
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())

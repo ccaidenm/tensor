@@ -12,6 +12,7 @@ import { StyleDialog } from './components/dialogs/StyleDialog';
 import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
 import { AltTextDialog } from './components/dialogs/ImageDialogs';
 import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
+import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
 import { Toaster } from '@/components/ui/toast';
@@ -184,6 +185,9 @@ function App() {
       <FontBrowserDialog />
       <AltTextDialog />
       <InsertTableDialog />
+      {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
+          one mount like its InsertTableDialog twin. */}
+      <InsertReferenceTableDialog />
       <DocumentPropertiesDialog />
       <Toaster />
       <DocumentStatisticsDialog />

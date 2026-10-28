@@ -151,6 +151,18 @@ if (typeof (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView ==
   (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView = () => {};
 }
 
+// jsdom ships no Range layout APIs (Element has zero-rect stubs;
+// Range has neither). prosemirror-view's coordsAtPos reads them on
+// TEXT RANGES — the PAGELESS scroll-into-view path (paginated routes
+// through ScrollGuardExtension instead, so it never lands here).
+// Zero geometry keeps the dispatch alive and scrolls nothing.
+if (typeof (Range.prototype as { getClientRects?: unknown }).getClientRects === 'undefined') {
+  const zeroRect = () =>
+    ({ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0 }) as DOMRect;
+  (Range.prototype as { getClientRects?: unknown }).getClientRects = () => [zeroRect()];
+  (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect = zeroRect;
+}
+
 // jsdom ships no CSS Font Loading API — no document.fonts, no FontFace
 // global. M-FONTS-A registers faces against that API; these stubs give
 // the registry's REAL code path an honest recording surface for tests:

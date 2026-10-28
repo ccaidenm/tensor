@@ -152,7 +152,18 @@ export const EquationNode = Node.create({
           } else {
             const splitPos = $cursor.pos;
             newTr = newTr.split(splitPos);
-            insertPos = newTr.mapping.map(splitPos);
+            // THE BOUNDARY (M-REFS fix — the shared dance's latent bug,
+            // caught by the referenceTable's mid-heading-caret repro):
+            // the split's raw map lands INSIDE a half (assoc 1 → the
+            // right half's content start; assoc −1 → the left half's
+            // last content position) — NEITHER is the between-blocks
+            // boundary, so a block insert there doesn't fit, PM
+            // fit-shifts it, and NodeSelection.create finds nothing.
+            // RESOLVE the mapped position instead: it sits at the right
+            // half's content start, whose `before()` IS the half's open
+            // boundary — the exact between-siblings spot.
+            const $mapped = newTr.doc.resolve(newTr.mapping.map(splitPos));
+            insertPos = $mapped.before($mapped.depth);
           }
 
           const equationNode = equationType.create({ latex: initialLatex, align: 'center' });
