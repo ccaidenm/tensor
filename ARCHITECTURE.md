@@ -115,6 +115,30 @@ The shell's word processor renders its paginated mode from this engine: `PageGeo
 
 ## 4. The Data Model
 
+### 4.0 Input: Header/Footer Bands (M-HEADER-FOOTER-2)
+
+`SemanticDoc` carries an optional **sibling input** alongside `blocks`:
+
+```ts
+// src/types.ts
+export interface SemanticDoc {
+  blocks: Block[]
+  baseStyle: TextStyle
+  bands?: BandSet  // NEVER in flow order — the adapter routes band nodes out
+}
+export interface BandSet {
+  header?: Block[]; footer?: Block[]
+  firstHeader?: Block[]; firstFooter?: Block[]
+  differentFirstPage?: boolean
+  anchorPx?: number  // default BAND_ANCHOR_PX (48 = Word's 36pt at 96dpi)
+}
+```
+
+Band blocks are **paragraph/heading only** (`breakBand` throws loud on anything structural). They break at the band wrap width (`page − side margins`) through the same `breakLines`, cached in a separate `bandLineCache` (L2). Two rulings govern them:
+
+- **The reservation is engine-issued.** The body `contentBox` reserves `max(margin, anchor + need)` per side, `need` = the MAX band height across the page classes (first vs rest under `differentFirstPage` — single shared contentBox, the walk machine's contract). **No band content → NO reservation** — the anchor is where content anchors, not a floor (a margins-0 doc meets the sheet edge exactly).
+- **Per-page emission as echoes.** After the pages derive, the active class's band lines re-emit on EVERY page (`LineBox.band: 'header' | 'footer'`, the table-header-repeat precedent — "extra emissions of the same logical lines, not new flow units"). Band `rect`s stay content-box-relative: headers carry NEGATIVE y (the float precedent made out-of-box coordinates legal). Consumers that tile the flow track (the shell's contiguity assert, line counting) must skip band lines.
+
 ### 4.1 Input: A Document
 
 ```ts
@@ -800,6 +824,8 @@ The shell pairing adds three two-sided laws (each is a contract only as a pair):
 ### 11.1 Adding a Block Type
 
 Extend the union in `types.ts` (e.g. `ListBlock`), give it runs or a line-producing form, and the driver picks it up *if* it can produce lines. Do not add `kind === 'x'` special cases scattered through layout logic: route through the same `breakLines` + `placeBlock` path. Add a flow test and, if output shapes change, a NEW golden case (old ones must not move).
+
+**M-EQ addendum — the equation family.** `EquationBlock` (src/types.ts) is the second ATOMIC VISUAL kind: it rides the image family's synthetic-line machinery (one placement decision, bonds degenerate at n == 1, placed[] output) with two inversions ruled at the type site: dims come from the **EquationMetrics port** at layout time (derived facts — the adapter cannot measure), and there is **no fit-down** (over-tall throws `EquationTooTallError`, a sentinel the SHELL treats as fallback-worthy user input; over-wide bleeds into the margins). The hash covers `latex`/`fontSize`/`align` — cache-relevant exactly when layout-relevant. Test recipe followed: `tests/equation.test.ts`.
 
 ### 11.2 Adding a Layout Feature
 

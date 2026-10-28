@@ -200,3 +200,35 @@ describe('golden: image keepNext caption bond (FakeMetrics)', () => {
     expect(round(result)).toMatchSnapshot()
   })
 })
+
+describe('golden: reference table — ToC entries with level indents (FakeMetrics)', () => {
+  it('per-entry lines, numbers right-aligned at the shared text edge', () => {
+    // M-REFS: three entries (level indents 0/32/64); each entry's runs
+    // are complete line content — text + tab + page number — so the
+    // breaker + the right tab stop right-align every number at the
+    // shared text edge (624) whatever its level.
+    const entryRun = (text: string, page: string) => [
+      { text, style: { fontFamily: 'sans-serif', fontSize: 16 } },
+      { text: '\t', style: { fontFamily: 'sans-serif', fontSize: 16 } },
+      { text: page, style: { fontFamily: 'sans-serif', fontSize: 16 } },
+    ]
+    const doc: SemanticDoc = {
+      baseStyle: { fontFamily: 'sans-serif', fontSize: 16 },
+      blocks: [
+        {
+          id: 'toc',
+          kind: 'referenceTable',
+          entries: [
+            { runs: entryRun('Introduction', '1') },
+            { runs: entryRun('Background', '2'), indentLeft: 32 },
+            { runs: entryRun('Method', '5'), indentLeft: 64 },
+          ],
+        },
+      ],
+    }
+
+    const { layout } = createLayoutEngine({ metrics: FakeMetrics })
+    const result = layout(doc, opts)
+    expect(round(result)).toMatchSnapshot()
+  })
+})

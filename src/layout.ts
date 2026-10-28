@@ -1,5 +1,8 @@
 import type {
   Block,
+  EquationBlock,
+  Run,
+  EquationMetrics,
   FragmentBreak,
   ImageBlock,
   LayoutEngine,
@@ -10,9 +13,33 @@ import type {
   PlacedRect,
   Rect,
   SemanticDoc,
+  TableBandData,
+  TableBandLine,
+  TableBandRect,
+  TableBlock,
+  TableCellData,
+  TextStyle,
   TextMetrics,
 } from './types.js'
+import { BAND_ANCHOR_PX } from './types.js'
 import { breakCodeLines, breakLines, fitDownImage } from './line-breaker.js'
+
+/**
+ * M-EQ — the SENTINEL for an equation the engine refuses (taller than
+ * the content box: can never fit any page, and equations are never
+ * rescaled). NOT an adapter/engine bug — it is USER INPUT — so it
+ * joins the UnsupportedDocError sentinel family in PaginatedView's
+ * catch: the pageless fallback renders the node view natively (no
+ * height limit there), never a crash, never a silent clip. The
+ * missing-port throw above is a WIRING bug and stays loud (no
+ * sentinel).
+ */
+export class EquationTooTallError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EquationTooTallError'
+  }
+}
 
 // SLICER VOCABULARY:
 // - A block FRAGMENTS when a page break lands inside it (between its
@@ -214,11 +241,15 @@ interface WalkCacheEntry {
 // Line-level cache: a block's LineResults depend only on (runs, the
 // TWO wrap widths — base and line-0 — and baseStyle) — keyed by the
 // block id, re-validated by hash. The indent family feeds both
-// widths; both are part of the key.
+// widths; both are part of the key. M-TABLES: a TABLE's band results
+// ALSO depend on the content-box HEIGHT (the monster-row fragmentation
+// threshold and the rowspan distribution) — contentHeight is stored
+// and checked for tables only (undefined for text blocks).
 interface CachedLines {
   contentHash: string
   maxWidth: number
   firstMaxWidth: number
+  contentHeight?: number
   lines: LineResult[]
 }
 
@@ -227,8 +258,22 @@ interface CachedLines {
  * lives inside the returned instance — the shell must hold ONE stable
  * engine instance (new metrics requires a new engine).
  */
-export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): LayoutEngine {
+export function createLayoutEngine({
+  metrics,
+  equationMetrics,
+}: {
+  metrics: TextMetrics
+  /** M-EQ: the equation dims port — optional at construction so
+   * existing callers (tests, older shells) keep working; an equation
+   * block arriving WITHOUT the port throws loud at layout time (the
+   * adapter/engine contract seam, the validate family's spirit). */
+  equationMetrics?: EquationMetrics
+}): LayoutEngine {
   const lineCache = new Map<string, CachedLines>()
+  // M-HEADER-FOOTER: band-block line cache — same shape as lineCache
+  // (hash + wrap width keyed), separate namespace (band blocks never
+  // enter the walk). Lives with the engine instance (L2).
+  const bandLineCache = new Map<string, CachedLines>()
   let walkCache: WalkCacheEntry[] = []
   let storedOptsHash: string | null = null
   let storedBaseStyleHash: string | null = null
@@ -246,10 +291,12 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
   return {
     layout(doc, opts) {
       // Loud adapter contracts, upfront — before any cache work.
+      validateKinds(doc)
       validateDuplicateIds(doc)
       validateIndentGeometry(doc)
       validateInlineInCode(doc)
       validateFloatFlow(doc)
+      validateReferenceEntries(doc)
 
       // Stats hygiene: rebuilt from scratch every call, never
       // accumulated — a stale counter would make the scripted counts lie.
@@ -269,11 +316,94 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
       })
       // All pages share opts geometry. TODO(sections): per-section
       // page descriptors.
+      // M-HEADER-FOOTER: the BAND geometry — engine-issued facts, same
+      // as the contentBox. Computed BEFORE the body contentBox so the
+      // body shrinks by the band needs (Word: the body starts below
+      // the header band, ends above the footer band). Band blocks are
+      // paragraph/heading only (validated below), broken at the BAND
+      // wrap width (page width − side margins), never walked — they
+      // re-emit on every page as echoes (the table header-repeat
+      // precedent). Single shared contentBox (the walk's contract):
+      // the reservation takes the MAX across the page classes
+      // (first-page vs rest under differentFirstPage).
+      const bands = doc.bands ?? undefined
+      const anchorPx = bands?.anchorPx ?? BAND_ANCHOR_PX
+      // M-HEADER-FOOTER-3: the anchor CLAMPS to the user's margin — a
+      // margin dragged below the band distance (Word's "Header from
+      // Top" knob, which we don't expose) pulls the band up with it,
+      // so the band always lives INSIDE the margin area it scales
+      // with. Margins larger than the anchor leave it at the default
+      // distance (Word's behavior unchanged).
+      const anchorTop = Math.min(anchorPx, opts.margins.top)
+      const anchorBottom = Math.min(anchorPx, opts.margins.bottom)
+      const sideW = opts.page.width - opts.margins.left - opts.margins.right
+      const breakBand = (blocks: Block[] | undefined): { block: Block; results: LineResult[] }[] => {
+        if (!blocks || blocks.length === 0) return []
+        return blocks.map((block) => {
+          if (block.kind !== 'paragraph' && block.kind !== 'heading') {
+            throw new Error(
+              `band block "${block.id}" kind "${block.kind}": band blocks are paragraph/heading only`,
+            )
+          }
+          const hash = hashBlock(block)
+          const cached = bandLineCache.get(block.id)
+          if (cached && cached.contentHash === hash && cached.maxWidth === sideW) {
+            return { block, results: cached.lines }
+          }
+          const results = breakLines(
+            block.runs,
+            metrics,
+            sideW,
+            doc.baseStyle,
+            sideW,
+            { first: 0, rest: 0, stops: block.tabStops },
+          )
+          bandLineCache.set(block.id, {
+            contentHash: hash,
+            maxWidth: sideW,
+            firstMaxWidth: sideW,
+            lines: results,
+          })
+          return { block, results }
+        })
+      }
+      const topClass = bands?.differentFirstPage ? 'first' : 'default'
+      const topBlocks =
+        topClass === 'first'
+          ? breakBand(bands?.firstHeader)
+          : breakBand(bands?.header)
+      const bottomBlocks =
+        topClass === 'first'
+          ? breakBand(bands?.firstFooter)
+          : breakBand(bands?.footer)
+      // The REST pages' blocks: under differentFirstPage the default
+      // regions; otherwise the same as page 0 (shared objects).
+      const restTopBlocks =
+        topClass === 'first' ? breakBand(bands?.header) : topBlocks
+      const restBottomBlocks =
+        topClass === 'first' ? breakBand(bands?.footer) : bottomBlocks
+      const sumHeight = (entries: { results: LineResult[] }[]) =>
+        entries.reduce((sum, e) => sum + e.results.reduce((s, r) => s + r.height, 0), 0)
+      const topNeed = Math.max(
+        sumHeight(topBlocks),
+        sumHeight(restTopBlocks),
+      )
+      const bottomNeed = Math.max(
+        sumHeight(bottomBlocks),
+        sumHeight(restBottomBlocks),
+      )
+      // No band content → NO reservation (a margins-0 doc with no
+      // header must meet the sheet edge exactly — the anchor is not a
+      // floor, it is where band CONTENT anchors).
+      const bodyTop =
+        topNeed > 0 ? Math.max(opts.margins.top, anchorTop + topNeed) : opts.margins.top
+      const bodyBottom =
+        bottomNeed > 0 ? Math.max(opts.margins.bottom, anchorBottom + bottomNeed) : opts.margins.bottom
       const contentBox: Rect = Object.freeze({
         x: opts.margins.left,
-        y: opts.margins.top,
+        y: bodyTop,
         width: opts.page.width - opts.margins.left - opts.margins.right,
-        height: opts.page.height - opts.margins.top - opts.margins.bottom,
+        height: opts.page.height - bodyTop - bodyBottom,
       })
 
       const hashes = doc.blocks.map(hashBlock)
@@ -381,6 +511,160 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
             { start: 0, end: 0, segments: [], width: dims.width, height: dims.height, baseline: dims.height },
           ]
         }
+        // M-EQ — the equation's single synthetic "line": the SAME
+        // machinery as the image (one placement decision, bonds
+        // degenerate safely, never emitted into lines[]), with two
+        // deliberate inversions ruled in types.ts's EquationBlock doc:
+        // dims come from the EquationMetrics PORT (derived facts, not
+        // document data — the adapter is pure and cannot measure), and
+        // there is NO fit-down (an equation is never rescaled — a
+        // font-shrunk formula misrepresents the math). Over-tall throws
+        // loud: taller than the content box can never fit ANY page
+        // (the codeBlock taller-than-page ruling family's atomic
+        // analog). Over-wide places as-is (Word's margin-bleed
+        // convention — the rect centers and may go negative-x, the
+        // frame floats already emit; the vertical band is wholly the
+        // equation's, so no text ever overlaps it).
+        if (block.kind === 'equation') {
+          if (!equationMetrics) {
+            throw new Error(
+              `block "${block.id}": equation block but no equationMetrics port — ` +
+                'the shell must pass createLayoutEngine({ metrics, equationMetrics })',
+            )
+          }
+          const dims = equationMetrics.measure(block.latex, block.fontSize)
+          if (dims.height > contentBox.height) {
+            throw new EquationTooTallError(
+              `block "${block.id}": equation renders ${dims.width}×${dims.height}px, taller than the ` +
+                `${contentBox.height}px content box — it can never fit any page. Equations are never ` +
+                'rescaled (the no-fit-down ruling); shorten the formula or reduce its font size',
+            )
+          }
+          return [
+            { start: 0, end: 0, segments: [], width: dims.width, height: dims.height, baseline: dims.height },
+          ]
+        }
+        // M-TABLES — the table's BAND results: one synthetic LineResult
+        // per row-band (height = the band's flow height, tableBand =
+        // the ready-to-emit data). The whole table computation
+        // (tracks, cell line stacks, row heights, rowspan
+        // distribution, band splitting) runs under the SAME lineCache
+        // entry as prose lines — keyed by (contentHash, the wrap
+        // width, AND the content-box height: the monster-row
+        // fragmentation threshold and the rowspan distribution are
+        // height-dependent, a text block's lines are not).
+        if (block.kind === 'table') {
+          const cached = lineCache.get(block.id)
+          const hash = hashes[index]
+          if (
+            cached &&
+            cached.contentHash === hash &&
+            cached.maxWidth === contentBox.width &&
+            cached.contentHeight === contentBox.height
+          ) {
+            return cached.lines
+          }
+          const layout = computeTableLayout(
+            block,
+            contentBox.width,
+            contentBox.height,
+            metrics,
+            doc.baseStyle,
+          )
+          lineCache.set(block.id, {
+            contentHash: hash,
+            maxWidth: contentBox.width,
+            firstMaxWidth: contentBox.width,
+            contentHeight: contentBox.height,
+            lines: layout.results,
+          })
+          stats.linesRebroken += 1
+          return layout.results
+        }
+        // M-REFS — the reference table's ENTRIES: one breaker call per
+        // entry (the entry's own wrap width = the block wrap width −
+        // the entry's indentLeft), flattened into per-LINE results
+        // carrying `referenceLine` (the emit branch's rect-x source +
+        // the shell's sidecar join). The entry's runs are COMPLETE
+        // line content — text runs, the tab run, the page-number run —
+        // so the ONE breaker + the ONE tab machinery break, wrap, and
+        // right-align the number; the arm supplies the RIGHT tab stop
+        // at the shared text edge (content-frame: contentBox.width −
+        // indentRight), which every entry's number aligns to whatever
+        // its level. LOUD SEAM: an entry indent at/past its wrap width
+        // is refused — a zero-width lane cannot break (the adapter
+        // clamps, the warned-clamp family). Cache: the text kinds'
+        // key (hash + maxWidth) — entry indents ride the hash,
+        // firstLineIndent is refused by validation, so firstMaxWidth ≡
+        // maxWidth for this kind.
+        if (block.kind === 'referenceTable') {
+          const maxWidth =
+            contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
+          const cached = lineCache.get(block.id)
+          const hash = hashes[index]
+          if (cached && cached.contentHash === hash && cached.maxWidth === maxWidth) {
+            return cached.lines
+          }
+          const results: LineResult[] = []
+          let runStart = 0
+          let textStart = 0
+          for (let e = 0; e < block.entries.length; e++) {
+            const entry = block.entries[e]
+            const entryIndent = (block.indentLeft ?? 0) + (entry.indentLeft ?? 0)
+            const entryWidth = maxWidth - (entry.indentLeft ?? 0)
+            if (entryWidth <= 0) {
+              throw new Error(
+                `block "${block.id}" entry ${e}: indentLeft ${entry.indentLeft ?? 0} leaves a ` +
+                  `${entryWidth}px wrap width — a zero-width lane cannot break; the adapter must ` +
+                  'validate before sending',
+              )
+            }
+            const lines = breakLines(entry.runs, metrics, entryWidth, doc.baseStyle, entryWidth, {
+              // The entry's EVERY line sits at its own indent (first ≡
+              // rest — the block-tier firstLineIndent is refused);
+              // stops resolve in the CONTENT frame (pen + tabLeft), so
+              // the right stop lands the number's END at the shared
+              // text edge regardless of the entry's level.
+              first: entryIndent,
+              rest: entryIndent,
+              stops: [
+                { position: contentBox.width - (block.indentRight ?? 0), alignment: 'right' },
+              ],
+            })
+            for (const line of lines) {
+              results.push({
+                start: textStart + line.start,
+                end: textStart + line.end,
+                width: line.width,
+                height: line.height,
+                baseline: line.baseline,
+                segments: line.segments.map((seg) => ({
+                  runIndex: runStart + seg.runIndex,
+                  start: textStart + seg.start,
+                  end: textStart + seg.end,
+                  x: seg.x,
+                })),
+                referenceLine: { entryIndex: e, x: entryIndent },
+              })
+            }
+            // Canonical order advance: entries in array order, runs in
+            // array order — the SAME concatenation AdapterBlock.text
+            // mirrors (an inline object token is one position, the
+            // E-IMG-2 receipt).
+            for (const run of entry.runs) {
+              runStart += 1
+              textStart += run.kind === 'inlineImage' ? 1 : run.text.length
+            }
+          }
+          lineCache.set(block.id, {
+            contentHash: hash,
+            maxWidth,
+            firstMaxWidth: maxWidth,
+            lines: results,
+          })
+          stats.linesRebroken += 1
+          return results
+        }
         // INDENT FAMILY, effect 1 (line breaking): base lines wrap at
         // contentBox.width − indentLeft − indentRight; ONLY line 0
         // wraps at contentBox.width − (indentLeft + firstLineIndent) −
@@ -412,7 +696,16 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
         const results =
           block.kind === 'codeBlock'
             ? breakCodeLines(block.runs, metrics, maxWidth, doc.baseStyle, firstMaxWidth)
-            : breakLines(block.runs, metrics, maxWidth, doc.baseStyle, firstMaxWidth)
+            : breakLines(block.runs, metrics, maxWidth, doc.baseStyle, firstMaxWidth, {
+                // M-RULER Phase 4: tab stops resolve in the CONTENT
+                // frame — line 0's left edge sits indentLeft +
+                // firstLineIndent into it (the hanging seam), later
+                // lines at indentLeft. The stops ride the block
+                // (normalized by the adapter).
+                first: (block.indentLeft ?? 0) + (block.firstLineIndent ?? 0),
+                rest: block.indentLeft ?? 0,
+                stops: block.tabStops,
+              })
         lineCache.set(block.id, {
           contentHash: hash,
           maxWidth,
@@ -465,7 +758,13 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
         // fit, nothing to bond (validateFloatFlow refused flow).
         const floated = block.kind === 'image' && block.float != null
         const results: readonly LineResult[] = floated ? [] : getLines(i)
-        const control = controlOf(block)
+        // M-TABLES: the R2/R3 boundary minimums (orphan/widow) never
+        // apply BETWEEN a table's bands — rows break naturally (Word
+        // has no widow control on table rows; "keep rows together" is
+        // keepLines, which R-ATOMIC already honors band-wise). The
+        // bond lookahead's control for a table successor must match
+        // (the prediction mirrors the machine).
+        const control = block.kind === 'table' ? false : controlOf(block)
         const next = doc.blocks[i + 1]
         const bondExists =
           !floated &&
@@ -509,7 +808,8 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
           // applies (see its comment for the full arm list).
           const nextLines = getLines(i + 1)
           const lands = firstLineLands(
-            next, nextLines, placed.exitState, contentBox.height, controlOf(next),
+            next, nextLines, placed.exitState, contentBox.height,
+            next.kind === 'table' ? false : controlOf(next),
           )
           if (!lands) {
             if (!bondAttempts.has(i)) {
@@ -625,7 +925,9 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
                   prevEntryState,
                   contentBox.width,
                   contentBox.height,
-                  controlOf(prev),
+                  // M-TABLES: same table-aware control the walk used —
+                  // the re-placement must mirror the machine exactly.
+                  prev.kind === 'table' ? false : controlOf(prev),
                   true,
                   true,
                 )
@@ -740,6 +1042,55 @@ export function createLayoutEngine({ metrics }: { metrics: TextMetrics }): Layou
       const pages: PageGeometry[] = []
       for (let p = 0; p <= maxPage; p++) {
         pages.push(Object.freeze({ index: p, size, contentBox }))
+      }
+
+      // M-HEADER-FOOTER: the BAND EMISSION — per page, the active
+      // class's blocks re-emit as echoes on every page (same logical
+      // lines, `band`-tagged, never flow units). Page-relative band
+      // tops: header anchors at anchorPx from the page top; footer
+      // BOTTOM-anchors at anchorPx from the page bottom (its top
+      // derives). rect stays CONTENT-BOX-RELATIVE (the LineBox
+      // contract): header rect.y = anchor − contentBox.y (negative —
+      // the float precedent made out-of-box coords legal), footer
+      // rect.y = (page.height − anchor − footerHeight) − contentBox.y.
+      // Consumers add contentBox.y themselves, uniformly.
+      if (bands && (topBlocks.length > 0 || bottomBlocks.length > 0 || restTopBlocks.length > 0 || restBottomBlocks.length > 0)) {
+        const bandOffsetY = (which: 'header' | 'footer', height: number): number =>
+          which === 'header'
+            ? anchorTop - contentBox.y
+            : opts.page.height - anchorBottom - height - contentBox.y
+        const emitBands = (
+          which: 'header' | 'footer',
+          entries: { block: Block; results: LineResult[] }[],
+          pageIndex: number,
+        ): void => {
+          const height = sumHeight(entries)
+          let y = bandOffsetY(which, height)
+          for (const { block, results } of entries) {
+            for (let li = 0; li < results.length; li++) {
+              const result = results[li]
+              lines.push(
+                freezeLineBox({
+                  blockId: block.id,
+                  lineIndex: li,
+                  pageIndex,
+                  rect: { x: 0, y, width: result.width, height: result.height },
+                  baseline: result.baseline,
+                  rangeStart: result.start,
+                  rangeEnd: result.end,
+                  segments: result.segments,
+                  band: which,
+                }),
+              )
+              y += result.height
+            }
+          }
+        }
+        for (let p = 0; p <= maxPage; p++) {
+          const isFirst = p === 0
+          emitBands('header', isFirst ? topBlocks : restTopBlocks, p)
+          emitBands('footer', isFirst ? bottomBlocks : restBottomBlocks, p)
+        }
       }
 
       const didWork =
@@ -907,9 +1258,34 @@ function placeBlock(
   backupFinalSplit: boolean,
 ): { lineBoxes: LineBox[]; breaks: FragmentBreak[]; placedRects: PlacedRect[]; exitState: WalkState } {
   const L = results.length
+  // M-TABLES: the table's header machinery — the LEADING header bands
+  // re-emit at the top of every continuation page (Word's "Repeat
+  // Header Rows"). pendingHeader is set by closePage and fired lazily
+  // by the first CONTENT band's placement on the fresh page: a close
+  // whose continuation never places (a trailing close) emits nothing,
+  // and the R6 floor (below) drops the repeat for a monster band that
+  // cannot share a page with the header.
+  const isTable = block.kind === 'table'
+  const headerCount = isTable
+    ? (() => {
+        let n = 0
+        for (const r of results) {
+          if (!r.tableBand?.isHeader) break
+          n += 1
+        }
+        return n
+      })()
+    : 0
+  const headerHeight = isTable
+    ? results.slice(0, headerCount).reduce((sum, r) => sum + r.height, 0)
+    : 0
+  let pendingHeader = false
   // How many of THIS block's lines a fresh page holds — only the R4
-  // exemption test and R-ATOMIC's n <= cap check consume it.
-  const cap = countFitting(results, 0, contentHeight)
+  // exemption test and R-ATOMIC's n <= cap check consume it. For a
+  // table, a continuation page's fresh budget shrinks by the repeated
+  // headers (conservative on the first page, where the headers are
+  // part of the sequence itself).
+  const cap = countFitting(results, 0, isTable ? contentHeight - headerHeight : contentHeight)
   const lineBoxes: LineBox[] = []
   const breaks: FragmentBreak[] = []
   const placedRects: PlacedRect[] = []
@@ -940,14 +1316,98 @@ function placeBlock(
   // validateIndentGeometry guarantees the line-0 edge is ≥ 0.
   const baseLeft = block.indentLeft ?? 0
   const firstLeft = baseLeft + (block.firstLineIndent ?? 0)
-  // IMAGE EMIT GEOMETRY: align positions the PLACED rect within the
-  // full content box via the shared alignOffset (center of the placed
-  // rect, not the intrinsic). Computed once — an image is one line.
+  // IMAGE / EQUATION EMIT GEOMETRY: align positions the PLACED rect
+  // within the full content box via the shared alignOffset (center of
+  // the placed rect, not the intrinsic). Computed once — an atomic
+  // visual block is one line. Equations default 'center' (Word's
+  // display-equation convention; images default 'left').
   const imageLeft =
     block.kind === 'image'
       ? alignOffset(block.align ?? 'left', results[0].width, contentWidth)
+      : block.kind === 'equation'
+        ? alignOffset(block.align ?? 'center', results[0].width, contentWidth)
+        : 0
+  // TABLE EMIT GEOMETRY: the table sits inside its MARGINED box — the
+  // left margin first, then the shared alignOffset over the tracks'
+  // total within the box (contentWidth − mL − mR). The band data is
+  // TABLE-relative; the emit adds the table's x and the band top.
+  const tableMarginL = block.kind === 'table' ? Math.max(0, block.margin?.left ?? 0) : 0
+  const tableMarginR = block.kind === 'table' ? Math.max(0, block.margin?.right ?? 0) : 0
+  const tableX =
+    block.kind === 'table'
+      ? tableMarginL +
+        alignOffset(
+          block.align ?? 'left',
+          results[0]?.width ?? contentWidth,
+          contentWidth - tableMarginL - tableMarginR,
+        )
       : 0
+  // The BAND emit (M-TABLES): the band's cell lines are PARALLEL
+  // LineBoxes (same band y, one lane per column — the contiguity
+  // contract is band-wise, paint.ts) and the cell rect slices ride
+  // placed[] (kind 'tableCell' — paint geometry, not flow).
+  const placeBands = (from: number, count: number): void => {
+    for (let i = from; i < from + count; i++) {
+      const result = results[i]
+      const band = result?.tableBand
+      if (!band) continue
+      for (const l of band.lines) {
+        lineBoxes.push(
+          freezeLineBox({
+            blockId: block.id,
+            lineIndex: l.lineIndex,
+            pageIndex,
+            rect: {
+              x: tableX + l.x,
+              y: y + l.y,
+              width: l.width,
+              height: l.height,
+            },
+            baseline: l.baseline,
+            rangeStart: l.rangeStart,
+            rangeEnd: l.rangeEnd,
+            segments: l.segments,
+            tableCell: { row: l.row, col: l.col, width: l.laneWidth },
+          }),
+        )
+      }
+      for (const r of band.rects) {
+        placedRects.push(
+          freezePlacedRect({
+            blockId: block.id,
+            kind: 'tableCell',
+            pageIndex,
+            rect: { x: tableX + r.x, y: y + r.y, width: r.width, height: r.height },
+            cell: {
+              fill: r.fill,
+              border: r.border,
+              colspan: r.colspan,
+              rowspan: r.rowspan,
+              row: r.row,
+              col: r.col,
+            },
+          }),
+        )
+      }
+      y += result.height
+      hasContent = true
+    }
+  }
   const place = (from: number, count: number): void => {
+    // HEADER REPEAT (lazy): the first content band's placement on a
+    // page that was just closed fires the pending header bands first.
+    // The repeats are the same logical lines (same lineIndex/ranges)
+    // re-emitted — echoes, not new flow units. from === 0 = the
+    // sequence's OWN header bands (the table's first page after an
+    // R1 close) — they cover the repeat, clear the flag.
+    if (isTable && pendingHeader) {
+      pendingHeader = false
+      if (from !== 0) placeBands(0, headerCount)
+    }
+    if (isTable) {
+      placeBands(from, count)
+      return
+    }
     for (let i = from; i < from + count; i++) {
       const result = results[i]
       if (block.kind === 'image') {
@@ -961,6 +1421,51 @@ function placeBlock(
             alt: block.alt,
             pageIndex,
             rect: { x: imageLeft, y, width: result.width, height: result.height },
+          }),
+        )
+      } else if (block.kind === 'equation') {
+        // M-EQ — the equation's ATOMIC emit: the same shape as the
+        // image's, with latex/fontSize echoing instead of src/alt (the
+        // shell's EquationLayer re-renders the math from them — paint
+        // data is the shell's to resolve). No z/float: equations are
+        // in-flow by construction.
+        placedRects.push(
+          freezePlacedRect({
+            blockId: block.id,
+            kind: 'equation',
+            latex: block.latex,
+            fontSize: block.fontSize,
+            pageIndex,
+            rect: { x: imageLeft, y, width: result.width, height: result.height },
+          }),
+        )
+      } else if (block.kind === 'referenceTable') {
+        // M-REFS — the entry line's rect.x is its ENTRY's left edge
+        // (the per-line referenceLine.x — the block tier's
+        // baseLeft/firstLeft don't apply: the indent lives per entry,
+        // the same ruling that gave tables their band emitter).
+        const ref = result.referenceLine
+        if (!ref) {
+          throw new Error(
+            `block "${block.id}" line ${i}: referenceTable line carries no referenceLine ` +
+              'payload — the getLines arm must tag every entry line',
+          )
+        }
+        lineBoxes.push(
+          freezeLineBox({
+            blockId: block.id,
+            lineIndex: i,
+            pageIndex,
+            rect: {
+              x: ref.x,
+              y,
+              width: result.width,
+              height: result.height,
+            },
+            baseline: result.baseline,
+            rangeStart: result.start,
+            rangeEnd: result.end,
+            segments: result.segments,
           }),
         )
       } else {
@@ -986,12 +1491,17 @@ function placeBlock(
     pageIndex += 1
     y = 0
     hasContent = false
+    if (isTable) pendingHeader = true
   }
 
   let k = 0
   while (k < L) {
     const n = L - k
-    let fits = countFitting(results, k, contentHeight - y)
+    // M-TABLES: the fit budget reserves the pending header repeat's
+    // height — the repeat fires BEFORE the content band on the fresh
+    // page, so the fit must leave room for it.
+    const headerBudget = isTable && pendingHeader ? headerHeight : 0
+    let fits = countFitting(results, k, contentHeight - y - headerBudget)
 
     if (fits >= n) {
       if (backupFinalSplit && n > 1) {
@@ -999,7 +1509,17 @@ function placeBlock(
         // A's last line opens the successor's page.
         place(k, n - 1)
         k += n - 1
-        breaks.push(Object.freeze({ blockId: block.id, atLine: k, pageIndex: pageIndex + 1 }))
+        // M-TABLES: atLine is the CONTINUATION's first content
+        // lineIndex (the band's smallest canonical index) — the
+        // repeated header lines are echoes of earlier pages, not the
+        // continuation.
+        breaks.push(
+          Object.freeze({
+            blockId: block.id,
+            atLine: results[k]?.tableBand?.firstLineIndex ?? k,
+            pageIndex: pageIndex + 1,
+          }),
+        )
         closePage()
         continue
       }
@@ -1013,7 +1533,15 @@ function placeBlock(
         closePage() // R1
         continue
       }
-      fits = 1 // R6: a fresh page always places one line
+      // Fresh page. A pending header repeat shrank the budget above —
+      // drop the repeat and refit before the R6 floor: a monster band
+      // that cannot share a page with the repeated header gets the
+      // page to itself (Word drops the repeat in the same situation).
+      if (headerBudget > 0) {
+        pendingHeader = false
+        fits = countFitting(results, k, contentHeight - y)
+      }
+      if (fits === 0) fits = 1 // R6: a fresh page always places one band/line
     }
 
     if (control && hasContent && fits === 1 && n > 1) {
@@ -1039,7 +1567,13 @@ function placeBlock(
     place(k, fits)
     k += fits
     if (k < L) {
-      breaks.push(Object.freeze({ blockId: block.id, atLine: k, pageIndex: pageIndex + 1 }))
+      breaks.push(
+        Object.freeze({
+          blockId: block.id,
+          atLine: results[k]?.tableBand?.firstLineIndex ?? k,
+          pageIndex: pageIndex + 1,
+        }),
+      )
       closePage()
     }
   }
@@ -1171,6 +1705,565 @@ function sameState(a: WalkState, b: WalkState): boolean {
   return a.pageIndex === b.pageIndex && a.y === b.y
 }
 
+// ─── M-TABLES — TABLE LAYOUT ─────────────────────────────────────────
+//
+// THE MODEL (spec of record, mirrored in types.ts's TableBlock doc):
+// the table's flow units are BANDS — a band is one row's line-grid
+// slice. An ordinary row (fits a page) is exactly ONE band; a monster
+// row (taller than the content box) fragments into per-line-grid
+// bands, the codeBlock taller-than-page ruling family. Bands tile the
+// flow track exactly like lines (the contiguity contract holds
+// band-wise); the cell LINES within a band are PARALLEL lanes that
+// ride lines[] as ordinary LineBoxes carrying `tableCell` identity.
+//
+// TRACKS: the engine owns the derivation (two-sided law). Per column:
+// any covering cell's colwidth entry; >1 distinct values = adapter
+// contract violation (THROW — prosemirror-tables keeps column cells in
+// sync, so a conflict is a bug, never clipped). No widths at all →
+// equal tracks of the content box (the pageless width:100% +
+// table-layout:fixed look). Fixed columns that would crowd the
+// flexible ones below the track floor scale down proportionally
+// (down-only; a table never overflows its content box in v1).
+//
+// ROWSPAN: a merged cell lays its line stack out at the union width;
+// its requirement is distributed equally over the spanned rows' heights
+// (pass 1), then its lines are placed BAND-ALIGNED by greedy fill — a
+// line never straddles a band boundary; the band remainder is slack
+// the cell fill covers. A fill that overflows its span grows the
+// span's last band and the whole distribution re-runs (heights only
+// grow — bounded at TABLE_FILL_PASSES, after which the R6 floor family
+// owns the outcome).
+//
+// PADDING: CELL_PAD_H/CELL_PAD_V are the ENGINE's constants — the
+// shell's painter imports them (one pad derivation, never two).
+
+export const CELL_PAD_H = 8
+export const CELL_PAD_V = 4
+/** Track floor — prosemirror-tables' cellMinWidth default. */
+export const CELL_MIN_TRACK = 25
+
+/** Bounded re-fill passes for the rowspan line distribution. */
+const TABLE_FILL_PASSES = 8
+
+/** M-T4 — the engine's built-in cell padding (the inheritance floor). */
+const DEFAULT_CELL_PAD = { top: CELL_PAD_V, right: CELL_PAD_H, bottom: CELL_PAD_V, left: CELL_PAD_H }
+
+/**
+ * M-T4 — per-side padding resolution: cell override ← table default ←
+ * the engine constants. Negative sides clamp to 0 (the adapter clamps
+ * too; this is the deterministic backstop).
+ */
+function resolveCellPad(cell: TableCellData, table: TableBlock): {
+  top: number
+  right: number
+  bottom: number
+  left: number
+} {
+  const t = table.cellPadding
+  const c = cell.padding
+  const pick = (v: number | null | undefined, d: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(0, v) : d
+  return {
+    top: pick(c?.top, pick(t?.top, DEFAULT_CELL_PAD.top)),
+    right: pick(c?.right, pick(t?.right, DEFAULT_CELL_PAD.right)),
+    bottom: pick(c?.bottom, pick(t?.bottom, DEFAULT_CELL_PAD.bottom)),
+    left: pick(c?.left, pick(t?.left, DEFAULT_CELL_PAD.left)),
+  }
+}
+
+/** One anchored cell's prepared layout data. */
+interface TableCellStack {
+  /** Anchor row/col (grid identity). */
+  row: number
+  col: number
+  colspan: number
+  rowspan: number
+  /** Union track width (sum of spanned tracks). */
+  laneWidth: number
+  /** The lane's left edge, TABLE-relative. */
+  laneX: number
+  /** M-T4 — the cell's RESOLVED padding (per-side, constants floored). */
+  pad: { top: number; right: number; bottom: number; left: number }
+  fill: string | null
+  border: 'all' | 'none' | 'outer'
+  /** Broken line stack — all paragraphs' lines, in order. */
+  lines: LineResult[]
+  /** Which paragraph owns each line (parallel to `lines`). */
+  linePara: number[]
+  /** Per-paragraph canonical bases (table-space text offsets / run indexes). */
+  paraBases: { textStart: number; runStart: number }[]
+  /** Canonical lineIndex base of this cell's lines. */
+  lineIndexBase: number
+  /** Sum of the stack's line heights (no padding). */
+  contentHeight: number
+}
+
+interface TableBand {
+  row: number
+  height: number
+  /**
+   * The band's line lanes — parallel lanes (whole stacks for ordinary
+   * rows; one line each for monster bands; distributed chunks for
+   * rowspan cells). Canonical order at assembly.
+   */
+  lanes: { stack: TableCellStack; paraIndex: number; lineIndex: number; line: LineResult; y: number }[]
+  /** First band of its row — the cell-top padding applies here. */
+  isFirstOfRow: boolean
+  isHeader: boolean
+  /** The band's READY-TO-EMIT data (frozen). */
+  data: TableBandData
+  /** The band's covered text range (informational; the synthetic result's start/end). */
+  start: number
+  end: number
+}
+
+interface TableLayout {
+  tableWidth: number
+  tableX: number
+  tracks: number[]
+  bands: TableBand[]
+  headerBandCount: number
+  /** The synthetic LineResults — one per band — for the placement machine. */
+  results: LineResult[]
+}
+
+/** Grid width: the first row's colspan sum. */
+function tableColumnCount(block: TableBlock): number {
+  const first = block.rows[0]
+  if (!first) throw new Error(`table "${block.id}": no rows`)
+  if (first.cells.length === 0) throw new Error(`table "${block.id}": row 0 has no cells`)
+  return first.cells.reduce((sum, cell) => sum + cell.colspan, 0)
+}
+
+interface AnchoredCell {
+  rowIndex: number
+  cellIndex: number
+  cell: TableCellData
+  col: number
+}
+
+/**
+ * Row-major anchored-cell placement over the occupancy grid: each cell
+ * visited once at its anchor, left-to-right by column, first free
+ * track. Validates the rectangular grid (every row's total occupancy
+ * === cols) and that no span overruns — the adapter (fixTables)
+ * guarantees both; this is the loud backstop.
+ */
+function tableAnchoredCells(block: TableBlock): AnchoredCell[] {
+  const cols = tableColumnCount(block)
+  const occupied = new Set<string>()
+  const anchored: AnchoredCell[] = []
+  block.rows.forEach((rowData, rowIndex) => {
+    let col = 0
+    rowData.cells.forEach((cell, cellIndex) => {
+      if (!Number.isInteger(cell.colspan) || cell.colspan < 1) {
+        throw new Error(`table "${block.id}": row ${rowIndex} cell ${cellIndex} has colspan ${cell.colspan}`)
+      }
+      if (!Number.isInteger(cell.rowspan) || cell.rowspan < 1) {
+        throw new Error(`table "${block.id}": row ${rowIndex} cell ${cellIndex} has rowspan ${cell.rowspan}`)
+      }
+      while (occupied.has(`${rowIndex}:${col}`)) col += 1
+      if (col + cell.colspan > cols) {
+        throw new Error(
+          `table "${block.id}": cell at row ${rowIndex} col ${col} (colspan ${cell.colspan}) overruns the ${cols}-column grid`,
+        )
+      }
+      if (rowIndex + cell.rowspan > block.rows.length) {
+        throw new Error(
+          `table "${block.id}": cell at row ${rowIndex} col ${col} spans ${cell.rowspan} rows past the table end`,
+        )
+      }
+      for (let dr = 0; dr < cell.rowspan; dr++) {
+        for (let dc = 0; dc < cell.colspan; dc++) {
+          occupied.add(`${rowIndex + dr}:${col + dc}`)
+        }
+      }
+      anchored.push({ rowIndex, cellIndex, cell, col })
+      col += cell.colspan
+    })
+    let count = 0
+    for (let c = 0; c < cols; c++) if (occupied.has(`${rowIndex}:${c}`)) count += 1
+    if (count !== cols) {
+      throw new Error(
+        `table "${block.id}": row ${rowIndex} occupies ${count} of ${cols} columns — the grid is not rectangular; the adapter (fixTables) must normalize before sending`,
+      )
+    }
+  })
+  return anchored
+}
+
+function computeTableLayout(
+  block: TableBlock,
+  contentWidth: number,
+  contentHeight: number,
+  metrics: TextMetrics,
+  baseStyle: TextStyle,
+): TableLayout {
+  const cols = tableColumnCount(block)
+  const anchored = tableAnchoredCells(block)
+
+  // ── M-T4 — the TABLE BOX (outer left/right margins): tracks derive
+  // against the narrowed box; the aligned x shifts by the left margin
+  // (placeBlock adds it). Loud seam: margins that consume the box
+  // THROW (the adapter must clamp before sending). Top/bottom margins
+  // are NOT here — the adapter maps them to spaceBefore/spaceAfter
+  // (the block tier's once-at-entry rule). ──
+  const marginL = Math.max(0, block.margin?.left ?? 0)
+  const marginR = Math.max(0, block.margin?.right ?? 0)
+  const boxWidth = contentWidth - marginL - marginR
+  if (boxWidth <= 0) {
+    throw new Error(
+      `table "${block.id}": horizontal margins (${marginL} + ${marginR}) leave no room in the ${contentWidth}px content box — the adapter must validate before sending`,
+    )
+  }
+
+  // ── TRACKS (the engine owns the derivation) ──
+  // Per column: the covering cells' colwidth entries. Conflict = throw.
+  const widths: (number | null)[] = Array.from({ length: cols }, () => null)
+  for (const { col, cell } of anchored) {
+    const cw = cell.colwidth
+    if (!cw) continue
+    for (let dc = 0; dc < cell.colspan; dc++) {
+      const track = col + dc
+      const v = cw[dc]
+      const w = typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+      if (w == null) continue
+      const existing = widths[track]
+      if (existing == null) widths[track] = w
+      else if (Math.abs(existing - w) > 0.01) {
+        throw new Error(
+          `table "${block.id}": column ${track} carries conflicting colwidths (${existing} vs ${w}) — the adapter must keep column cells in sync`,
+        )
+      }
+    }
+  }
+  const fixedTotal = widths.reduce<number>((sum, w) => sum + (w ?? 0), 0)
+  const unsetCount = widths.filter((w) => w == null).length
+  const tracks: number[] = widths.map((w) => w ?? 0)
+  let tableWidth: number
+  if (unsetCount === 0) {
+    // Fully fixed: the table is as wide as its tracks (the pageless
+    // fixed <colgroup> look); over-wide tracks scale DOWN to the box.
+    if (fixedTotal > boxWidth && fixedTotal > 0) {
+      const factor = boxWidth / fixedTotal
+      for (let c = 0; c < cols; c++) tracks[c] = (tracks[c] ?? 0) * factor
+    }
+    tableWidth = tracks.reduce((sum, w) => sum + w, 0)
+  } else {
+    // Some flexible columns: fixed columns first — shrinking
+    // proportionally when they would crowd the flexible ones below the
+    // track floor — then the flexible share the remainder equally. The
+    // table fills the box (the width:100% look).
+    const floor = unsetCount * CELL_MIN_TRACK
+    if (fixedTotal > 0 && boxWidth - fixedTotal < floor) {
+      const factor = Math.max(0, (boxWidth - floor) / fixedTotal)
+      for (let c = 0; c < cols; c++) if (widths[c] != null) tracks[c] = (tracks[c] ?? 0) * factor
+    }
+    const flexTotal = boxWidth - tracks.reduce((sum, w) => sum + w, 0)
+    const flexWidth = Math.max(flexTotal / unsetCount, 1)
+    for (let c = 0; c < cols; c++) if (widths[c] == null) tracks[c] = flexWidth
+    tableWidth = boxWidth
+  }
+  const laneXOf = (col: number): number => tracks.slice(0, col).reduce((sum, w) => sum + w, 0)
+
+  // ── CELL LINE STACKS (one breaker, no fork: each cell's paragraphs
+  // break at the lane's content width — the SAME breakLines prose
+  // machinery). Canonical order: rows top-down, anchored cells
+  // left-to-right, paragraphs in order, runs in order. The table's
+  // concatenated text, canonical run indexes, and line indexes follow
+  // EXACTLY this order (the shell's AdapterBlock builds the same
+  // arrays — agreement by construction).
+  //
+  // THE SEPARATOR LAW (M-TABLES 2): EVERY cell paragraph's text slice
+  // is followed by ONE '\n' separator in the canonical text — the
+  // shell's AdapterBlock.text appends the same. Rationale: the
+  // PM↔text-offset bridge is PER-PARAGRAPH, and a zero-length slice
+  // (an empty cell) would share the offset space with its neighbors —
+  // the caret/selection round-trip through blockOffsetToPmPos would
+  // route EVERY empty cell to the FIRST one. The separator gives each
+  // paragraph a DISTINCT textStart even at zero length (slice [k, k)
+  // with the separator just before it). The separator never enters a
+  // line's range (ranges are per-paragraph slices), never measures,
+  // and never paints. ──
+  const stacks: TableCellStack[] = []
+  let textOffset = 0
+  let runOffset = 0
+  let lineIndexBase = 0
+  for (const { rowIndex, cell, col } of anchored) {
+    const laneWidth = tracks.slice(col, col + cell.colspan).reduce((sum, w) => sum + w, 0)
+    // M-T4 — the cell's resolved padding narrows the lane's content
+    // width (per-side: cell ← table default ← the engine constants).
+    const pad = resolveCellPad(cell, block)
+    const laneContentWidth = Math.max(laneWidth - pad.left - pad.right, 1)
+    const lines: LineResult[] = []
+    const linePara: number[] = []
+    const paraBases: { textStart: number; runStart: number }[] = []
+    let contentHeight = 0
+    cell.content.forEach((para, paraIndex) => {
+      paraBases.push({ textStart: textOffset, runStart: runOffset })
+      const broken = breakLines(para.runs, metrics, laneContentWidth, baseStyle)
+      broken.forEach((line) => {
+        lines.push(line)
+        linePara.push(paraIndex)
+        contentHeight += line.height
+      })
+      // The canonical text offset advances by the breaker's token
+      // lengths: an inline object contributes ONE position (the
+      // U+FFFC the adapter also appends), a text run its text.
+      textOffset += para.runs.reduce(
+        (sum, run) => sum + (run.kind === 'inlineImage' ? 1 : run.text.length),
+        0,
+      )
+      // The SEPARATOR LAW: +1 per paragraph (after the last one too —
+      // the trailing separator keeps the accounting uniform; the
+      // shell's text carries the same trailing '\n').
+      textOffset += 1
+      runOffset += para.runs.length
+    })
+    stacks.push({
+      row: rowIndex,
+      col,
+      colspan: cell.colspan,
+      rowspan: cell.rowspan,
+      laneWidth,
+      laneX: laneXOf(col),
+      pad,
+      fill: cell.backgroundColor ?? null,
+      border: block.borderStyle ?? 'all',
+      lines,
+      linePara,
+      paraBases,
+      lineIndexBase,
+      contentHeight,
+    })
+    lineIndexBase += lines.length
+  }
+
+  // ── ROW HEIGHTS (pass 1) ──
+  const heights: number[] = block.rows.map((row) => row.minHeight ?? 0)
+  for (const stack of stacks) {
+    if (stack.rowspan === 1) {
+      heights[stack.row] = Math.max(heights[stack.row]!, stack.contentHeight + stack.pad.top + stack.pad.bottom)
+    }
+  }
+  // Rowspan distribution (row-major anchor order; later cells see
+  // earlier cells' growth).
+  for (const stack of stacks) {
+    if (stack.rowspan === 1) continue
+    const req = stack.contentHeight + stack.pad.top + stack.pad.bottom
+    const spanSum = heights
+      .slice(stack.row, stack.row + stack.rowspan)
+      .reduce((sum, h) => sum + (h ?? 0), 0)
+    if (req > spanSum) {
+      const share = (req - spanSum) / stack.rowspan
+      for (let r = stack.row; r < stack.row + stack.rowspan; r++) heights[r] = heights[r]! + share
+    }
+  }
+
+  // ── BAND SLOTS per row ──
+  // Ordinary row (fits a page): ONE band holding every own cell's full
+  // stack. Monster row: per-line-grid bands (each own cell contributes
+  // its k-th line to band k); the row's negotiated height reconciles
+  // into the last band. Degenerate monster (no own lines — the
+  // monster-ness came from a rowspan share or minHeight): one
+  // un-fragmentable band (the R6 floor family owns the overflow).
+  const rowBands: TableBand[][] = block.rows.map((rowData, r) => {
+    const h = heights[r]!
+    const own = stacks.filter((s) => s.row === r && s.rowspan === 1)
+    if (h <= contentHeight || own.length === 0) {
+      const lanes: TableBand['lanes'] = []
+      for (const s of own) {
+        let y = s.pad.top
+        s.lines.forEach((line, k) => {
+          lanes.push({ stack: s, paraIndex: s.linePara[k]!, lineIndex: s.lineIndexBase + k, line, y })
+          y += line.height
+        })
+      }
+      return [{ row: r, height: h, lanes, isFirstOfRow: true, isHeader: rowData.isHeader, data: null as unknown as TableBandData, start: 0, end: 0 }]
+    }
+    const maxLines = Math.max(...own.map((s) => s.lines.length))
+    const bands: TableBand[] = []
+    for (let k = 0; k < maxLines; k++) {
+      let height = 0
+      const lanes: TableBand['lanes'] = []
+      for (const s of own) {
+        const line = s.lines[k]
+        if (!line) continue
+        height = Math.max(height, line.height)
+        lanes.push({
+          stack: s,
+          paraIndex: s.linePara[k]!,
+          lineIndex: s.lineIndexBase + k,
+          line,
+          y: k === 0 ? s.pad.top : 0,
+        })
+      }
+      bands.push({ row: r, height, lanes, isFirstOfRow: k === 0, isHeader: rowData.isHeader, data: null as unknown as TableBandData, start: 0, end: 0 })
+    }
+    // Reconcile: the row's negotiated height may exceed the bands' sum
+    // (a rowspan share or minHeight drove it) — the last band absorbs.
+    const bandSum = bands.reduce((sum, b) => sum + b.height, 0)
+    if (bandSum < h) bands[bands.length - 1]!.height += h - bandSum
+    return bands
+  })
+  const bands = rowBands.flat()
+
+  // ── ROWSPAN LINE DISTRIBUTION (band-aligned greedy fill) ──
+  // Each pass re-runs the whole distribution from scratch (the previous
+  // pass's assignments cleared); growth (the span's last band growing
+  // to hold the remainder) only ever increases band heights, so the
+  // fill converges or hits the pass cap (bounded, deterministic).
+  for (let pass = 0; pass < TABLE_FILL_PASSES; pass++) {
+    for (const band of bands) {
+      band.lanes = band.lanes.filter((l) => l.stack.rowspan === 1)
+    }
+    let grew = false
+    for (const stack of stacks) {
+      if (stack.rowspan === 1) continue
+      const spanBands: TableBand[] = []
+      for (let r = stack.row; r < stack.row + stack.rowspan; r++) spanBands.push(...rowBands[r]!)
+      let cursor = 0
+      let padPending = true
+      for (let bi = 0; bi < spanBands.length && cursor < stack.lines.length; bi++) {
+        const band = spanBands[bi]!
+        const isLastBand = bi === spanBands.length - 1
+        let used = 0
+        for (const lane of band.lanes) {
+          if (lane.stack === stack) used += stack.pad.top + lane.line.height
+        }
+        while (cursor < stack.lines.length) {
+          const line = stack.lines[cursor]!
+          const pad = padPending ? stack.pad.top : 0
+          if (used + pad + line.height > band.height + 1e-9) {
+            if (!isLastBand) break
+            // The last band takes the whole remainder (grows to fit) —
+            // content never vanishes (the R6 family's spirit).
+            band.height = used + pad + line.height
+            grew = true
+          }
+          band.lanes.push({
+            stack,
+            paraIndex: stack.linePara[cursor]!,
+            lineIndex: stack.lineIndexBase + cursor,
+            line,
+            y: used + pad,
+          })
+          used += pad + line.height
+          padPending = false
+          cursor += 1
+        }
+      }
+      if (cursor < stack.lines.length) grew = true // defensive; the last-band growth consumes all
+    }
+    if (!grew) break
+  }
+
+  // ── BAND DATA ASSEMBLY ──
+  // Lanes sort to canonical order (row-major anchor order — the stable
+  // sort keeps a cell's own lines adjacent); rect slices cover every
+  // cell occupying the band's row (anchors AND rowspan continuations).
+  for (const band of bands) {
+    const ordered = [...band.lanes].sort((a, b) =>
+      a.stack.row !== b.stack.row ? a.stack.row - b.stack.row : a.stack.col - b.stack.col,
+    )
+    const lines: TableBandLine[] = ordered.map((lane) => {
+      const base = lane.stack.paraBases[lane.paraIndex]!
+      const line = lane.line
+      const textStart = base.textStart
+      return {
+        lineIndex: lane.lineIndex,
+        x: lane.stack.laneX + lane.stack.pad.left,
+        y: lane.y,
+        laneWidth: lane.stack.laneWidth - lane.stack.pad.left - lane.stack.pad.right,
+        rangeStart: textStart + line.start,
+        rangeEnd: textStart + line.end,
+        baseline: line.baseline,
+        height: line.height,
+        width: line.width,
+        segments: line.segments.map((seg) => ({
+          runIndex: base.runStart + seg.runIndex,
+          start: textStart + seg.start,
+          end: textStart + seg.end,
+          x: seg.x,
+        })),
+        row: lane.stack.row,
+        col: lane.stack.col,
+      }
+    })
+    const rowCover = stacks
+      .filter((s) => s.row <= band.row && band.row < s.row + s.rowspan)
+      .sort((a, b) => a.col - b.col)
+    const rects: TableBandRect[] = rowCover.map((s) => ({
+      x: s.laneX,
+      y: 0,
+      width: s.laneWidth,
+      height: band.height,
+      fill: s.fill,
+      border: s.border,
+      colspan: s.colspan,
+      rowspan: s.rowspan,
+      row: s.row,
+      col: s.col,
+    }))
+    let firstLineIndex = Number.MAX_SAFE_INTEGER
+    let start = Number.MAX_SAFE_INTEGER
+    let end = 0
+    for (const l of lines) {
+      firstLineIndex = Math.min(firstLineIndex, l.lineIndex)
+      start = Math.min(start, l.rangeStart)
+      end = Math.max(end, l.rangeEnd)
+    }
+    if (lines.length === 0) {
+      // A degenerate band (no lines — e.g. a minHeight-tall empty row):
+      // its range is the covering cells' text extent (informational).
+      firstLineIndex = rowCover[0]?.lineIndexBase ?? 0
+      start = rowCover[0]?.paraBases[0]?.textStart ?? 0
+      end = start
+    }
+    band.data = { lines, rects, firstLineIndex, isHeader: band.isHeader }
+    band.start = start
+    band.end = end
+    // Freeze the emission records at creation (the same immutability
+    // posture as the emitted LineBoxes/PlacedRects).
+    for (const l of lines) Object.freeze(l)
+    Object.freeze(lines)
+    for (const r of rects) Object.freeze(r)
+    Object.freeze(rects)
+    Object.freeze(band.data)
+  }
+
+  const headerBandCount = (() => {
+    // The LEADING header prefix only (a mid-table all-header row styles
+    // as a header but does not repeat — Word's top-rows rule).
+    let n = 0
+    for (const band of bands) {
+      if (!band.isHeader) break
+      n += 1
+    }
+    return n
+  })()
+
+  const results: LineResult[] = bands.map((band) => ({
+    start: band.start,
+    end: band.end,
+    segments: [],
+    width: tableWidth,
+    height: band.height,
+    baseline: 0,
+    tableBand: band.data,
+  }))
+
+  return {
+    tableWidth,
+    tableX: alignOffset(block.align ?? 'left', tableWidth, contentWidth),
+    tracks,
+    bands,
+    headerBandCount,
+    results,
+  }
+}
+
+
 // contentHash covers everything that determines a block's lines and
 // placement: kind (all four kinds — and kind also routes the BREAKER
 // and the EMIT: codeBlock vs prose semantics, image = atomic
@@ -1214,6 +2307,13 @@ function hashBlock(block: Block): string {
       indentLeft: block.indentLeft,
       indentRight: block.indentRight,
       firstLineIndent: block.firstLineIndent,
+      // M-RULER Phase 4: tab stops are now LAYOUT-RELEVANT (the \t
+      // advance rule) — they ride the hash, so a stop edit re-breaks
+      // the block (the Phase 3 ruling's deferred half: the field
+      // becomes cache-relevant exactly when it becomes
+      // layout-relevant). stableStringify drops undefined → absent ≡
+      // unset bit-for-bit; stop-free hashes are unchanged.
+      tabStops: block.tabStops,
     }
     hash = stableStringify(
       block.kind === 'image'
@@ -1233,28 +2333,135 @@ function hashBlock(block: Block): string {
             // unchanged.
             float: block.float ?? undefined,
           }
-        : {
-            ...base,
-            runs: block.runs.map((run) =>
-              // E-IMG-2 run union dispatch: an inline object's fields
-              // are included BY CONSTRUCTION — the mapping names
-              // kind/src/width/height/alt, so any of their edits
-              // re-breaks the block. A text run maps to {text, style}
-              // BIT-IDENTICALLY to the pre-union hash (an explicit
-              // kind: 'text' is deliberately NOT hashed — absent ≡
-              // 'text' ≡ unset, the stableStringify undefined-dropping
-              // rule), so existing docs' hashes are unchanged.
-              run.kind === 'inlineImage'
+        : block.kind === 'equation'
+          ? {
+              // M-EQ: latex and fontSize ride the hash — both are the
+              // metrics port's keys (an edit to either must re-measure
+              // and re-walk, never serve a spliced stale rect); align
+              // rides because the emit geometry reads it. The echoes
+              // (latex/fontSize in placed[]) are covered by
+              // construction — the E-IMG-1 alt ruling family.
+              ...base,
+              latex: block.latex,
+              fontSize: block.fontSize,
+              align: block.align,
+            }
+          : block.kind === 'table'
+          ? {
+              // M-TABLES: the hash covers the full grid structure —
+              // rows (isHeader/minHeight), cells (colspan/rowspan/
+              // colwidth/backgroundColor/padding) and each cell
+              // paragraph's runs (the same run-union dispatch as the
+              // flow tier). align/margin/cellPadding ride too (the
+              // emit geometry and the padding resolution read them).
+              // Cell paragraph ids are NOT hashed (the cells are
+              // embedded, never walked as blocks). Undefined/null
+              // attrs drop (absent ≡ unset, the stableStringify rule);
+              // BoxEdges sides normalize null → dropped so an explicit
+              // null side hashes ≡ an absent side (they layout
+              // identically — the inheritance floor).
+              ...base,
+              align: block.align,
+              borderStyle: block.borderStyle,
+              margin: block.margin ?? undefined,
+              cellPadding: block.cellPadding
                 ? {
-                    kind: run.kind,
-                    src: run.src,
-                    width: run.width,
-                    height: run.height,
-                    alt: run.alt,
+                    top: block.cellPadding.top ?? undefined,
+                    right: block.cellPadding.right ?? undefined,
+                    bottom: block.cellPadding.bottom ?? undefined,
+                    left: block.cellPadding.left ?? undefined,
                   }
-                : { text: run.text, style: run.style },
-            ),
-          },
+                : undefined,
+              rows: block.rows.map((row) => ({
+                isHeader: row.isHeader,
+                minHeight: row.minHeight ?? undefined,
+                cells: row.cells.map((cell) => ({
+                  colspan: cell.colspan,
+                  rowspan: cell.rowspan,
+                  colwidth: cell.colwidth ?? undefined,
+                  backgroundColor: cell.backgroundColor ?? undefined,
+                  padding: cell.padding
+                    ? {
+                        top: cell.padding.top ?? undefined,
+                        right: cell.padding.right ?? undefined,
+                        bottom: cell.padding.bottom ?? undefined,
+                        left: cell.padding.left ?? undefined,
+                      }
+                    : undefined,
+                  content: cell.content.map((para) => ({
+                    runs: para.runs.map((run) =>
+                      run.kind === 'inlineImage'
+                        ? {
+                            kind: run.kind,
+                            src: run.src,
+                            width: run.width,
+                            height: run.height,
+                            alt: run.alt,
+                          }
+                        : { text: run.text, style: run.style },
+                    ),
+                  })),
+                })),
+              })),
+            }
+          : block.kind === 'referenceTable'
+            ? {
+                // M-REFS: the hash covers the ENTRIES — each entry's
+                // full runs (the same run-union dispatch as the flow
+                // tier; the page-number run IS one of them, so a
+                // re-resolved number re-breaks exactly this block) +
+                // the entry's indentLeft (the level step — wrap
+                // geometry). kind/flow/spacing/indentLeft/indentRight
+                // ride via the explicit base below. firstLineIndent is
+                // DELIBERATELY UNCOVERED — refused nonzero by
+                // validation, so it can never reach a hash (and
+                // explicit-0 vs absent normalize to the same hash);
+                // tabStops is UNCOVERED too — the arm supplies its own
+                // stop and never reads the field (not read → not
+                // cache-relevant, the Phase 3 ruling's shape).
+                kind: block.kind,
+                flow: block.flow,
+                spaceBefore: block.spaceBefore,
+                spaceAfter: block.spaceAfter,
+                indentLeft: block.indentLeft,
+                indentRight: block.indentRight,
+                entries: block.entries.map((entry) => ({
+                  indentLeft: entry.indentLeft,
+                  runs: entry.runs.map((run) =>
+                    run.kind === 'inlineImage'
+                      ? {
+                          kind: run.kind,
+                          src: run.src,
+                          width: run.width,
+                          height: run.height,
+                          alt: run.alt,
+                        }
+                      : { text: run.text, style: run.style },
+                  ),
+                })),
+              }
+            : {
+              ...base,
+              runs: block.runs.map((run) =>
+                // E-IMG-2 run union dispatch: an inline object's fields
+                // are included BY CONSTRUCTION — the mapping names
+                // kind/src/width/height/alt, so any of their edits
+                // re-breaks the block. A text run maps to {text, style}
+                // BIT-IDENTICALLY to the pre-union hash (an explicit
+                // kind: 'text' is deliberately NOT hashed — absent ≡
+                // 'text' ≡ unset, the stableStringify undefined-dropping
+                // rule), so existing docs' hashes are unchanged.
+                run.kind === 'inlineImage'
+                  ? {
+                      kind: run.kind,
+                      src: run.src,
+                      width: run.width,
+                      height: run.height,
+                      alt: run.alt,
+                    }
+                  : { text: run.text, style: run.style },
+              ),
+            },
     )
     blockHashCache.set(block, hash)
     hashCallCount += 1
@@ -1287,6 +2494,30 @@ function stableStringify(value: unknown): string {
     return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`
   }
   return '"unsupported"'
+}
+
+// Unknown block kinds are an ADAPTER/ENGINE VERSION SKEW (a newer
+// shell feeding a stale engine — or vice versa), loud and upfront:
+// before any cache work, before a deep TypeError could freeze the
+// caller's relayout with an unreadable stack. The union here mirrors
+// types.ts's Block.
+const KNOWN_KINDS = new Set([
+  'paragraph',
+  'heading',
+  'codeBlock',
+  'image',
+  'equation',
+  'table',
+  'referenceTable',
+])
+function validateKinds(doc: SemanticDoc): void {
+  for (const block of doc.blocks) {
+    if (!KNOWN_KINDS.has(block.kind)) {
+      throw new Error(
+        `unknown block kind '${block.kind}' (block "${block.id}") — engine/tensor version mismatch: rebuild @tensor-editor/engine (npm run build in the engine package) and reload`,
+      )
+    }
+  }
 }
 
 // Duplicate ids are an adapter-contract violation, loud and upfront —
@@ -1375,6 +2606,33 @@ function validateFloatFlow(doc: SemanticDoc): void {
         `blocks "${a.id}" → "${b.id}": bond touches a floated image — a float is not in flow and cannot bond; the adapter must validate before sending`,
       )
     }
+  }
+}
+
+// REFERENCE TABLE SEAM (M-REFS — loud, upfront, the adapter-contract
+// family): entries must carry ≥ 1 run (an empty entry has no line at
+// all — the shell renders an empty collection as its placeholder
+// entry), and firstLineIndent is meaningless per-entry — refused
+// nonzero (the per-entry indentLeft replaces it). The entry-indent-
+// past-wrap-width refusal lives in the getLines arm (it needs the
+// content box's width, which validation doesn't see).
+function validateReferenceEntries(doc: SemanticDoc): void {
+  for (const block of doc.blocks) {
+    if (block.kind !== 'referenceTable') continue
+    if ((block.firstLineIndent ?? 0) !== 0) {
+      throw new Error(
+        `block "${block.id}": referenceTable carries firstLineIndent ${block.firstLineIndent} — ` +
+          'meaningless per-entry (the entry indentLeft replaces it); the adapter must validate before sending',
+      )
+    }
+    block.entries.forEach((entry, i) => {
+      if (!Array.isArray(entry.runs) || entry.runs.length === 0) {
+        throw new Error(
+          `block "${block.id}" entry ${i}: reference entries must carry at least one run ` +
+            '(the tab + page-number run included); the adapter must validate before sending',
+        )
+      }
+    })
   }
 }
 
