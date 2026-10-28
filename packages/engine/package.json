@@ -1,0 +1,36 @@
+{
+  "name": "@tensor-editor/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "github:tensor-editor/engine"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsup && tsc src/index.ts --ignoreConfig --declaration --emitDeclarationOnly --outDir dist --moduleResolution bundler --module esnext --target es2022 --strict --skipLibCheck",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.1",
+    "typescript": "^7.0.2"
+  }
+}

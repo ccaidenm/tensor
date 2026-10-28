@@ -175,7 +175,7 @@ async fn fetch_link_metadata(url: String) -> Result<LinkMetadata, String> {
 
 #[tauri::command]
 async fn fetch_url(url: String, ua: Option<String>) -> Result<tauri::ipc::Response, String> {
-    let mut builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .user_agent(ua.unwrap_or_else(|| "Mozilla/5.0 (compatible; TensorEditor/1.0)".to_string()));
     let client = builder.build().map_err(|e| e.to_string())?;
 
@@ -436,7 +436,9 @@ mod wpdoc_tests {
         // same PNG inflates it by ~4/3 and lives INSIDE the JSON,
         // defeating its deflate too.
         let doc_sized: String = r#"{"version":1,"docJSON":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":""#.to_string() + &"tensor engine paginates orphan ".repeat(20_000) + r#""}]}]},"metadata":{}}"#;
-        let png: Vec<u8> = (0..30_000u32).map(|i| ((i * 31 + i / 7) % 256) as u8).collect();
+        let png: Vec<u8> = (0..30_000u32)
+            .map(|i| ((i * 31 + i / 7) % 256) as u8)
+            .collect();
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
 
         // v2: deflated document + stored media.
@@ -445,14 +447,24 @@ mod wpdoc_tests {
         let v2_size = std::fs::metadata(&v2_path).unwrap().len();
 
         // Data-URL equivalent: the PNG base64-embedded in the JSON.
-        let data_url_doc = format!("{}\"data:image/png;base64,{}\"}}]}}]}}", doc_sized.trim_end_matches('}'), b64);
+        let data_url_doc = format!(
+            "{}\"data:image/png;base64,{}\"}}]}}]}}",
+            doc_sized.trim_end_matches('}'),
+            b64
+        );
         // The V1-format data-URL equivalent: plain JSON on disk.
         let du_path = tmp("size-du");
         std::fs::write(&du_path, &data_url_doc).unwrap();
         let du_size = std::fs::metadata(&du_path).unwrap().len();
 
-        println!("SIZE-RECEIPT v2={v2_size} bytes, v1-data-url={du_size} bytes (ratio 1:{})", du_size / v2_size.max(1));
-        assert!(v2_size * 5 < du_size, "v2 ({v2_size}) must beat the v1 data-url format ({du_size}) by >5x");
+        println!(
+            "SIZE-RECEIPT v2={v2_size} bytes, v1-data-url={du_size} bytes (ratio 1:{})",
+            du_size / v2_size.max(1)
+        );
+        assert!(
+            v2_size * 5 < du_size,
+            "v2 ({v2_size}) must beat the v1 data-url format ({du_size}) by >5x"
+        );
         std::fs::remove_file(&v2_path).ok();
         std::fs::remove_file(&du_path).ok();
     }
