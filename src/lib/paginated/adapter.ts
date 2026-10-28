@@ -20,16 +20,17 @@ import { lookupStyle } from '@/lib/styles/registry';
 import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
 import { regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
 // M-REFS: the collection scan — the referenceTable node's entries are
-// a LIVE projection of the document (the atom-field ruling: the node
-// stores only kind/depth), so the adapter reads them through the same
+// real paragraphs the GENERATOR maintains (the container model); the
+// adapter joins them to their navigation targets through the same
 // memoized one-walk scan every consumer shares.
 import {
-  REFERENCE_KINDS,
   entriesForKind,
   scanCollections,
   type CollectionScan,
   type ReferenceKind,
 } from '@/lib/references/scan';
+// M-REFS: the two-pass resolver's map type (referencePages.ts).
+import type { ReferencePagesMap } from './referencePages';
 import {
   baselineRunStyle,
   resolveBlockTier,
@@ -120,7 +121,9 @@ export interface BlockPaint {
   caption?: boolean;
   /** M-REFS: a reference table block — the GDocs-style FIELD BORDER
    * (a light gray rounded box around the block's per-page fragment,
-   * drawn by paintLines as pure ink; layout never reads it). */
+   * drawn by paintLines as pure ink; layout never reads it). (The
+   * leader toggle lives in the MODEL — the generator's refLeader
+   * span — not a paint hint: the dots are real runs now.) */
   reference?: boolean;
 }
 
@@ -179,9 +182,24 @@ export interface AdapterBlock {
 
 /** One reference-table sidecar entry — see AdapterBlock.reference. */
 export interface ReferenceSidecarEntry {
+  /** The entry paragraph's PM position RELATIVE to the container node
+   *  (its text starts at relStart; pmStart = block.from + relStart) —
+   *  the caret/selection bridge into REAL entry text (the table
+   *  cell-map's shape, minus the grid). */
+  relStart: number;
+  /**
+   * M-REFS-8 — the LEADER SPAN's text length at this row's tail (the
+   * refLeader-marked dots; 0 = no leader). The PAINTER's tag: the
+   * gap-filling dots (extra ink at the leader run's own measured
+   * style) are drawn after the span's text, up to the page number —
+   * never layout, never the block-text contract. */
+  leaderLen: number;
+  /** The child's REAL text slice of the canonical block text (the
+   *  synthetic tab/number suffix follows it, non-mappable). */
   textStart: number;
   textLen: number;
-  /** PM positions (final caret targets), doc order. */
+  /** PM positions (final caret targets), doc order. Zero for the
+   *  placeholder (visible, never navigable). */
   targets: number[];
 }
 
@@ -309,6 +327,15 @@ interface CachedConversion {
    * every other kind (undefined === undefined keeps their reuse test
    * byte-identical). */
   scan?: CollectionScan;
+  /** M-REFS: the RESOLVED PAGE STRINGS for the entries (the two-pass
+   * resolver's output): one string per entry, aligned with the
+   * container's children. The conversion cache reuses only when the
+   * ARRAY is the same object (identity-stable resolver output — the
+   * scan precedent). Undefined on every other kind. */
+  refPages?: readonly string[];
+  /** M-REFS-9: the number display the conversion was built under
+   * (the preset fact — see Projection.numberDisplay). */
+  numberDisplay?: 'plain' | 'none';
 }
 
 const nodeCache = new WeakMap<PMNode, CachedConversion>();
@@ -517,6 +544,15 @@ interface Projection {
    * object is the same one (the sibling-fact pattern: list markers
    * reconvert the same way). */
   scan?: CollectionScan;
+  /** M-REFS: the RESOLVED PAGE STRINGS for this container's entries
+   * (the two-pass resolver's output): one string per entry, aligned
+   * with the children. The conversion cache reuses only when the
+   * ARRAY is the same object (identity-stable resolver output). */
+  refPages?: readonly string[];
+  /** M-REFS-9: the number display ('plain' default | 'hyperlink' —
+   * the numbers carry their target for link styling | 'none' — no
+   * numbers). */
+  numberDisplay?: 'plain' | 'none';
 }
 
 /**
@@ -707,7 +743,15 @@ function walkProseRuns(
       // FAMILY is mapped to engine geometry (M6.2 — indent/indentLeft/
       // indentRight consumed, no longer dropped); justify remains
       // engine work and stays loud.
-      if (child.marks.some((m) => m.type.name === 'link')) dropped.add('link');
+      // M-REFS-11: the reference-table rows' SEMANTIC links (the
+      // `tensor-ref:` scheme — the invisible always-on hyperlink) are
+      // RECOGNIZED-QUIET: no styling in paginated (the user's
+      // "invisible" ruling), no dropped-attr warning (they are
+      // deliberate model data for the future PDF/DOCX exporters).
+      if (child.marks.some((m) => m.type.name === 'link')) {
+        const href = child.marks.find((m) => m.type.name === 'link')?.attrs?.href;
+        if (typeof href !== 'string' || !href.startsWith('tensor-ref:')) dropped.add('link');
+      }
 
       // TRANSFORMED MEASUREMENT (amendment 3): run TEXT is transformed
       // HERE, so the engine measures (and wraps) the transformed text
@@ -1030,58 +1074,151 @@ function convertNode(
     };
   }
 
-  // M-REFS — the reference table converts from the SCAN (the atom-field
-  // ruling: the node's only document data is kind/depth; entries are a
-  // live projection). One engine ReferenceTableBlock + the ENTRY sidecar
-  // (the table.paragraphs precedent): the block's canonical runs/text
-  // are the entries' concatenation — text runs now, the tab + page-
-  // number runs once the two-pass resolves pages (a page edit re-runs
-  // THIS conversion with a changed scan/facts and re-breaks through
-  // the engine's contentHash — the number IS an entry-runs edit by
-  // construction). Entry styling: the document-default run look
-  // (baseStyle resolution, no paragraph tier — an entry belongs to no
-  // paragraph style). Entry indent: (level−1) × 32 (the list gutter
-  // precedent). The PLACEHOLDER (empty collection): ONE muted italic
-  // entry with ZERO targets — visible, never navigable (the NodeView's
-  // twin ruling), so the block can never be a zero-height ghost.
+  // M-REFS — the reference table converts from its REAL CHILDREN (the
+  // container model: entries are real paragraphs the generator
+  // maintains): each child's runs flow through the SHARED
+  // walkProseRuns (one run mapping, no fork — user marks render in
+  // paginated like body text), plus the SYNTHETIC tab + page-number
+  // runs (document-default style; page strings arrive with the
+  // two-pass — LAYOUT facts, never persisted PM text). One engine
+  // ReferenceTableBlock + the ENTRY sidecar (the table.paragraphs
+  // precedent): per-entry `relStart` = the child paragraph's position
+  // RELATIVE to the container (pmStart = block.from + relStart — the
+  // caret/selection bridge into entry text), `textStart`/`textLen`
+  // = the child's REAL text slice of the canonical block text (the
+  // synthetic tab/number suffix follows it, non-mappable). TARGETS
+  // come from the SCAN (keyed by the child's refId — the generator's
+  // key): the sidecar's targets are navigation facts, not layout.
+  // The PLACEHOLDER (a null-refId child, the generator's own write)
+  // converts like any entry — real italic text, zero targets.
   if (kind === 'referenceTable') {
     const refKind = projection.refKind ?? 'toc';
     const refDepth = typeof projection.refDepth === 'number' ? projection.refDepth : 3;
-    const entries = entriesForKind(projection.scan ?? scanCollections(node), refKind, refDepth);
-    const entryStyle: TextStyle = textStyleOf(base, undefined);
+    const scan = projection.scan ?? scanCollections(node);
+    const scanEntries = entriesForKind(scan, refKind, refDepth);
+    const syntheticStyle: TextStyle = textStyleOf(base, undefined);
     const engineEntries: ReferenceTableBlock['entries'] = [];
     const refRuns: Run[] = [];
     const refDecor: RunDecor[] = [];
     const sidecarEntries: ReferenceSidecarEntry[] = [];
     let refText = '';
+    // Relative cursor into the container (its open token is +1; the
+    // table arm's manual walk, same shape).
+    let cursor = 1;
+    let sawChild = false;
+    // The resolver's per-entry page strings (aligned with the children
+    // below) — undefined when the caller passed none (cold start).
+    const refPagesInput = projection.refPages;
+    // THE NUMBER DISPLAY (M-REFS-9) — hoisted (the sidecar's click
+    // fact reads it outside the row loop).
+    const numberDisplay = projection.numberDisplay ?? 'plain';
+    let entryIndex = 0;
 
-    if (entries.length === 0) {
-      // The placeholder entry — italic muted ink, never navigable.
-      const placeholderStyle: TextStyle = { ...entryStyle, italic: true };
-      const hint = REFERENCE_KINDS[refKind].emptyHint;
-      engineEntries.push({ runs: [{ text: hint, style: placeholderStyle }] });
-      refRuns.push({ text: hint, style: placeholderStyle });
-      refDecor.push({});
-      sidecarEntries.push({ textStart: 0, textLen: hint.length, targets: [] });
-      refText = hint;
-    } else {
-      for (const e of entries) {
-        const textStart = refText.length;
-        engineEntries.push({
-          runs: [{ text: e.text, style: entryStyle }],
-          ...(e.level > 1 ? { indentLeft: (e.level - 1) * LIST_INDENT_PX } : {}),
-        });
-        refRuns.push({ text: e.text, style: entryStyle });
-        refDecor.push({});
-        sidecarEntries.push({ textStart, textLen: e.text.length, targets: e.targets.map((t) => t.pos) });
-        refText += e.text;
+    node.forEach((child) => {
+      const childPos = cursor;
+      cursor += child.nodeSize;
+      if (child.type.name !== 'paragraph') return; // the generator owns paragraphs; anything else waits
+      sawChild = true;
+      const thisEntryIndex = entryIndex;
+      entryIndex += 1;
+
+      // The child's runs: the SHARED prose walk (marks resolve like
+      // body text — bold/color on an entry render everywhere).
+      const paraDef = lookupStyle(
+        typeof child.attrs?.styleId === 'string' && child.attrs.styleId
+          ? child.attrs.styleId
+          : 'normal',
+        definitions
+      );
+      const prose = walkProseRuns(child, 'paragraph', paraDef, base, definitions, dropped);
+      const textStart = refText.length;
+
+      // The entry's targets: the scan join by refId (null = the
+      // placeholder — real text, zero navigation).
+      const refId = typeof child.attrs.refId === 'string' && child.attrs.refId ? child.attrs.refId : null;
+      let targets: number[] = [];
+      if (refId) {
+        const match = scanEntries.find((e) =>
+          refKind === 'index' ? e.text === refId : e.targets[0]?.blockId === refId
+        );
+        targets = match ? match.targets.map((t) => t.pos) : [];
       }
+
+      const indentLeft = Math.max(0, ownIndentLeft(child));
+      // THE LEADER SPAN (M-REFS-8): the generator writes a refLeader-
+      // marked dots span as the row's LAST text node — REAL text with
+      // the USER's marks (resolved through the shared prose walk, so
+      // size/bold/color flow into the runs). Its LENGTH is detected
+      // from the child's own inline nodes (never guessed from text: a
+      // heading may legitimately end in dots) and rides the SIDECAR as
+      // the painter's tag — the engine lays out the seed verbatim (the
+      // block-text contract holds bit-for-bit; the engine NEVER
+      // rewrites run text), and the PAINTER extends the dots with
+      // extra ink at the leader run's own measured style to fill the
+      // gap to the page number.
+      let leaderLen = 0;
+      const lastInline = child.childCount > 0 ? child.child(child.childCount - 1) : null;
+      if (
+        lastInline?.isText &&
+        lastInline.marks.some((m) => m.type.name === 'refLeader')
+      ) {
+        leaderLen = lastInline.text?.length ?? 0;
+      }
+
+      // The engine entry: the row's real runs (text + seed dots) + the
+      // synthetic tab + THE PAGE NUMBER (the two-pass resolver's
+      // string, '' while unresolved — a LAYOUT fact riding the entry
+      // runs by construction, so a re-resolved number re-breaks
+      // exactly this block through the engine's contentHash).
+      // THE NUMBER DISPLAY (M-REFS-9, the presets' number arm): the
+      // container's numberDisplay attr decides the number run's TEXT.
+      // 'plain' (default): the resolved page string. 'none': NO
+      // number at all (the entries stand alone — the entries' own
+      // semantic link marks (M-REFS-11) are the navigation data; the
+      // future exporters map them).
+      const pageStr = numberDisplay === 'none' ? '' : refPagesInput?.[thisEntryIndex] ?? '';
+      engineEntries.push({
+        runs: [
+          ...prose.runs,
+          { text: '\t', style: syntheticStyle },
+          { text: pageStr, style: syntheticStyle },
+        ],
+        ...(indentLeft ? { indentLeft } : {}),
+      });
+      refRuns.push(...prose.runs);
+      refDecor.push(...prose.runDecor);
+      // The synthetic pair rides the canonical text too (the engine's
+      // block text = the entries' concatenation, by construction).
+      refRuns.push({ text: '\t', style: syntheticStyle }, { text: pageStr, style: syntheticStyle });
+      refDecor.push({}, {});
+      refText += prose.text + '\t' + pageStr;
+
+      sidecarEntries.push({
+        relStart: childPos + 1, // the child's text starts at relStart (+1 for its open)
+        leaderLen,
+        textStart,
+        textLen: prose.text.length,
+        targets,
+      });
+    });
+
+    // No children at all (a just-inserted container, pre-generator):
+    // one placeholder line so the block is never a zero-height ghost.
+    if (!sawChild) {
+      engineEntries.push({ runs: [{ text: ' ', style: syntheticStyle }] });
+      refRuns.push({ text: ' ', style: syntheticStyle });
+      refDecor.push({});
+      refText = ' ';
+      sidecarEntries.push({ relStart: 1, leaderLen: 0, textStart: 0, textLen: 1, targets: [] });
     }
 
     const semantic: ReferenceTableBlock = {
       id: blockId,
       kind: 'referenceTable',
       entries: engineEntries,
+    };
+    const sidecar: ReferenceSidecar = {
+      entries: sidecarEntries,
     };
     return {
       gen: cacheGeneration,
@@ -1095,11 +1232,17 @@ function convertNode(
         align: 'left',
         paint: { reference: true },
         runDecor: refDecor,
-        reference: { entries: sidecarEntries },
+        reference: sidecar,
       },
       indentLeft: 0,
-      // The doc-version fact (see Projection.scan) — the reuse test.
+      // The doc-version fact (see Projection.scan) — targets ride the
+      // scan; the children's own edits miss the node cache naturally.
       scan: projection.scan,
+      // The page-strings fact (identity-stable resolver output) —
+      // the reuse test below compares it by reference.
+      refPages: projection.refPages,
+      // The number-display fact (the preset — the reuse test).
+      numberDisplay: projection.numberDisplay,
     };
   }
 
@@ -1258,6 +1401,15 @@ export function pmDocToSemantic(
    * (PaginatedView's relayout) reads it fresh from the document store.
    */
   bandOptions?: { differentFirstPage?: boolean },
+  /**
+   * M-REFS — the RESOLVED PAGE STRINGS (the two-pass fixpoint's input):
+   * per referenceTable blockId, one string per entry (multi-location
+   * index entries join pages "3, 7"). Absent on cold start ('' runs);
+   * the caller (PaginatedView's relayout) passes the resolver's
+   * identity-stable output so the conversion cache stays warm in
+   * steady state.
+   */
+  referencePages?: ReferencePagesMap,
 ): AdapterResult {
   // THE REGISTRY EPOCH (M-STYLES STEP 3): the shell-side mirror of the
   // engine's baseStyleHash. A baseStyle change OR any definition edit
@@ -1334,7 +1486,15 @@ export function pmDocToSemantic(
       // conversion only under the SAME doc scan (a retitle elsewhere
       // keeps the node object but changes the scan object). Every
       // other kind carries undefined on both sides (no-op test).
-      cached.scan === projection.scan
+      cached.scan === projection.scan &&
+      // M-REFS: the page-strings fact — a re-resolved number is a NEW
+      // array (identity-stable when unchanged), so the ToC reconverts
+      // exactly when its numbers moved.
+      cached.refPages === projection.refPages &&
+      // M-REFS-9: the number-display fact (a preset flip changes the
+      // numbers/decor without touching the PM children — the same
+      // sibling-fact pattern as the scan/pages facts).
+      cached.numberDisplay === projection.numberDisplay
     ) {
       return cached;
     }
@@ -1596,6 +1756,7 @@ export function pmDocToSemantic(
       // (the doc-version fact — the conversion cache reuses only under
       // the same scan object; a retitle elsewhere reconverts). The
       // sidecar (entry slices → PM targets) rides the AdapterBlock.
+      // The page strings ride the resolver's identity-stable map.
       push(
         projected(
           node,
@@ -1605,6 +1766,8 @@ export function pmDocToSemantic(
             refKind: node.attrs?.kind === 'figures' || node.attrs?.kind === 'index' ? node.attrs.kind : 'toc',
             refDepth: typeof node.attrs?.depth === 'number' ? node.attrs.depth : 3,
             scan: refScan,
+            refPages: referencePages?.get(String(node.attrs?.blockId ?? '')),
+            numberDisplay: node.attrs?.numberDisplay === 'none' ? 'none' : 'plain',
           },
           offset,
         ),

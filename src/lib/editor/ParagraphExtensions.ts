@@ -222,6 +222,22 @@ const styleIdAttribute = (fallback: string) => ({
   },
 });
 
+/**
+ * M-REFS — the ENTRY ID: a paragraph inside a referenceTable container
+ * carries its scan entry's reconciliation key (the target's stable
+ * blockId; the term itself for index entries; null = the placeholder).
+ * The generator (lib/references/generator.ts) matches children by it —
+ * an unchanged key is NEVER rewritten, so the user's formatting on the
+ * entry survives every refresh. Pure model identity: no renderHTML,
+ * never DOM ink, never clipboard noise (the attr round-trips null).
+ */
+const refIdAttribute = {
+  refId: {
+    default: null,
+    keepOnSplit: false,
+  },
+};
+
 export const ParagraphWithExtras = Paragraph.extend({
   addAttributes() {
     return {
@@ -233,6 +249,7 @@ export const ParagraphWithExtras = Paragraph.extend({
       ...spacingAttributes,
       ...tabStopsAttribute,
       ...styleIdAttribute('normal'),
+      ...refIdAttribute,
     };
   },
 });

@@ -28,9 +28,14 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 export type ReferenceKind = 'toc' | 'figures' | 'index';
 
 /** One click target. `pos` is the FINAL caret position for navigation
- * (block interiors are pos+1; index marks sit AT the span start). */
+ * (block interiors are pos+1; index marks sit AT the span start).
+ * `blockId` is the target block's stable id — the GENERATOR's
+ * reconciliation key (an entry paragraph carries it as `refId`, so
+ * a retitled heading UPDATES its entry in place, keeping the user's
+ * formatting, instead of rebuilding the whole table). */
 export interface ReferenceTarget {
   pos: number;
+  blockId: string;
 }
 
 /** One collection entry, kind-agnostic — the generic system's unit:
@@ -86,6 +91,18 @@ const BAND_KINDS = new Set(['headerBlock', 'footerBlock']);
  * Pure: reads the doc, allocates the entries. No editor, no store, no
  * DOM (the adapter contract — L1's shape at the scan layer). */
 
+/** The containing block's stable id for a position (an index span
+ * lives inside its paragraph — the paragraph's blockId is the
+ * generator's reconciliation key for the entry it feeds). */
+function blockIdOf(doc: PMNode, pos: number): string {
+  const $pos = doc.resolve(pos);
+  for (let d = $pos.depth; d >= 1; d--) {
+    const attrs = $pos.node(d).attrs as { blockId?: unknown };
+    if (typeof attrs.blockId === 'string' && attrs.blockId) return attrs.blockId;
+  }
+  return '';
+}
+
 const scanCache = new WeakMap<PMNode, CollectionScan>();
 
 /** The caption-bond ruling: a figure is a BLOCK image whose NEXT
@@ -133,10 +150,15 @@ function scanIndexSpans(doc: PMNode): RefCollectionEntry[] {
     if (!term) continue; // whitespace-only marks are never entries
     let entry = byTerm.get(term);
     if (!entry) {
-      entry = { text: term, level: 0, targets: [] };
+      // LEVEL CONVENTION (loop-proofing, pinned by the app-flow tests):
+      // EVERY entry carries a level ≥ 1 — figures/index rows are base
+      // level 1 (the generator's (level−1)·32 indent math and its
+      // read-back agree by construction; a level-0 entry would
+      // re-derive level 1 on read-back and loop the generator).
+      entry = { text: term, level: 1, targets: [] };
       byTerm.set(term, entry);
     }
-    entry.targets.push({ pos: span.from });
+    entry.targets.push({ pos: span.from, blockId: blockIdOf(doc, span.from) });
   }
   return [...byTerm.values()].sort((a, b) =>
     a.text.localeCompare(b.text, undefined, { sensitivity: 'base' })
@@ -151,7 +173,11 @@ function scanTocEntries(doc: PMNode): RefCollectionEntry[] {
     if (BAND_KINDS.has(node.type.name)) return false;
     if (node.type.name !== 'heading') return;
     const level = typeof node.attrs.level === 'number' ? node.attrs.level : 1;
-    entries.push({ text: node.textContent, level, targets: [{ pos: pos + 1 }] });
+    entries.push({
+      text: node.textContent,
+      level,
+      targets: [{ pos: pos + 1, blockId: String(node.attrs?.blockId ?? '') }],
+    });
     return;
   });
   return entries;
@@ -170,7 +196,13 @@ function scanFigureEntries(doc: PMNode): RefCollectionEntry[] {
     if (!isCaptionParagraph(next?.node)) continue;
     const text = next.node.textContent.trim();
     if (!text) continue; // an empty caption is not yet a figure entry
-    entries.push({ text, level: 0, targets: [{ pos: next.pos + 1 }] });
+    entries.push({
+      text,
+      // Base level 1 — the figures rows never indent (the convention
+      // comment above; level 0 is banned).
+      level: 1,
+      targets: [{ pos: next.pos + 1, blockId: String(next.node.attrs?.blockId ?? '') }],
+    });
   }
   return entries;
 }
@@ -199,4 +231,13 @@ export function entriesForKind(
 ): RefCollectionEntry[] {
   const entries = scan[kind];
   return kind === 'toc' ? entries.filter((e) => e.level <= depth) : entries;
+}
+
+/** The GENERATOR's per-entry reconciliation key (an entry paragraph's
+ * `refId`): the target's stable blockId (toc/figures) or the term
+ * itself (index — terms are unique by the grouping law). An entry
+ * whose key survives a doc edit is UPDATED IN PLACE, never rebuilt —
+ * the user's formatting lives on (the GDocs ruling). */
+export function refIdOf(entry: RefCollectionEntry, kind: ReferenceKind): string {
+  return kind === 'index' ? entry.text : entry.targets[0]?.blockId ?? '';
 }

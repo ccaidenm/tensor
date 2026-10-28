@@ -1,153 +1,93 @@
-import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
+import { NodeViewContent, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
+import { useEditorState } from '@tiptap/react';
 import { useReferenceStore } from '@/lib/references/store';
 import { navigateToReferenceTarget } from '@/lib/references/navigate';
-import { REFERENCE_KINDS, entriesForKind, scanCollections } from '@/lib/references/scan';
-import type { ReferenceKind } from '@/lib/references/scan';
+import { entriesForKind, refIdOf, scanCollections, type ReferenceKind } from '@/lib/references/scan';
 
 /**
- * M-REFS — the reference-table node view: the visible rendering in
- * PAGELESS mode, and the accessibility mirror in paginated (renders
- * invisibly inside the hidden input view — the M5 law: the clickable
- * list lands in the a11y tree exactly like an <img alt>).
+ * M-REFS — the reference-table node view (RESTORED round 7, the user's
+ * ruling: the container's look is the React surface's — "I don't wanna
+ * change the rendering of the text"): the bordered field frame around
+ * REAL content (NodeViewContent renders the generator's row paragraphs
+ * — plain body text, natively selectable, the dots span included).
  *
- * THE CLICK RULING (Word-style, locked with the user): a PLAIN mouse
- * click on an entry selects the BLOCK (NodeSelection — deletable, one
- * Delete away); Ctrl/Cmd+click NAVIGATES to the entry's target. The
- * ONE keyboard carve-out (the accessibility gate): a focused entry's
- * Enter/Space NAVIGATES — a keyboard user focusing an entry wants to
- * GO, and block selection is already reachable via the editor's own
- * node-selection paths. Location ordinals (index terms with multiple
- * occurrences) ALWAYS navigate — that is their only purpose. Pageless
- * shows NO page numbers (no pages exist — Word's web-view convention;
- * the paginated engine arm right-aligns numbers at the shared text
- * edge).
+ * THE BORDER is selection-driven (the user's GDocs ruling): the gray
+ * box shows only while the user is IN the table (NodeSelection ON it
+ * or the caret strictly inside its content); transparent at rest — no
+ * layout shift. THE ONE custom arm: Ctrl/Cmd+click NAVIGATES (the
+ * clicked row's refId maps through the scan to its target); plain
+ * clicks are NATIVE text behavior — a caret in entry text.
  *
- * AUTO-UPDATE: entries are recomputed from the LIVE doc at render time
- * (the memoized scan — cheap), and the reference store's version
- * (debounced post-transaction bump) re-renders this view when the
- * document changes. Nothing is stored on the node — the empty state
- * is the document's truth, never a lie.
+ * The store's version bumps re-render this view on doc changes (the
+ * debounced seam); the CONTENT itself is PM-synced (NodeViewContent's
+ * contentDOM — PM's own DOM management).
  */
 export function ReferenceTableNodeView({ node, editor, selected, getPos }: ReactNodeViewProps) {
   useReferenceStore((s) => s.version);
   const { kind, depth } = node.attrs as { kind: ReferenceKind; depth: number };
-  const meta = REFERENCE_KINDS[kind];
   const entries = entriesForKind(scanCollections(editor.state.doc), kind, depth);
+  // THE FIELD BORDER'S SELECTION FACT: NodeSelection ON the block, or
+  // the caret strictly inside its content.
+  const bordered = useEditorState({
+    editor,
+    selector: ({ editor: e }) => {
+      const selNode = (e.state.selection as unknown as { node?: { type?: { name?: string } } }).node;
+      if (selNode?.type?.name === 'referenceTable') return true;
+      const at = typeof getPos === 'function' ? getPos() : undefined;
+      if (typeof at !== 'number') return false;
+      const self = e.state.doc.nodeAt(at);
+      if (!self) return false;
+      const end = at + self.nodeSize;
+      const { from, to } = e.state.selection;
+      return from > at && to < end;
+    },
+  });
 
-  /** The ruling's mouse arm: plain click selects the block;
-   * Ctrl/Cmd+click navigates. Keyboard activation is handled at
-   * keydown (below) — a focused entry's Enter/Space navigates, and
-   * preventDefault suppresses the button's synthetic click so the
-   * action never fires twice. */
-  function onTermClick(event: React.MouseEvent, pos: number): void {
-    if (event.ctrlKey || event.metaKey) {
+  /** Ctrl/Cmd+click → navigate the clicked row's target (the refId is
+   *  the scan join key); plain clicks fall through to native text. */
+  function onClick(event: React.MouseEvent) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const target = (() => {
+      try {
+        const dom = event.target as Node;
+        const pos = editor.view.posAtDOM(dom, 0);
+        const $pos = editor.state.doc.resolve(pos);
+        for (let d = $pos.depth; d >= 1; d--) {
+          const ancestor = $pos.node(d);
+          if (ancestor.type.name !== 'paragraph') continue;
+          const refId = typeof ancestor.attrs.refId === 'string' ? ancestor.attrs.refId : null;
+          if (!refId) return null; // the placeholder — never navigable
+          const row = entries.find((e) => refIdOf(e, kind) === refId);
+          return row?.targets[0] ?? null;
+        }
+        return null;
+      } catch {
+        return null; // a click in the frame chrome — no row
+      }
+    })();
+    if (target) {
       event.preventDefault();
       event.stopPropagation();
-      navigateToReferenceTarget(editor, pos);
-      return;
+      navigateToReferenceTarget(editor, target.pos);
     }
-    const at = getPos();
-    if (typeof at === 'number') {
-      event.preventDefault();
-      editor.commands.setNodeSelection(at);
-    }
-  }
-
-  /** The ruling's keyboard arm (the accessibility gate): a keyboard
-   * user focusing an entry wants to GO — Enter/Space navigates. Block
-   * selection stays reachable via the editor's own node-selection
-   * paths (arrow keys, Escape-then-Delete on the selected node). */
-  function onTermKeyDown(event: React.KeyboardEvent, pos: number): void {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    navigateToReferenceTarget(editor, pos);
   }
 
   return (
     <NodeViewWrapper
       data-tensor-ref-table-view="true"
       data-kind={kind}
-      data-count={entries.length}
-      // The GDocs field affordance (the user's ask): a light gray
-      // border always shows the block's extent; selection strengthens
-      // it (ring) — the block reads as a unit at rest AND in hand.
-      className={`tensor-ref-table not-prose my-2 select-none rounded-md border border-border/70 px-3 py-2 ${
-        selected ? 'ring-2 ring-primary/40' : ''
-      }`}
+      data-bordered={bordered ? 'true' : 'false'}
+      // The GDocs field affordance (selection-driven): the gray border
+      // shows only while the user is IN the table; transparent at rest
+      // (no layout shift).
+      className={`tensor-ref-table not-prose my-2 rounded-md border px-3 py-2 ${
+        bordered ? 'border-border/70' : 'border-transparent'
+      } ${selected ? 'ring-2 ring-primary/40' : ''}`}
+      onClick={onClick}
     >
-      <div>
-        {/* The block's own title — display-only ink, never content
-            (the document's headings are the content; this label is how
-            the block names itself, per the kind registry). */}
-        <p className="mb-1 text-sm font-semibold text-muted-foreground" aria-hidden="true">
-          {meta.title}
-        </p>
-        {entries.length === 0 ? (
-          <p
-            data-testid="reference-table-empty"
-            className="py-2 text-sm italic text-muted-foreground/70"
-          >
-            {meta.emptyHint}
-          </p>
-        ) : (
-          <ul className="m-0 list-none p-0" role="list" aria-label={meta.title}>
-            {entries.map((entry, i) => (
-              <li
-                key={`${entry.text}-${i}`}
-                role="listitem"
-                aria-label={entry.text}
-                className="text-sm"
-              >
-                {entry.targets.length === 1 ? (
-                  <button
-                    type="button"
-                    data-testid={`reference-entry-${i}`}
-                    className="block w-full cursor-pointer rounded-sm px-1 text-left hover:bg-accent/50 focus-visible:bg-accent focus-visible:outline-none"
-                    style={{ paddingLeft: `${(entry.level - 1) * 16 + 4}px` }}
-                    onClick={(e) => onTermClick(e, entry.targets[0]!.pos)}
-                    onKeyDown={(e) => onTermKeyDown(e, entry.targets[0]!.pos)}
-                    title={`${entry.text} — Ctrl+click to go`}
-                  >
-                    {entry.text}
-                  </button>
-                ) : (
-                  // MULTI-LOCATION (index): the term names the row;
-                  // EACH occurrence ordinal is its own navigation
-                  // segment (the paginated page numbers' pageless
-                  // twin — the acceptance criterion's "multiple
-                  // locations", individually clickable).
-                  <div
-                    className="flex items-baseline gap-1 px-1"
-                    style={{ paddingLeft: `${(entry.level - 1) * 16 + 4}px` }}
-                  >
-                    <span className="min-w-0 break-words">{entry.text}</span>
-                    <span aria-hidden="true" className="text-muted-foreground/60">
-                      ·
-                    </span>
-                    {entry.targets.map((target, j) => (
-                      <button
-                        key={j}
-                        type="button"
-                        data-testid={`reference-entry-${i}-${j}`}
-                        className="cursor-pointer rounded-sm px-0.5 text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:bg-accent focus-visible:outline-none"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          navigateToReferenceTarget(editor, target.pos);
-                        }}
-                        aria-label={`${entry.text}, occurrence ${j + 1}`}
-                        title={`${entry.text}, occurrence ${j + 1}`}
-                      >
-                        {j + 1}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {/* The rows are REAL content — PM-synced DOM inside the frame:
+          plain body text, natively selectable (the dots included). */}
+      <NodeViewContent className="tensor-ref-table-entries" />
     </NodeViewWrapper>
   );
 }

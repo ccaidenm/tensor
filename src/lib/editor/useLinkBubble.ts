@@ -34,6 +34,13 @@ function findLinkAt(state: EditorState, pos: number) {
   const marks = state.doc.resolve(pos).marks();
   const linkMark = marks.find((m) => m.type.name === 'link');
   if (!linkMark) return null;
+  // M-REFS-10: the reference-table rows' SEMANTIC links (the
+  // `tensor-ref:` scheme — the invisible always-on hyperlink to the
+  // entry's target) are NOT editable links: the bubble must never
+  // open for them (the row's own click/nav machinery owns them).
+  if (typeof linkMark.attrs.href === 'string' && linkMark.attrs.href.startsWith('tensor-ref:')) {
+    return null;
+  }
 
   let start = pos;
   let end = pos;
