@@ -16,6 +16,8 @@ import { navigateToReferenceTarget } from '@/lib/references/navigate';
 import { EquationTooTallError } from '@tensor-editor/engine';
 import { getRealMetrics, fontString } from '@/lib/paginated/metrics';
 import { assertContiguity } from '@/lib/paginated/paint';
+import { resolveReferencePages, type ReferencePagesMap } from '@/lib/paginated/referencePages';
+import { computeLeaderCounts, adoptedLeaderCount } from '@/lib/paginated/referenceLeaders';
 import {
   blockOffsetToPmPos,
   blockRangeAround,
@@ -194,6 +196,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     blinkTimerRef.current = setTimeout(() => setCaretBlinking(true), 500);
   }, []);
   const [selRects, setSelRects] = useState<PaintedRect[]>([]);
+  /** M-REFS: the reference tables whose bounds carry the FIELD BORDER
+   *  right now — the selection lives inside them (caret) or ON them
+   *  (NodeSelection). Selection-driven chrome, the muted-band
+   *  precedent; computed in the selection projection. */
+  const [refBorders, setRefBorders] = useState<Set<string>>(() => new Set());
+  const refBordersRef = useRef<Set<string>>(new Set());
   const [toolbarPos, setToolbarPos] = useState<FloatingToolbarPosition | null>(null);
   // M-IMAGES-1: the selected image's placed rect + model dims.
   // M-IMAGES-1.5: corner radius per image blockId (paint-only) —
@@ -248,6 +256,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // Handlers below run inside PM's dispatch (outside React's render
   // cycle) — they read the fallback flag through this ref, not state.
   const adapterErrorRef = useRef<Error | null>(null);
+  /** M-REFS: the resolver's warm map (the two-pass fixpoint's state) —
+   *  identity-stable per the resolver; null on cold start/fallback. */
+  const refPagesRef = useRef<ReferencePagesMap | null>(null);
 
   const layoutRef = useRef<LayoutState | null>(null);
   const fontsReadyRef = useRef(false);
@@ -603,6 +614,26 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           );
     if (isInlineImageNodeSelection || isCellSelection || isReferenceTableNodeSelection) setCaret(null);
     setSelRects(rects);
+    // M-REFS: the FIELD BORDER set — reference blocks whose bounds
+    // hold the selection (caret strictly inside, or a NodeSelection ON
+    // the container). Ancestry-walk (the selectionInReferenceTable
+    // helper's shape), keyed by the node's stable blockId.
+    const borders = new Set<string>();
+    type RefNodeLike = { type?: { name?: string }; attrs?: { blockId?: string } } | null | undefined;
+    const addRef = (node: RefNodeLike) => {
+      if (node?.type?.name === 'referenceTable') {
+        const id = node.attrs?.blockId;
+        if (id) borders.add(id);
+      }
+    };
+    addRef((selection as unknown as { node?: RefNodeLike }).node);
+    for (let d = selection.$from.depth; d > 0; d--) addRef(selection.$from.node(d));
+    for (let d = selection.$to.depth; d > 0; d--) addRef(selection.$to.node(d));
+    const prevBorders = refBordersRef.current;
+    if (prevBorders.size !== borders.size || [...borders].some((id) => !prevBorders.has(id))) {
+      refBordersRef.current = borders;
+      setRefBorders(borders);
+    }
     const imageNode = isBlockImageNodeSelection
       ? (selection as unknown as { node: { attrs: { blockId?: string } } }).node
       : null;
@@ -745,25 +776,53 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (import.meta.env.DEV) reportUnresolvedRefs(editor);
     try {
       const __t0 = performance.now();
-      const adapted = pmDocToSemantic(editor.state.doc, baseStyle, {
+      // M-REFS — THE TWO-PASS FIXPOINT: pass 1 lays out with the WARM
+      // numbers (the resolver's identity-stable map, null on cold
+      // start → '' runs); the resolver reads pass 1's placement and,
+      // iff any entry's number moved, pass 2 re-converts + re-lays-out
+      // with the fresh map. Steady state: the resolver returns the
+      // SAME map → pass 2 skipped, conversion caches stay warm. The
+      // capped-at-2 ruling: numbers are read off pass 1; a number's
+      // own width change re-resolves on the NEXT relayout (one-pass
+      // lag in the pathological oscillation case, by ruling).
+      const refPagesIn = refPagesRef.current;
+      const pass1 = pmDocToSemantic(editor.state.doc, baseStyle, {
         definitions: registryNow.merged,
         epoch: registryNow.epoch,
       }, {
         // M-HEADER-FOOTER-2: per-call band options (L4) — the engine
         // owns the band geometry from here.
         differentFirstPage: hfSettings?.differentFirstPage ?? false,
-      });
-      const result = engineRef.current!.layout(
+      }, refPagesIn ?? undefined);
+      const result1 = engineRef.current!.layout(
         // M-HEADER-FOOTER-2: the View ▸ Show Headers & Footers toggle is
         // DISPLAY-ONLY but rides the LAYOUT (the captions precedent is
         // ink-only; a hidden band must also GIVE BACK its reservation —
         // Word collapses the area). Stripping doc.bands pre-layout does
         // both: no band lines, body reclaimed. Per-call read (L4).
         useConfigStore.getState().config.editor.showHeadersFooters === false
-          ? { ...adapted.doc, bands: undefined }
-          : adapted.doc,
+          ? { ...pass1.doc, bands: undefined }
+          : pass1.doc,
         toLayoutOptions(pageSetupNow),
       );
+      const refPagesOut = resolveReferencePages(pass1.blocks, result1.lines, refPagesIn);
+      let adapted = pass1;
+      let result = result1;
+      if (refPagesOut && refPagesOut !== refPagesIn) {
+        refPagesRef.current = refPagesOut;
+        adapted = pmDocToSemantic(editor.state.doc, baseStyle, {
+          definitions: registryNow.merged,
+          epoch: registryNow.epoch,
+        }, {
+          differentFirstPage: hfSettings?.differentFirstPage ?? false,
+        }, refPagesOut);
+        result = engineRef.current!.layout(
+          useConfigStore.getState().config.editor.showHeadersFooters === false
+            ? { ...adapted.doc, bands: undefined }
+            : adapted.doc,
+          toLayoutOptions(pageSetupNow),
+        );
+      }
       // Permanent benchmark seam: total relayout time, readable
       // by the self-driving bench and the coalescing test. The
       // engine's lastStats ride along (M-STYLES acceptance receipt —
@@ -780,6 +839,29 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         lastStats: { ...engineRef.current!.lastStats },
       });
       assertContiguity(result);
+      // M-REFS-10 — THE LEADER ADOPTION (the "entire leading is
+      // selectable" ruling): measure the resolved dot counts off the
+      // FRESH layout; when any container's model span length differs,
+      // schedule the generator's FORCED pass (debounced — pagination
+      // churn coalesces) so the spans adopt the full count and the
+      // ENTIRE leader becomes real, selectable text. The fixpoint:
+      // after adoption the fill = 0, the counts recompute equal, no
+      // further writes.
+      computeLeaderCounts(adapted.blocks, result.lines, metricsRef.current!);
+      scheduleLeaderAdoption();
+      // M-REFS-7 — the relayout leg of the debug seam: one entry per
+      // layout call (version + walk stats). With the BlockCanvas leg,
+      // the user's next repro discriminates: layouts running + no
+      // canvas entries = the render path is dead; no layouts = the
+      // update pipeline is dead (the frozen-relayout ghost theory).
+      const dbgLayout = (globalThis as { __tensorPaintDebug?: { log: unknown[] } }).__tensorPaintDebug;
+      if (dbgLayout) {
+        dbgLayout.log.push({
+          relayout: result.version,
+          walked: engineRef.current!.lastStats.blocksWalked,
+          spliced: engineRef.current!.lastStats.blocksSpliced,
+        });
+      }
       const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch, bandBlockIds: adapted.bandBlockIds };
       layoutRef.current = next;
       // No flushSync — React batches setLayout calls
@@ -853,12 +935,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // projections (caret/selection/toolbar/bubble) resolve THAT page.
     if (hit.band != null) bandPageRef.current = hit.pageIndex;
     const block = current.blocks.find((b) => b.id === hit.blockId);
-    // M-REFS: a reference table drags/extends AS A UNIT — its entries
-    // are a projection (no PM positions inside the atom), so any hit
-    // within the block resolves to the position just after it. A drag
-    // across the table therefore selects the whole block, never a
-    // phantom caret inside projected text.
-    if (block?.reference) return block.from + 1;
+    // M-REFS: entry hits map to TRUE positions inside the container's
+    // real paragraphs (the sidecar bridge in blockOffsetToPmPos — the
+    // cell-map precedent); no unit mapping, no interception.
     return block ? blockOffsetToPmPos(block, hit.offset) : null;
   }
 
@@ -1094,16 +1173,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       }
     }
 
-    // M-REFS — the reference-table ENTRY click (the locked ruling): a
-    // plain click SELECTS the block (NodeSelection — deletable, Delete
-    // works natively); Ctrl/Cmd+click NAVIGATES the hit entry's target
-    // (the sidecar's offset→entry map; the caret-follow scroll owns
-    // the reveal — ScrollGuardExtension routes the navigation write).
-    // Runs BEFORE the generic text hit: an entry line is an
-    // interaction surface, not a caret position. Right-clicks take the
-    // same branch (the selection is still set — the context menu then
-    // opens on it).
-    if (stack) {
+    // M-REFS — THE CONTAINER-MODEL CLICK: entries are REAL text — a
+    // plain click/caret/drag flows PM's NATIVE path (the generic hit
+    // resolves to true positions INSIDE entry paragraphs through the
+    // sidecar bridge; nothing is intercepted). The ONE custom arm:
+    // Ctrl/Cmd+click ANYWHERE in a row navigates (M-REFS-11: the rows
+    // are ALWAYS hyperlinking invisibly — the semantic link mark is
+    // the model data the future exporters map; the editor's follow is
+    // the modifier click, Word's field convention).
+    if (stack && (e.ctrlKey || e.metaKey)) {
       const rz = useConfigStore.getState().config.editor.zoomLevel / 100;
       const rs = stack.getBoundingClientRect();
       const refHit = hitTest(
@@ -1116,24 +1194,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       );
       const refBlock = refHit ? layout.blocks.find((b) => b.id === refHit.blockId) : undefined;
       if (refBlock?.reference) {
-        e.preventDefault();
-        if (e.ctrlKey || e.metaKey) {
-          const entry = referenceEntryAt(refBlock.reference, refHit!.offset);
-          // The placeholder carries ZERO targets — visible, never
-          // navigable (an honest no-op, not a silent caret jump).
-          if (entry && entry.targets.length > 0) {
-            navigateToReferenceTarget(editor, entry.targets[0]!);
-          }
-        } else {
-          // The SELECTION ask (GDocs): a plain click selects the block
-          // AND arms a drag — holding and moving extends a text
-          // selection from the block's start, so dragging across the
-          // table selects it AS A UNIT with the content around it (a
-          // release without moving keeps the NodeSelection).
-          editor.commands.setNodeSelection(refBlock.from);
-          startDrag(refBlock.from);
+        const entry = referenceEntryAt(refBlock.reference, refHit!.offset);
+        // The placeholder carries ZERO targets — visible, never
+        // navigable (an honest no-op, not a silent caret jump).
+        if (entry && entry.targets.length > 0) {
+          e.preventDefault();
+          navigateToReferenceTarget(editor, entry.targets[0]!);
+          return;
         }
-        return;
       }
     }
 
@@ -1336,6 +1404,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
+      if (adoptionTimerRef.current !== null) {
+        clearTimeout(adoptionTimerRef.current);
+        adoptionTimerRef.current = null;
+      }
     };
   }, [editor]);
 
@@ -1495,6 +1567,56 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const SYNC_BUDGET_PER_FRAME = Infinity;
   const syncBudgetRef = useRef({ count: 0, frameStart: 0 });
   const rafRef = useRef<number | null>(null);
+  /** M-REFS-10 — THE ADOPTION NUDGE: when the measured leader counts
+   *  differ from the model's spans, dispatch the generator's FORCED
+   *  pass (debounced — pagination churn coalesces into one write).
+   *  The diff walk reads the PM doc's refLeader spans per row and
+   *  compares with the counts store; equal ⇒ no dispatch (the
+   *  fixpoint). Debounce 300ms: faster typing re-measures before the
+   *  write lands (one adoption per settle, the search-store rhythm). */
+  const adoptionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLeaderAdoption = useCallback(() => {
+    const ed = editor;
+    if (!ed || !fontsReadyRef.current) return;
+    if (adoptionTimerRef.current) clearTimeout(adoptionTimerRef.current);
+    adoptionTimerRef.current = setTimeout(() => {
+      adoptionTimerRef.current = null;
+      if (adapterErrorRef.current) return;
+      // A DRAG holds raw PM positions (startDrag's anchor) — an
+      // adoption rewrite would shift them mid-flight. Reschedule;
+      // the next relayout re-measures after the drag settles.
+      if (draggingRef.current) {
+        scheduleLeaderAdoption();
+        return;
+      }
+      let diff = false;
+      ed.state.doc.descendants((node) => {
+        if (diff || node.type.name !== 'referenceTable') return !diff;
+        const blockId = String(node.attrs.blockId ?? '');
+        let i = 0;
+        node.forEach((child) => {
+          if (diff) return;
+          if (child.type.name !== 'paragraph') return;
+          if (node.attrs.leaders === false) return;
+          const adopted = adoptedLeaderCount(blockId, i);
+          if (adopted == null) return; // no measurement — nothing to adopt
+          let spanLen = 0;
+          child.forEach((inline) => {
+            if (inline.isText && inline.marks.some((m) => m.type.name === 'refLeader')) {
+              spanLen += inline.text?.length ?? 0;
+            }
+          });
+          if (spanLen !== adopted) diff = true;
+          i += 1;
+        });
+        return false;
+      });
+      if (diff) {
+        ed.view.dispatch(ed.state.tr.setMeta('refRefresh', true));
+      }
+    }, 300);
+  }, [editor]);
+
   const scheduleCoalescedRelayout = useCallback(() => {
     if (rafRef.current !== null) return; // already scheduled — coalesce
     const raf =
@@ -2021,6 +2143,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                         resolveBitmap={resolveMediaBitmap}
                         bitmapFailed={getBitmapFailed}
                         bitmapEpoch={bitmapEpoch}
+                        referenceBorder={refBorders.has(group.blockId)}
+                        referenceEntries={blocks.find((b) => b.id === group.blockId)?.reference?.entries}
                       />
                     );
                   })}

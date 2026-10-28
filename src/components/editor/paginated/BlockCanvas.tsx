@@ -62,6 +62,21 @@ interface BlockCanvasProps {
    * styleEpoch precedent).
    */
   muted?: boolean;
+  /**
+   * M-REFS: the reference-table FIELD BORDER's selection fact — true
+   * only while the caret sits inside this container (PaginatedView
+   * computes it per selection projection). Rides boxKey: entering/
+   * leaving the table repaints the block once, the mute precedent.
+   */
+  referenceBorder?: boolean;
+  /**
+   * M-REFS-8: the container's sidecar entries (leaderLen per row) —
+   * the PAINTER's leader tag: gap-filling dots drawn after each
+   * row's refLeader span at the span's own measured style. Rides
+   * boxKey via the paint hint's identity (the sidecar array changes
+   * ⇒ the conversion changed ⇒ new lines anyway).
+   */
+  referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
 }
 
 /**
@@ -79,7 +94,7 @@ interface BlockCanvasProps {
  * their pixels. Falls back to full repaint on canvas resize, first-line
  * edits, or style changes (the fallback cost = the old behavior).
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -95,20 +110,43 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
 
     const decorKey = runDecor.map((d) => `${d.color}|${d.highlight}|${d.underline}|${d.strike}`).join(';');
     const paintKey = paint ? JSON.stringify(paint) : '';
-    const boxKey = `${left}|${top}|${width}|${align}|${decorKey}|${npc === true ? 'npc' : ''}|${paintKey}|ep${styleEpoch}|cap${showCaptions ? '1' : '0'}|bmp${bitmapEpoch}|muted${muted ? '1' : '0'}`;
+    // M-REFS HARDENING (the stale-ink class-killer): the key carries a
+    // CONTENT FINGERPRINT of the line set (count + first/last ranges),
+    // not just object references — a line-set change forces the
+    // repaint even when the engine handed back reused frozen
+    // references, so the bitmap can never outlive the geometry it
+    // was painted from (the reported "text gone from the model but
+    // still painted / condensed into one line" class).
+    const lineFingerprint = `${lines.length}:${lines[0]?.rangeStart ?? 0}-${lines[lines.length - 1]?.rangeEnd ?? 0}`;
+    const boxKey = `${left}|${top}|${width}|${height}|${align}|${decorKey}|${npc === true ? 'npc' : ''}|${paintKey}|ep${styleEpoch}|cap${showCaptions ? '1' : '0'}|bmp${bitmapEpoch}|muted${muted ? '1' : '0'}|ln${lineFingerprint}|ref${referenceBorder ? '1' : '0'}`;
     // boxKey carries the registry epoch: ANY definition edit breaks
     // the boxKey comparison and forces the repaint below — even when
     // the engine spliced (same LineBox references, blocksWalked = 0)
-    // and only paint-tier facts (decor color) changed.
+    // and only paint-tier facts (decor color) changed. `height` rides
+    // the key too (the full extent — a shrunk block with otherwise
+    // identical facts must repaint or the old bitmap squishes behind
+    // the smaller CSS size, the reported "2 lines condensed into 1").
     const unchanged =
       prevBoxRef.current === boxKey &&
       prevTextRef.current === text &&
       prevLinesRef.current !== null &&
       prevLinesRef.current.length === lines.length &&
       lines.every((l, i) => l === prevLinesRef.current![i]);
+    // M-REFS-7 — THE GHOST DEBUG SEAM (definitive): logs EVERY effect
+    // run INCLUDING the unchanged SKIPs (round 6's log missed skips —
+    // an empty log with live typing means the EFFECT isn't running at
+    // all, i.e. the relayout pipeline is dead, which is the ghost).
+    const dbgAll = (globalThis as { __tensorPaintDebug?: { log: unknown[] } }).__tensorPaintDebug;
+    if (dbgAll) {
+      dbgAll.log.push({
+        blockId: lines[0].blockId,
+        decision: unchanged ? 'SKIP' : 'PAINT',
+        textLen: text.length,
+        nLines: lines.length,
+        height,
+      });
+    }
     if (unchanged) return;
-
-    // Benchmark seams: paint execution time + px² rasterized.
     const __w = globalThis as {
       __benchPaints?: { paints: Array<{ at: number; blockId: string; px2?: number }> };
     };
@@ -140,24 +178,49 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (damageFrom > 0) {
-      // Damage-only: clear from the first changed line's top to the
-      // canvas bottom, redraw those lines (same coordinate space).
-      const damageTop = lines[damageFrom].rect.y - first.rect.y;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, damageTop, width, height - damageTop);
-      paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted });
-      // Receipt: px² actually rasterized (cleared + repainted region).
-      __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
-    } else {
-      // Full repaint (canvas resize, edit at line 0, style change, or
-      // initial mount) — same as the previous behavior.
-      canvas.width = newW;
-      canvas.height = newH;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted });
-      // Receipt: full canvas.
-      __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
+    // (The PAINT decisions log above; the boxKey rode the round-6 log.)
+
+    try {
+      if (damageFrom > 0) {
+        // Damage-only: clear from the first changed line's top to the
+        // canvas bottom, redraw those lines (same coordinate space).
+        const damageTop = lines[damageFrom].rect.y - first.rect.y;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, damageTop, width, height - damageTop);
+        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+        // Receipt: px² actually rasterized (cleared + repainted region).
+        __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
+      } else {
+        // Full repaint (canvas resize, edit at line 0, style change, or
+        // initial mount) — same as the previous behavior.
+        canvas.width = newW;
+        canvas.height = newH;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+        // Receipt: full canvas.
+        __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
+      }
+    } catch (err) {
+      // THE STALE-INK GUARD (the reported ghost class): a thrown paint
+      // must NEVER leave a half-cleared bitmap behind refs that make
+      // the next render SKIP — that is exactly "the model moved on but
+      // the canvas still shows the old text until the next keystroke".
+      // One full-repaint retry IN THE SAME FRAME (a transient resolver
+      // race is the plausible cause); if even that fails, reset the
+      // refs so the next render repaints fully. Loud either way.
+      console.error('[BlockCanvas] paint failed — retrying full repaint', err);
+      try {
+        canvas.width = newW;
+        canvas.height = newH;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+      } catch (retryErr) {
+        console.error('[BlockCanvas] repaint retry failed — full repaint armed for next render', retryErr);
+        prevLinesRef.current = null;
+        prevTextRef.current = '';
+        prevBoxRef.current = '';
+        return;
+      }
     }
 
     prevLinesRef.current = lines;
@@ -165,7 +228,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     prevBoxRef.current = boxKey;
   // showCaptions + wrapWidth + bitmapEpoch ride the repaint KEY —
   // each flips the paint when it changes (the arrival repaint).
-  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted]);
+  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries]);
 
   return (
     <canvas

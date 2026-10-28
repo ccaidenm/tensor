@@ -54,7 +54,7 @@ export function TableHeaderPins({ geometry, pins, onToggle }: TableHeaderPinsPro
                 data-testid="table-header-pin-on"
                 data-block-id={pin.blockId}
                 aria-label="Unpin header row"
-                className="pointer-events-auto absolute flex items-center justify-end pr-[8px] rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="pointer-events-auto absolute flex items-center justify-end rounded text-muted-foreground hover:bg-muted hover:text-foreground"
                 style={{
                   // THE NUMBER SLOT (M-GUTTER): left edge at
                   // contentBox.x − 28 → the icon's right edge sits 8px

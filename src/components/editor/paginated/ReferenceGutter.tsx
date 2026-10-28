@@ -94,7 +94,7 @@ export function ReferenceTableBadges({
                   data-testid="ref-table-badge"
                   data-kind={badge.kind}
                   aria-label={`Select ${KIND_LABEL[badge.kind]}`}
-                  className="pointer-events-auto absolute flex items-center justify-end pr-[8px] rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="pointer-events-auto absolute flex items-center justify-end rounded text-muted-foreground"
                   style={slotStyle(geometry, badge.y, badge.height)}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
@@ -137,7 +137,7 @@ export function IndexLineMarks({
                 // stopPropagation): the bookmark is an indicator, not a
                 // click target — a click passes through like any
                 // margin click (the gutter contract).
-                className="pointer-events-auto absolute flex items-center justify-end pr-[8px] text-muted-foreground/70"
+                className="pointer-events-auto absolute flex items-center justify-end text-muted-foreground/70"
                 style={slotStyle(geometry, mark.y, mark.height)}
               />
             }
