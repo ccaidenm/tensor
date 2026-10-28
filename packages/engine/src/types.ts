@@ -95,6 +95,23 @@ export interface TextMetrics {
   descent(style: TextStyle): number
 }
 
+/**
+ * M-EQ — Port only. The real (KaTeX-measuring) implementation lives in
+ * the shell repo, never here — the engine consumes measurement, it does
+ * not perform it (the TextMetrics law, mirrored). An equation's dims
+ * are DERIVED facts — a pure function of (latex, fontSize) under the
+ * renderer's fonts — so unlike an image's user-set document data they
+ * arrive through this port at layout time. The implementation MUST be
+ * synchronous and MUST memoize (the TextMetrics contract); the engine
+ * never caches on its behalf. A font's async load landing late is the
+ * SHELL's invalidation problem (re-measure + relayout) — the engine
+ * just re-runs the port when asked.
+ */
+export interface EquationMetrics {
+  /** Natural rendered size of `latex` at `fontSize`, in px. */
+  measure(latex: string, fontSize: number): { width: number; height: number }
+}
+
 export interface LineSegment {
   /** Index into the paragraph's runs array. */
   runIndex: number
@@ -105,6 +122,17 @@ export interface LineSegment {
    */
   start: number
   end: number
+  /**
+   * M-RULER Phase 4: the segment's start x, LINE-RELATIVE (0 = the line
+   * box's left edge; the shell adds rect.x + alignment). Emitted by the
+   * breaker's pen walk — the shell consumes these for paint, offset-x
+   * and hit-testing instead of re-measuring prefix sums, which CANNOT
+   * model tab advances (a \t's jump is pen-dependent, and center/right
+   * stops reposition their text). A \t is its OWN segment (the breaker
+   * splits at tabs): it paints nothing and its advance is the gap to
+   * the next segment's x — the placed pen jump.
+   */
+  x: number
 }
 
 export interface LineResult {
@@ -123,6 +151,78 @@ export interface LineResult {
   height: number
   /** Max ascent over runs in the line. */
   baseline: number
+  /**
+   * M-TABLES (INTERNAL): present on the synthetic BAND results a table
+   * block feeds the placement machine — one per row-band; the machine's
+   * emit branch expands it into the band's parallel cell LineBoxes +
+   * cell rects. Never present on prose/code lines. The band's start/end
+   * span its covered text range (informational).
+   */
+  tableBand?: TableBandData
+  /**
+   * M-REFS (INTERNAL): present on the flattened per-LINE results a
+   * referenceTable block feeds the placement machine — one per entry
+   * line. `x` is the line's LEFT EDGE (px, content-box-relative — the
+   * block's indentLeft + the entry's indentLeft) for the emit branch's
+   * LineBox rect; `entryIndex` names the entry the line belongs to
+   * (the shell's sidecar join — click navigation resolves the hit
+   * offset's entry). Never present on prose/code/table lines.
+   */
+  referenceLine?: { entryIndex: number; x: number }
+}
+
+/**
+ * One cell line's READY-TO-EMIT data inside a band (M-TABLES).
+ * Geometry is TABLE-relative (the emitter adds the table's x offset and
+ * the band top). Segments are RE-BASED: runIndex indexes the table's
+ * canonical run array and start/end index the table's concatenated
+ * text (the shell's AdapterBlock carries the same arrays).
+ */
+export interface TableBandLine {
+  lineIndex: number
+  /** Cell-lane content left edge (table-relative; includes CELL_PAD_H). */
+  x: number
+  /** Band-relative y. */
+  y: number
+  /**
+   * The lane's CONTENT width (union track width − 2·CELL_PAD_H): the
+   * shell's selection-rect clamp bound — [rect.x, rect.x + laneWidth].
+   */
+  laneWidth: number
+  rangeStart: number
+  rangeEnd: number
+  baseline: number
+  height: number
+  /** The line's INK width (the breaker's measured width, re-based). */
+  width: number
+  segments: LineSegment[]
+  row: number
+  col: number
+}
+
+/** One cell rect slice in a band (M-TABLES), TABLE-relative. */
+export interface TableBandRect {
+  x: number
+  /** Band-relative y (always 0 — a slice covers its whole band). */
+  y: number
+  width: number
+  height: number
+  fill: string | null
+  border: 'all' | 'none' | 'outer'
+  colspan: number
+  rowspan: number
+  row: number
+  col: number
+}
+
+export interface TableBandData {
+  /** Cell line emissions, canonical (row-major cell) order. */
+  lines: TableBandLine[]
+  /** Cell rect slices, document order. */
+  rects: TableBandRect[]
+  /** The smallest canonical lineIndex among `lines` — FragmentBreak.atLine. */
+  firstLineIndex: number
+  isHeader: boolean
 }
 
 /**
@@ -165,7 +265,14 @@ export interface FlowPolicy {
 
 export interface BlockBase {
   id: string
-  kind: 'paragraph' | 'heading' | 'codeBlock' | 'image'
+  kind:
+    | 'paragraph'
+    | 'heading'
+    | 'codeBlock'
+    | 'image'
+    | 'equation'
+    | 'table'
+    | 'referenceTable'
   flow?: FlowPolicy
   /**
    * Vertical space (px) above the block's first line. Applied ONCE at
@@ -213,6 +320,32 @@ export interface BlockBase {
    * firstLineIndent < 0) — the adapter must validate before sending.
    */
   firstLineIndent?: number
+  /**
+   * TAB STOPS (M-RULER Phase 3/3.5; px, measured from the CONTENT-BOX
+   * LEFT EDGE — Word's margin-relative convention: indent edits never
+   * move tab stops). Ascending by position, deduped — the adapter
+   * normalizes on the way in. INERT until the Phase 4 breaker consumes
+   * them (the \t advance rule): hashBlock deliberately does NOT cover
+   * this field yet, so a tabStops edit splices the cached lines instead
+   * of re-breaking them (identical output — the breaker never reads the
+   * field). Phase 4 adds the hash coverage together with the
+   * consumption, so the field becomes cache-relevant exactly when it
+   * becomes layout-relevant. The ALIGNMENT kinds change the advance
+   * math there: left = the run starts at the stop; center = the run
+   * centers ON it; right = the run ENDS at it.
+   */
+  tabStops?: TabStop[]
+}
+
+/**
+ * One tab stop's alignment kind (M-RULER 3.5 — the OOXML w:tab val
+ * spelling, minus decimal for now). The RULER renders a glyph per kind
+ * and the BREAKER (Phase 4) computes each kind's advance differently.
+ */
+export interface TabStop {
+  /** px from the content box's left edge. */
+  position: number
+  alignment: 'left' | 'center' | 'right'
 }
 
 export interface ParagraphBlock extends BlockBase {
@@ -241,7 +374,14 @@ export interface CodeBlockBlock extends BlockBase {
   runs: Run[]
 }
 
-export type Block = ParagraphBlock | HeadingBlock | CodeBlockBlock | ImageBlock
+export type Block =
+  | ParagraphBlock
+  | HeadingBlock
+  | CodeBlockBlock
+  | ImageBlock
+  | EquationBlock
+  | TableBlock
+  | ReferenceTableBlock
 
 /**
  * ATOMIC VISUAL BLOCK — image. Never fragmented, never line-broken:
@@ -289,6 +429,223 @@ export interface ImageBlock extends BlockBase {
   float?: { dx: number; dy: number; z: 'front' | 'behind' } | null
 }
 
+/**
+ * M-EQ — ATOMIC VISUAL BLOCK — equation. Never fragmented, never
+ * line-broken: exactly ONE placement decision in the walk (a single
+ * synthetic "line" internally), the image family's atomicity by
+ * construction.
+ *
+ * THE DIMS RULING (the image contract's deliberate inversion): an
+ * equation's width/height are NOT document data — they are DERIVED
+ * facts, a pure function of (latex, fontSize) under the renderer's
+ * fonts. The adapter cannot measure (L1: pure conversion, no DOM), so
+ * the engine asks the EquationMetrics PORT at layout time (the
+ * TextMetrics law: the engine consumes measurement, never performs
+ * it — the real KaTeX-based implementation lives in the shell). The
+ * port MUST be sync and MUST memoize (the TextMetrics contract).
+ *
+ * NO FIT-DOWN (the image family's other deliberate inversion): an
+ * equation is never rescaled — shrinking a formula's font to squeeze
+ * it into a box misrepresents the math. Over-tall (taller than the
+ * content box: can never fit ANY page) throws LOUD in the getLines
+ * arm. Over-wide is ALLOWED to overflow the content box horizontally
+ * (Word's convention: a wide formula centers and bleeds into the
+ * margins; the rect's x goes negative via the shared alignOffset, the
+ * same frame floats already emit) — the vertical band is still wholly
+ * the equation's, so no text ever overlaps it.
+ *
+ * latex is OPAQUE to the engine EXCEPT as the metrics port's key: it
+ * never interprets the source, it echoes it through to placed[] so the
+ * shell's paint layer re-renders the math (paint data is the shell's
+ * to resolve). fontSize is the port's second key — the adapter sends
+ * the document-default run size the equation renders at.
+ */
+export interface EquationBlock extends BlockBase {
+  kind: 'equation'
+  /** OPAQUE LaTeX source — the metrics port's key; echoes to placed[]. */
+  latex: string
+  /** px — the metrics port's second key (the resolved document-default size). */
+  fontSize: number
+  /** Default 'center' (Word's display-equation convention). */
+  align?: 'left' | 'center' | 'right'
+}
+
+/**
+ * M-TABLES — the TABLE block. THE MODEL: rows hold cells; cells hold
+ * the SAME ParagraphBlock the flow tier uses (the engine breaks each
+ * cell's paragraphs at the CELL's track width — one breaker, no fork).
+ * The GRID is the adapter's to have validated (a rectangular grid is a
+ * ProseMirror fixTables guarantee); the engine re-derives column
+ * count/track geometry from the cells' colspans and validates loudly.
+ *
+ * PAGE-BREAKING MODEL (the spec of record for this kind): the table's
+ * flow units are ROWS, expressed internally as BANDS — a band is one
+ * row's line-grid slice (an ordinary row is exactly one band; a row
+ * taller than the content box fragments into per-line-grid bands, the
+ * codeBlock "taller-than-page" ruling family). Bands tile the flow
+ * track like lines; the cell LINES within a band are PARALLEL lanes
+ * (same y, one per column) — they ride lines[] as ordinary LineBoxes
+ * carrying `tableCell` lane identity, so the shell's caret/selection/
+ * search machinery consumes them unchanged. Cell fills/borders ride
+ * placed[] as kind:'tableCell' rects (paint geometry anchored to the
+ * bands — NOT flow participants).
+ *
+ * HEADER ROWS (isHeader): the table's LEADING header rows re-emit at
+ * the top of every continuation page the table fragments onto (Word's
+ * "Repeat Header Rows"); the repeats are extra emissions of the same
+ * logical lines (same lineIndex/ranges), not new flow units.
+ *
+ * ROWSPAN: a cell spanning multiple rows lays its line stack out at
+ * the union width; its height requirement is distributed equally over
+ * the spanned rows' heights, and its lines are placed BAND-ALIGNED
+ * (greedy fill per band — a line never straddles a band boundary; the
+ * band remainder is absorbed as vertical slack the cell fill covers).
+ *
+ * CELL CONTENT RESTRICTION (v1): paragraphs only. The adapter throws
+ * the UnsupportedDocError sentinel for anything else inside a cell
+ * (the pageless fallback renders it) — a cell's codeBlock/blockquote/
+ * image projection is future work.
+ */
+export interface TableBlock extends BlockBase {
+  kind: 'table'
+  rows: TableRowData[]
+  /** Horizontal placement of the table within the content box (default 'left'; shared alignOffset). */
+  align?: 'left' | 'center' | 'right'
+  /**
+   * The table-level border preset ('all' default — absent ≡ 'all'), echoed
+   * into every cell rect's paint data (the painter renders the grid with it).
+   */
+  borderStyle?: 'all' | 'none' | 'outer'
+  /**
+   * M-T4 — OUTER margins (px): left/right inset the table box (the
+   * track width budget narrows; the aligned x shifts). Top/bottom map
+   * to the block-tier spaceBefore/spaceAfter in the ADAPTER — a table
+   * margin above/below IS block spacing, and the engine's
+   * once-at-entry rule owns it (no parallel mechanism). Absent ≡ 0.
+   */
+  margin?: { left: number; right: number } | null
+  /**
+   * M-T4 — default cell padding (per-side; null sides fall to the
+   * engine constants). Per-cell `padding` overrides per-side.
+   */
+  cellPadding?: BoxEdges | null
+}
+
+export interface TableRowData {
+  /** Header cells (tableHeader) — leading rows that repeat across pages. */
+  isHeader: boolean
+  cells: TableCellData[]
+  /**
+   * Minimum row height (px) — M-T3's panel wires the UI; the contract
+   * lives here now. null/absent = pure content height ("at least"
+   * spacing is max(content, this)). Never a MAXIMUM: rows grow.
+   */
+  minHeight?: number | null
+}
+
+/**
+ * M-T4 — per-side box edges (px). Every side is INDEPENDENTLY nullable:
+ * null = "unset — inherit the next tier" (cell ← the table's default
+ * ← the engine's built-in constants). The PM attribute JSON round-trip
+ * convention (null for absent), applied per side.
+ */
+export interface BoxEdges {
+  top: number | null
+  right: number | null
+  bottom: number | null
+  left: number | null
+}
+
+export interface TableCellData {
+  colspan: number
+  rowspan: number
+  /**
+   * Per-spanned-column px widths — the PM cell colwidth attr's echo
+   * (the resizable table's stored track data). Sparse by position:
+   * entry j names the j-th spanned column; null/absent entries (and
+   * absent/null arrays) leave that column flexible. The ENGINE owns
+   * the track derivation (layout math, two-sided law); the adapter
+   * never precomputes tracks.
+   */
+  colwidth?: (number | null)[] | null
+  /** Cell shading (paint data — echoes into the placed rect). */
+  backgroundColor?: string | null
+  /**
+   * M-T4 — per-cell padding override; a null side inherits the
+   * table's cellPadding, then the engine constants.
+   */
+  padding?: BoxEdges | null
+  /** Paragraph-only (see the class comment). */
+  content: ParagraphBlock[]
+}
+
+/**
+ * M-REFS — the REFERENCE TABLE block (Table of Contents / Table of
+ * Figures / Index — the shell's collection kinds). THE MODEL: the
+ * block carries ENTRIES — one flow unit per entry, expressed
+ * internally as flattened per-LINE LineResults (the table-band
+ * family's shape, minus the lanes: an entry is ONE text lane). Each
+ * entry's runs are COMPLETE line content — the entry text runs, a tab
+ * run ('\t'), and the page-number run — so the entry breaks, wraps,
+ * and right-aligns through the ONE breaker + the ONE tab machinery
+ * (the getLines arm supplies the right tab stop at the entry's wrap
+ * width; the LEADER dots between text and number are paint-side ink
+ * the shell derives from the line's segments — never layout).
+ * `indentLeft` is per-entry (px): the ToC level indents move the LEFT
+ * edge; the numbers stay right-aligned at the shared margin.
+ *
+ * ENTRIES ARE DERIVED FACTS (the equation-law family): the block
+ * carries NO cached copy of the document text it summarizes — the
+ * shell's scanner rebuilds entries as the document changes, and the
+ * page numbers (resolved by the shell's two-pass fixpoint against the
+ * layout's own placement) ride the entry runs by construction — a
+ * number edit is an entry-runs edit, so the hash covers it (the
+ * cache-relevance ≡ layout-relevance rule; a re-resolved number
+ * re-breaks exactly this block). The engine knows nothing of
+ * navigation targets: entries are opaque text lanes; the shell's
+ * sidecar (AdapterBlock.reference) maps block-text offsets → PM
+ * target positions for click navigation.
+ *
+ * CANONICAL TEXT ORDER (the table's receipt): entries in array order,
+ * runs in array order within each entry — the same concatenation the
+ * shell's AdapterBlock.text mirrors; LineBox rangeStart/rangeEnd and
+ * segment offsets index it. The block has NO top-level runs field —
+ * the entries ARE the content.
+ *
+ * REFUSALS (validateReferenceEntries — loud, upfront):
+ * firstLineIndent is meaningless per-entry and refused nonzero (the
+ * per-entry indentLeft replaces it); an entry indent at/past the
+ * entry's wrap width is refused (the adapter clamps — a zero-width
+ * lane cannot break); entries must carry ≥ 1 run (an empty entry has
+ * no line at all — the shell renders empties as its placeholder
+ * entry). block.tabStops is IGNORED (the arm supplies its own stop)
+ * and deliberately NOT hash-covered for this kind — not read, not
+ * cache-relevant.
+ */
+export interface ReferenceTableBlock extends BlockBase {
+  kind: 'referenceTable'
+  entries: ReferenceEntry[]
+}
+
+/** One entry's flow content. runs = the COMPLETE line content (the
+ * entry text runs — INCLUDING the leader dots span, a REAL text run
+ * the shell's painter extends with extra dot ink to fill the gap at
+ * the run's own style — plus the tab run and the page-number run);
+ * indentLeft = the entry's own left indent (px, ON TOP of the
+ * block's indentLeft — the ToC level step).
+ *
+ * M-REFS-8 — THE LEADER IS SHELL INK (the round-8 ruling): the
+ * engine NEVER rewrites run text — the block-text contract (the
+ * entries' concatenation ≡ the shell's AdapterBlock.text) must hold
+ * bit-for-bit, and a run-text stretch breaks it (the painter slices
+ * the SHELL's text by segment offsets). The gap-filling dots are
+ * PAINT-SIDE ink derived from the line's placed segments and the
+ * leader run's own measured style (the shell owns it). */
+export interface ReferenceEntry {
+  runs: Run[]
+  indentLeft?: number
+}
+
 export interface SemanticDoc {
   blocks: Block[]
   /**
@@ -299,7 +656,41 @@ export interface SemanticDoc {
    * no-runs-at-all fallback only (P1 ruling).
    */
   baseStyle: TextStyle
+  /**
+   * M-HEADER-FOOTER: the header/footer bands — a SIBLING input, never
+   * in flow order (the adapter routes band nodes OUT of `blocks`).
+   * Band blocks are laid out top-down inside the per-page band strips
+   * (paragraph/heading only — validateKinds enforces), the SAME
+   * line-breaking as body prose at the band wrap width, and re-emitted
+   * on EVERY page (the table header-repeat precedent: echoes of the
+   * same logical lines, not new flow units). The body contentBox
+   * shrinks by the TALLER of the first-page vs rest-page band needs —
+   * single shared contentBox (the walk machine's contract), the max
+   * across pages (the engine's one-geometry-per-doc limit).
+   */
+  bands?: BandSet
 }
+
+export interface BandSet {
+  /** Default-page header blocks (all pages but the first under differentFirstPage). */
+  header?: Block[]
+  /** Default-page footer blocks. */
+  footer?: Block[]
+  /** First-page header blocks (used only under differentFirstPage). */
+  firstHeader?: Block[]
+  /** First-page footer blocks. */
+  firstFooter?: Block[]
+  /** Page 1 paints the first* regions; other pages the default ones. */
+  differentFirstPage?: boolean
+  /**
+   * The band anchor distance from the page edge (px). Default
+   * BAND_ANCHOR_PX (Word's 36pt at 96dpi = 48px).
+   */
+  anchorPx?: number
+}
+
+/** Word's header/footer anchor distance: 36pt → 48 CSS px (96dpi). */
+export const BAND_ANCHOR_PX = 48
 
 export interface LayoutOptions {
   page: { width: number; height: number }
@@ -347,6 +738,28 @@ export interface LineBox {
    * concatenated run text, same contract as rangeStart/rangeEnd.
    */
   segments: LineSegment[]
+  /**
+   * M-TABLES: present IFF this line is a TABLE CELL's line — the lane
+   * identity (grid row/col of the cell ANCHOR — a spanned cell's
+   * continuation carries the anchor's identity) and the lane's CONTENT
+   * width (union track width − 2·CELL_PAD_H — the selection clamp's
+   * bound; rect.width is the line's INK width). The shell clamps
+   * selection rects to [rect.x, rect.x + width] and matches lines to
+   * cells through (row, col). Cell lines within one band are PARALLEL
+   * (same rect.y) — the flow track's contiguity contract is band-wise,
+   * not line-wise (paint.ts).
+   */
+  tableCell?: { row: number; col: number; width: number }
+  /**
+   * M-HEADER-FOOTER: present IFF this line is a HEADER/FOOTER band's
+   * line. Band lines ride `lines[]` like body lines (they need
+   * caret/hit/segments) but NEVER the flow walk: `rect` stays
+   * CONTENT-BOX-RELATIVE (a header line above the contentBox carries
+   * NEGATIVE y — the float precedent made out-of-box coordinates
+   * legal), and consumers that tile the flow track (the shell's
+   * contiguity assert, line counting) must skip them.
+   */
+  band?: 'header' | 'footer'
 }
 
 export interface FragmentBreak {
@@ -384,8 +797,9 @@ export interface LastStats {
 }
 
 /**
- * One ATOMIC VISUAL block's placement — images now; horizontalRule may
- * migrate to this array later (do not assume kind is only 'image').
+ * One ATOMIC VISUAL block's placement — images and equations;
+ * horizontalRule may migrate to this array later (do not assume kind
+ * is only 'image').
  * Field set designed so FLOATS (E-IMG-3) extend it additively — they
  * do, via the optional float/z fields below; nothing existing changed
  * shape (absent optionals are omitted by serialization — golden
@@ -393,18 +807,48 @@ export interface LastStats {
  * DOCUMENT order, exactly like lines[] — floats interleaved with
  * block images at their block positions — a sibling array, never
  * interleaved with lines[]; consumers merge the two by (pageIndex,
- * rect.y). Images never appear in lines[]. Edit survival: echoes (src,
- * alt) are the adapter's stable strings; the rect is recomputed every
- * layout (positional, like LineBox.rect).
+ * rect.y). Images and equations never appear in lines[]. Edit
+ * survival: echoes (src, alt, latex, fontSize) are the adapter's
+ * stable strings; the rect is recomputed every layout (positional,
+ * like LineBox.rect).
  */
+/**
+ * M-TABLES — a table cell's paint geometry (kind: 'tableCell' rects in
+ * placed[]): the cell's box for this page fragment (a row split across
+ * pages emits the cell's SLICE per page; a rowspan cell's box spans
+ * its rows' bands — the slice covers only the bands on this page).
+ * NOT a flow participant (the bands own the flow track — paint.ts's
+ * contiguity contract skips this kind); rect is content-box-relative
+ * like every PlacedRect.
+ */
+export interface TableCellPaint {
+  /** Cell shading echo (null = transparent). */
+  fill: string | null
+  /** The table-level border preset the painter renders the grid with. */
+  border: 'all' | 'none' | 'outer'
+  colspan: number
+  rowspan: number
+  /** Grid row/col of the cell ANCHOR (the shell's PM-side cell matcher). */
+  row: number
+  col: number
+}
+
 export interface PlacedRect {
   /** Edit survival: author-assigned, stable across edits by contract. */
   blockId: string
-  kind: 'image'
-  /** OPAQUE echo of ImageBlock.src. */
-  src: string
-  /** OPAQUE echo of ImageBlock.alt — cache-relevant: it rides contentHash. */
-  alt: string
+  kind: 'image' | 'tableCell' | 'equation'
+  /** OPAQUE echo of ImageBlock.src — images only. */
+  src?: string
+  /** OPAQUE echo of ImageBlock.alt — cache-relevant: it rides contentHash. Images only. */
+  alt?: string
+  /**
+   * M-EQ — OPAQUE echo of EquationBlock.latex — equations only. The
+   * shell's paint layer re-renders the math from it; the engine never
+   * interprets the source.
+   */
+  latex?: string
+  /** M-EQ — OPAQUE echo of EquationBlock.fontSize — equations only (the paint size). */
+  fontSize?: number
   pageIndex: number
   /**
    * Relative to the page content box — same frame as LineBox.rect —
@@ -426,6 +870,8 @@ export interface PlacedRect {
    * byte-identical for either value; only this echo differs.
    */
   z?: 'front' | 'behind'
+  /** Present iff kind: 'tableCell' — the cell's paint/grid data. */
+  cell?: TableCellPaint
 }
 
 /**

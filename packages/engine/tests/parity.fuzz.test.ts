@@ -247,11 +247,28 @@ function applyOp(rng: () => number, state: FuzzState): { kind: OpKind; state: Fu
         // hash-only: same length, same heights, different content.
         // E-IMG-2: inline-image runs carry no text — the edit skips
         // them (the segment/token surfaces cover their cache paths).
-        doc.blocks[at] = {
-          ...target,
-          runs: target.runs.map((r) =>
-            r.kind === 'inlineImage' ? r : { ...r, text: r.text.replace(/a/g, 'c') },
-          ),
+        // M-TABLES: image/table blocks carry no runs — the hash-only
+        // edit re-rolls (a table's cell edit arrives via randomBlock
+        // or the flow arm; the fuzzer's corpus stays flow-kind).
+        // (target is already narrowed off 'image' here.)
+        // M-EQ: the equation joins the run-less family (its corpus
+        // edits ride the hash-only/height arms via the latex echo —
+        // re-rolled like tables, the fuzzer's corpus stays flow-kind).
+        // M-REFS: the referenceTable joins too (its content lives in
+        // entries, never top-level runs — the corpus stays flow-kind).
+        if (
+          target.kind === 'table' ||
+          target.kind === 'equation' ||
+          target.kind === 'referenceTable'
+        ) {
+          doc.blocks[at] = { ...target, flow: FLOW_MENU[Math.floor(rng() * FLOW_MENU.length)] }
+        } else {
+          doc.blocks[at] = {
+            ...target,
+            runs: target.runs.map((r) =>
+              r.kind === 'inlineImage' ? r : { ...r, text: r.text.replace(/a/g, 'c') },
+            ),
+          }
         }
       } else if (roll < 0.66) {
         // height-changing: entirely new random content, same id
@@ -392,7 +409,11 @@ describe('parity fuzz: warm engine deep-equals cold engine (parity law)', () => 
         for (const block of state.doc.blocks) {
           if (block.kind === 'image') {
             if (block.float !== undefined) corpusFloats += 1
-          } else {
+          } else if (
+            block.kind !== 'table' &&
+            block.kind !== 'equation' &&
+            block.kind !== 'referenceTable'
+          ) {
             corpusInlineRuns += block.runs.filter((r) => r.kind === 'inlineImage').length
           }
         }

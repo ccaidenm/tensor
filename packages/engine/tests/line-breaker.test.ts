@@ -88,8 +88,8 @@ describe('breakLines (greedy breaker)', () => {
     expect(lines[0].start).toBe(0)
     expect(lines[0].end).toBe(7)
     expect(lines[0].segments).toEqual([
-      { runIndex: 0, start: 0, end: 3 },
-      { runIndex: 1, start: 3, end: 7 },
+      { runIndex: 0, start: 0, end: 3, x: 0 },
+      { runIndex: 1, start: 3, end: 7, x: 30 },
     ])
   })
 

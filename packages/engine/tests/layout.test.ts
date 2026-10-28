@@ -36,7 +36,7 @@ describe('createLayoutEngine (measured layout)', () => {
     expect(line0.lineIndex).toBe(0)
     expect(line0.rangeStart).toBe(0)
     expect(line0.rangeEnd).toBe(59)
-    expect(line0.segments).toEqual([{ runIndex: 0, start: 0, end: 59 }])
+    expect(line0.segments).toEqual([{ runIndex: 0, start: 0, end: 59, x: 0 }])
     expect(line0.rect).toMatchObject({ x: 0, y: 0 })
     expect(line0.rect.width).toBe(590)
     expect(line0.rect.height).toBeCloseTo(17.6)

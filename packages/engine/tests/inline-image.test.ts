@@ -72,9 +72,9 @@ describe('inline images (E-IMG-2)', () => {
     // (15) in the concatenated text; the covering segment carries its
     // runIndex — the object marker the shell dispatches paint on.
     expect(line.segments).toEqual([
-      { runIndex: 0, start: 0, end: 15 },
-      { runIndex: 1, start: 15, end: 16 },
-      { runIndex: 2, start: 16, end: 21 },
+      { runIndex: 0, start: 0, end: 15, x: 0 },
+      { runIndex: 1, start: 15, end: 16, x: 150 },
+      { runIndex: 2, start: 16, end: 21, x: 450 },
     ])
     // The tall line's height flows: the following block starts at 84.
     expect(result.lines[1].rect.y).toBe(84)
@@ -107,7 +107,7 @@ describe('inline images (E-IMG-2)', () => {
     // Image-only line: ascent 60, descent 0 → height = baseline = 60.
     expect(l1.baseline).toBe(60)
     expect(l1.rect.height).toBe(60)
-    expect(l1.segments).toEqual([{ runIndex: 1, start: 40, end: 41 }])
+    expect(l1.segments).toEqual([{ runIndex: 1, start: 40, end: 41, x: 0 }])
     // The space after the object (position 41) was the break space →
     // trimmed; line 2 starts at 42.
     expect([l2.rangeStart, l2.rangeEnd]).toEqual([42, 56])
@@ -137,8 +137,8 @@ describe('inline images (E-IMG-2)', () => {
     expect(l1.rect.width).toBe(350)
     expect(l1.rect.height).toBe(84) // ascent 80 + text descent 4
     expect(l1.segments).toEqual([
-      { runIndex: 1, start: 40, end: 41 },
-      { runIndex: 2, start: 41, end: 46 },
+      { runIndex: 1, start: 40, end: 41, x: 0 },
+      { runIndex: 2, start: 41, end: 46, x: 300 },
     ])
   })
 
@@ -175,7 +175,7 @@ describe('inline images (E-IMG-2)', () => {
     expect(l1.rect.width).toBe(624) // == content width
     expect(l1.rect.height).toBe(150)
     expect(l1.baseline).toBe(150) // image-only line: ascent = height
-    expect(l1.segments).toEqual([{ runIndex: 1, start: 5, end: 6 }])
+    expect(l1.segments).toEqual([{ runIndex: 1, start: 5, end: 6, x: 0 }])
     // The space at position 6 was the BREAK space (lastSpaceIn's
     // (from, to] window includes it) → trimmed; line 2 starts at 7.
     expect([l2.rangeStart, l2.rangeEnd]).toEqual([7, 12])
@@ -216,7 +216,7 @@ describe('inline images (E-IMG-2)', () => {
     expect(line.rect.width).toBe(30 + 1 + 30)
     // The 1×1 object does not dominate the text line: 17.6 tall.
     expect(line.rect.height).toBeCloseTo(17.6)
-    expect(line.segments[1]).toEqual({ runIndex: 1, start: 3, end: 4 })
+    expect(line.segments[1]).toEqual({ runIndex: 1, start: 3, end: 4, x: 30 })
   })
 
   it('8. two adjacent objects: one position each, both unsplit, both seated', () => {
@@ -231,10 +231,10 @@ describe('inline images (E-IMG-2)', () => {
     expect(line.rect.height).toBe(34)
     expect(line.baseline).toBe(30)
     expect(line.segments).toEqual([
-      { runIndex: 0, start: 0, end: 3 },
-      { runIndex: 1, start: 3, end: 4 },
-      { runIndex: 2, start: 4, end: 5 },
-      { runIndex: 3, start: 5, end: 8 },
+      { runIndex: 0, start: 0, end: 3, x: 0 },
+      { runIndex: 1, start: 3, end: 4, x: 30 },
+      { runIndex: 2, start: 4, end: 5, x: 80 },
+      { runIndex: 3, start: 5, end: 8, x: 140 },
     ])
   })
 

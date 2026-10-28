@@ -12,4 +12,10 @@ export * from './types.js'
 // (contentBox.width − indentLeft − indentRight — indents apply to
 // inline content, unlike block images).
 export { createLayoutEngine, alignOffset } from './layout.js'
+// M-EQ: the over-tall-equation sentinel — the shell's fallback catch
+// dispatches on it (the UnsupportedDocError family).
+export { EquationTooTallError } from './layout.js'
+// M-TABLES: the cell padding/track-floor constants — the shell's
+// painter and hit-tester import them (one pad derivation, never two).
+export { CELL_PAD_H, CELL_PAD_V, CELL_MIN_TRACK } from './layout.js'
 export { fitDownImage } from './line-breaker.js'
