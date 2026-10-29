@@ -57,6 +57,7 @@ export function Ribbon() {
   const saveAs = useDocumentStore((s) => s.saveAs);
   const openFile = useDocumentStore((s) => s.openFile);
   const exportMarkdown = useDocumentStore((s) => s.exportMarkdown);
+  const exportDocx = useDocumentStore((s) => s.exportDocx);
 
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
 
@@ -120,12 +121,13 @@ export function Ribbon() {
                   <DropdownMenuItem onClick={save}>Save</DropdownMenuItem>
                   <DropdownMenuItem onClick={saveAs}>Save As…</DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  {/* M-MD: the export surface — Markdown first; PDF/DOCX
-                      join here as their milestones land (ruling 6). */}
+                  {/* M-MD/M-DOCX: the export surface — Markdown and Word
+                      now; PDF joins when #39 lands. */}
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       <DropdownMenuItem onClick={exportMarkdown}>Markdown (.md)…</DropdownMenuItem>
+                      <DropdownMenuItem onClick={exportDocx}>Word Document (.docx)…</DropdownMenuItem>
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                   <DropdownMenuSeparator />

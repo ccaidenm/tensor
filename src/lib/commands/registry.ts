@@ -61,6 +61,7 @@ import {
   Eye,
   Eraser,
   FileDown,
+  FileText,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -299,6 +300,16 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['export', 'markdown', 'md', 'convert', 'save as'],
     enablement: () => !!doc().editor,
     run: () => void doc().exportMarkdown(),
+  },
+  {
+    id: 'exportDocx',
+    title: 'Export Word Document',
+    icon: FileText,
+    group: 'actions',
+    // M-DOCX (#37): same one-body law — the gate lives in exportDocxFile.
+    keywords: ['export', 'word', 'docx', 'microsoft', 'convert', 'save as'],
+    enablement: () => !!doc().editor,
+    run: () => void doc().exportDocx(),
   },
   {
     id: 'undo',

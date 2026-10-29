@@ -3,6 +3,9 @@ import type { Editor } from '@tiptap/core';
 import { message } from '@tauri-apps/plugin-dialog';
 import { saveDocument, saveDocumentAs, openDocument } from './fileOperations';
 import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMarkdown';
+import { docxDefaultPath, exportDocxFile } from '@/lib/docx/exportFlow';
+import { toDocxCoreProperties } from './coreProperties';
+import { useMediaStore } from '@/lib/media/store';
 import { clearRecoveryCopy } from './recovery';
 import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
@@ -53,6 +56,9 @@ interface DocumentStore {
    *  lossy confirm (ruling 2) lives inside exportMarkdownFile, so the
    *  menu and the palette share the exact same body. */
   exportMarkdown: () => Promise<void>;
+  /** M-DOCX: export the current document as a Word .docx (#37) — the
+   *  same copy-not-conversion posture and the same one-body gate. */
+  exportDocx: () => Promise<void>;
   pageCount: number;
   currentPage: number;
   setPageInfo: (pageCount: number, currentPage: number) => void;
@@ -131,6 +137,35 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       await exportMarkdownFile(editor.getJSON(), { defaultPath: markdownDefaultPath(filePath) });
     } catch (err) {
       await message(err instanceof Error ? err.message : 'Failed to export Markdown', {
+        title: 'Error',
+        kind: 'error',
+      });
+    }
+  },
+
+  exportDocx: async () => {
+    const { editor, filePath, pageSetup, headerFooter, coreProperties } = get();
+    if (!editor) return;
+    try {
+      await exportDocxFile(
+        {
+          json: editor.getJSON(),
+          pageSetup,
+          headerFooter,
+          coreProperties: toDocxCoreProperties(coreProperties),
+          // The RESOLVED registry (code+global+doc) — the styles the
+          // document's styleIds reference (M-STYLES cascade).
+          styleDefinitions: Object.values(useStyleRegistryStore.getState().merged),
+          baseStyle: {
+            fontFamily: useConfigStore.getState().config.editor.defaultFontFamily,
+            fontSize: useConfigStore.getState().config.editor.defaultFontSize,
+          },
+          media: useMediaStore.getState().entries,
+        },
+        { defaultPath: docxDefaultPath(filePath) },
+      );
+    } catch (err) {
+      await message(err instanceof Error ? err.message : 'Failed to export Word document', {
         title: 'Error',
         kind: 'error',
       });

@@ -8,40 +8,43 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
-import type { MarkdownLossyReport } from '@/lib/markdown/lossy';
-import { markdownLossyLines } from '@/lib/markdown/lossy';
 
 /**
- * M-MD — the export lossy confirm, the developer-mode warning's
- * in-app spelling: a shadcn dialog, never a native popup. Store and
+ * M-MD/M-DOCX — THE export lossy confirm, one gate for every export
+ * flow (markdown, DOCX, later PDF): the developer-mode warning's
+ * in-app spelling — a shadcn dialog, never a native popup. Store and
  * component share this file (the InsertTableDialog precedent) so the
  * store is discoverable next to the surface it drives.
  *
- * The store is a PROMISE BRIDGE: exportMarkdownFile (lib) awaits
- * requestConfirm(report); the dialog's buttons settle it. The gate
- * lives in the lib flow, so the menu and the palette share the exact
- * same confirmation (the registry one-body law).
+ * The store is a PROMISE BRIDGE: an export flow awaits
+ * requestConfirm({title, lines}); the dialog's buttons settle it. The
+ * gate lives in each flow's lib module, so the menu and the palette
+ * share the exact same confirmation (the registry one-body law). The
+ * lines are pre-built by the flow's loss classifier (markdown's
+ * markdownLossyLines, DOCX's docxReportLines) — the dialog renders,
+ * it does not classify.
  */
 
 interface PendingConfirm {
-  report: MarkdownLossyReport;
+  title: string;
+  lines: string[];
   resolve: (proceed: boolean) => void;
 }
 
-interface ExportMarkdownDialogStore {
+interface ExportConfirmDialogStore {
   pending: PendingConfirm | null;
-  requestConfirm: (report: MarkdownLossyReport) => Promise<boolean>;
+  requestConfirm: (request: { title: string; lines: string[] }) => Promise<boolean>;
   settle: (proceed: boolean) => void;
 }
 
-export const useExportMarkdownDialogStore = create<ExportMarkdownDialogStore>((set, get) => ({
+export const useExportConfirmDialogStore = create<ExportConfirmDialogStore>((set, get) => ({
   pending: null,
-  requestConfirm: (report) =>
+  requestConfirm: (request) =>
     new Promise<boolean>((resolve) => {
       // A request arriving while one is pending declines the old —
       // no dangling promises, last ask wins.
       get().pending?.resolve(false);
-      set({ pending: { report, resolve } });
+      set({ pending: { ...request, resolve } });
     }),
   settle: (proceed) => {
     get().pending?.resolve(proceed);
@@ -49,9 +52,9 @@ export const useExportMarkdownDialogStore = create<ExportMarkdownDialogStore>((s
   },
 }));
 
-export function ExportMarkdownDialog() {
-  const pending = useExportMarkdownDialogStore((s) => s.pending);
-  const settle = useExportMarkdownDialogStore((s) => s.settle);
+export function ExportConfirmDialog() {
+  const pending = useExportConfirmDialogStore((s) => s.pending);
+  const settle = useExportConfirmDialogStore((s) => s.settle);
 
   return (
     <Dialog open={pending !== null} onOpenChange={(o) => { if (!o) settle(false); }}>
@@ -63,22 +66,20 @@ export function ExportMarkdownDialog() {
         overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
       >
         <DialogHeader>
-          <DialogTitle>Export Markdown?</DialogTitle>
+          <DialogTitle>{pending?.title ?? ''}</DialogTitle>
           <DialogDescription>
-            This document uses content that Markdown cannot represent — the exported file may not
-            look like this document.
+            The exported file may not look exactly like this document.
           </DialogDescription>
         </DialogHeader>
         <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-          {pending?.report &&
-            markdownLossyLines(pending.report).map((line) => <li key={line}>• {line}</li>)}
+          {pending?.lines.map((line) => <li key={line}>• {line}</li>)}
         </ul>
         <DialogFooter>
           <Button variant="outline" onClick={() => settle(false)}>
             Cancel
           </Button>
           <Button
-            data-testid="export-markdown-accept"
+            data-testid="export-confirm-accept"
             variant="destructive"
             onClick={() => settle(true)}
           >
