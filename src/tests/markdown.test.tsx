@@ -286,33 +286,32 @@ describe('lossy classification', () => {
     expect(tabbed.customFormatting).toBe(true);
   });
 
-  it('default image and table attrs are NOT a loss; deviations are', () => {
-    const plainImage = analyzeMarkdownLossy(
-      doc({ type: 'image', attrs: { src: `media://${SHA}`, width: null, height: null, align: 'left', keepNext: false, radius: 0 } }),
-    );
-    expect(plainImage.customFormatting).toBe(false);
-
+  it('object decoration is documented, never warned (the inserted-image rule)', () => {
+    // Insert ALWAYS stamps natural dimensions — sizing can never warn,
+    // or every document with an image would confirm (the cry-wolf bug).
     const sizedImage = analyzeMarkdownLossy(
-      doc({ type: 'image', attrs: { src: `media://${SHA}`, width: 300, height: 200, align: 'left', keepNext: false, radius: 0 } }),
+      doc({
+        type: 'image',
+        attrs: { src: `media://${SHA}`, width: 300, height: 200, align: 'center', keepNext: true, radius: 8 },
+      }),
     );
-    expect(sizedImage.customFormatting).toBe(true);
-
-    const plainTable = analyzeMarkdownLossy(
-      doc({ type: 'table', attrs: { borderStyle: 'all' }, content: [] }),
-    );
-    expect(plainTable.customFormatting).toBe(false);
-
+    expect(sizedImage.customFormatting).toBe(false);
     const shadedCell = analyzeMarkdownLossy(
       doc({ type: 'tableCell', attrs: { backgroundColor: '#ffeedd' }, content: [] }),
     );
-    expect(shadedCell.customFormatting).toBe(true);
-  });
-
-  it('lists with non-default style types are a loss', () => {
-    const plain = analyzeMarkdownLossy(doc({ type: 'bulletList', attrs: { listStyleType: 'disc' }, content: [] }));
-    expect(plain.customFormatting).toBe(false);
-    const custom = analyzeMarkdownLossy(doc({ type: 'orderedList', attrs: { listStyleType: 'upper-roman' }, content: [] }));
-    expect(custom.customFormatting).toBe(true);
+    expect(shadedCell.customFormatting).toBe(false);
+    const borderedTable = analyzeMarkdownLossy(
+      doc({ type: 'table', attrs: { borderStyle: 'none' }, content: [] }),
+    );
+    expect(borderedTable.customFormatting).toBe(false);
+    const romanList = analyzeMarkdownLossy(
+      doc({ type: 'orderedList', attrs: { listStyleType: 'upper-roman' }, content: [] }),
+    );
+    expect(romanList.customFormatting).toBe(false);
+    const styledEquation = analyzeMarkdownLossy(
+      doc({ type: 'equation', attrs: { latex: 'x', align: 'left', color: '#ff0000', scale: 2 } }),
+    );
+    expect(styledEquation.customFormatting).toBe(false);
   });
 
   it('the warning lists only the categories present', () => {

@@ -59,6 +59,19 @@ legal in Markdown link destinations.
 Task-list checkboxes from external files degrade to plain list items (the
 schema has no task lists).
 
+### Warned vs documented-only
+
+The export confirm fires for content that **disappears** (header/footer
+text, reference tables, page breaks) and for **text formatting** Markdown
+cannot express (custom styles, colors, fonts, sizes, alignment, spacing,
+indents, tab stops). Object **decoration** is documented here, not warned —
+those objects are all represented in Markdown and keep their content:
+images still render (at natural size — Markdown has no dimensions), the
+equation's latex still travels, table cells keep their text. Dropped
+without warning: image size/alignment/radius/float, equation
+alignment/color/scale, table borders/shading/cell padding, list numbering
+styles.
+
 ## Import
 
 **Where:** the standard Open… flow (the file dialog accepts `.md` /

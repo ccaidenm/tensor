@@ -5,13 +5,23 @@ import type { JSONContent } from '@tiptap/core';
  * "what would this export lose?", and the answer gates the export
  * (ruling 2): content Markdown cannot represent produces a CONFIRM
  * before the save dialog — never a silent loss, never a post-hoc
- * apology. The classifier is deliberately coarse: the user is asked
- * about CATEGORIES (banded content, generated tables, breaks,
- * formatting), not per-node minutiae.
+ * apology.
  *
- * The same walk defines what "clean" means: a document none of whose
- * categories fire exports with NO dialog — headings, lists, bold through
- * the stock handlers are not lossy by definition.
+ * THE LINE (the inserted-image cry-wolf fix): the confirm fires for
+ * (a) content that DISAPPEARS (band text, reference tables, page
+ * breaks) and (b) TEXT formatting Markdown cannot express (custom
+ * styles, colors, fonts, sizes, alignment, spacing, indents, tab
+ * stops). OBJECT DECORATION does not warn — images, equations, tables
+ * and lists are all REPRESENTED in Markdown and merely lose paint
+ * attrs (size, shading, borders, numbering style); those are
+ * documented in docs/markdown.md, and warning on them would fire at
+ * the first inserted image (insert always stamps natural dimensions).
+ *
+ * The classifier is deliberately coarse: the user is asked about
+ * CATEGORIES, not per-node minutiae. The same walk defines what
+ * "clean" means: a document none of whose categories fire exports with
+ * NO dialog — headings, lists, bold, images through the stock handlers
+ * are not lossy by definition.
  */
 
 export interface MarkdownLossyReport {
@@ -181,34 +191,22 @@ function checkFormatting(node: JSONContent, report: MarkdownLossyReport): void {
       return;
     }
     case 'bulletList':
-      if (attrs.listStyleType && attrs.listStyleType !== 'disc') report.customFormatting = true;
-      return;
     case 'orderedList':
-      if (attrs.listStyleType && attrs.listStyleType !== 'decimal') report.customFormatting = true;
-      return;
     case 'table':
-      if (attrs.borderStyle && attrs.borderStyle !== 'all') report.customFormatting = true;
-      if (attrs.align && attrs.align !== 'left') report.customFormatting = true;
-      return;
     case 'tableCell':
     case 'tableHeader':
-      if (truthy(attrs.backgroundColor)) report.customFormatting = true;
-      if (truthy(attrs.padding)) report.customFormatting = true;
-      return;
     case 'image':
     case 'inlineImage':
-      // Markdown keeps alt + src only — sizing/alignment/decoration ride
-      // the same "custom formatting" bucket.
-      if (truthy(attrs.width) || truthy(attrs.height)) report.customFormatting = true;
-      if (attrs.align && attrs.align !== 'left') report.customFormatting = true;
-      if (truthy(attrs.keepNext)) report.customFormatting = true;
-      if (truthy(attrs.radius)) report.customFormatting = true;
-      if (truthy(attrs.float)) report.customFormatting = true;
-      return;
     case 'equation':
-      if (attrs.align && attrs.align !== 'center') report.customFormatting = true;
-      if (attrs.color !== null && attrs.color !== undefined) report.customFormatting = true;
-      if (attrs.scale !== undefined && attrs.scale !== 1) report.customFormatting = true;
+      // OBJECT DECORATION — documented, never warned. These objects are
+      // all REPRESENTED in Markdown (the image renders, the cells keep
+      // their text, the equation's latex travels); only their paint
+      // attrs drop (image size/align/radius/float, cell shading/
+      // padding, table borders/flow, list numbering styles, equation
+      // align/color/scale). Warning on them cried wolf at the first
+      // inserted image — insert always stamps natural dimensions — so
+      // the confirm reserves itself for what disappears or how TEXT
+      // reads (see the paragraph/heading case above).
       return;
   }
 }
