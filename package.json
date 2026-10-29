@@ -37,7 +37,7 @@
     "@tauri-apps/plugin-fs": "^2.5.2",
     "@tauri-apps/plugin-http": "^2.6.0",
     "@tauri-apps/plugin-opener": "^2",
-    "@tensor-editor/engine": "file:../engine",
+    "@tensor-editor/engine": "file:packages/engine",
     "@tiptap/extension-color": "3.31.4",
     "@tiptap/extension-font-family": "3.31.4",
     "@tiptap/extension-highlight": "3.31.4",
