@@ -27,10 +27,17 @@ import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
 // M-HEADER-FOOTER-2: the doc-level header/footer containers — content
 // rides the ONE PM doc (L3); the adapter routes them into doc.bands.
 import { FooterBlock, HeaderBlock } from '@/lib/editor/HeaderFooterNodes';
-import { ImageNode } from '@/lib/editor/ImageNode';
-import { InlineImageNode } from '@/lib/editor/InlineImageNode';
+// M-MD: the markdown-mapped variants — the SAME nodes extended with
+// their markdown handlers. The fields are inert in the production
+// editor (nothing there builds a manager); lib/markdown/manager.ts
+// builds its standalone MarkdownManager from this very list.
+import { MarkdownImageNode, MarkdownInlineImageNode, MarkdownEquationNode } from '@/lib/markdown/specs';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
-import { EquationNode } from '@/lib/editor/EquationNode';
+// M-EQ: display equations — a block atom (the ImageNode family);
+// latex is the node's only document data, rendering is a
+// projection (lib/equations), paginated layout rides the engine's
+// EquationBlock + EquationMetrics port.
+// (M-MD: the markdown-mapped variant comes from lib/markdown/specs.)
 // M-REFS: the reference-table node (ToC/ToF/Index — one generic block
 // container; entries are real paragraphs the generator maintains) +
 // the invisible indexEntry mark + the debounced rescan seam + THE
@@ -90,8 +97,10 @@ export function tensorExtensions(): Extensions {
     // atom renders its marker, and the adapter translates it into the
     // engine's forced-break spelling (flow.breakBefore: 'page').
     PageBreakNode,
-    ImageNode,
-    InlineImageNode,
+    // M-MD: the markdown-mapped image/equation nodes (same schema, same
+    // names — the markdown handlers ride along, inert in production).
+    MarkdownImageNode,
+    MarkdownInlineImageNode,
     // M-TABLES: the TipTap table family (schema + commands + the
     // built-in columnResizing plugin via `resizable`) plus Tensor's
     // borderStyle/backgroundColor attrs. Pages mode falls back to the
@@ -104,7 +113,7 @@ export function tensorExtensions(): Extensions {
     // latex is the node's only document data, rendering is a
     // projection (lib/equations), paginated layout rides the engine's
     // EquationBlock + EquationMetrics port.
-    EquationNode,
+    MarkdownEquationNode,
     // M-REFS: the reference tables (ToC/ToF/Index) — the generic
     // collection container (kind/depth attrs only; entries are real
     // paragraphs the generator keeps in sync) + the invisible index

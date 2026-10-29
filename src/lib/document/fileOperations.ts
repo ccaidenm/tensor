@@ -9,7 +9,12 @@ import { openWpdoc, saveWpdoc } from './wpdoc';
 import { isLegacyHeaderFooter, type HeaderFooterSettings } from './headerFooter';
 import { migrateLegacyHeaderFooter } from '@/lib/editor/headerFooterCommands';
 
-const FILE_FILTERS = [{ name: 'Word Processor Document', extensions: ['wpdoc'] }];
+const FILE_FILTERS = [
+  { name: 'Word Processor Document', extensions: ['wpdoc'] },
+  // M-MD: markdown rides the same Open flow (issue #38's DOCX import
+  // will extend this the same way).
+  { name: 'Markdown', extensions: ['md', 'markdown'] },
+];
 
 /**
  * M-META: the ONE document-level bundle that rides .wpdoc metadata.
@@ -82,7 +87,13 @@ export async function saveDocumentAs(
 }
 
 export interface OpenDocumentResult {
-  path: string;
+  /** The document's path — NULL for a markdown import (M-MD ruling 5:
+   *  the doc stays Untitled until Save As — Save must never write a
+   *  zip container into the .md the user opened). */
+  path: string | null;
+  /** M-MD: markdown imports only — images dropped during ingestion
+   *  (remote/missing/unreadable). The open path surfaces the count. */
+  skippedImages?: number;
   pageSetup: PageSetup | null;
   /** M-STYLES: the file's doc-layer style definitions (may be empty —
    *  pre-styles files). The document store applies them to the
@@ -102,6 +113,14 @@ export interface OpenDocumentResult {
 export async function openDocument(editor: Editor): Promise<OpenDocumentResult | null> {
   const path = await open({ filters: FILE_FILTERS, multiple: false });
   if (!path || Array.isArray(path)) return null;
+
+  // M-MD: extension dispatch — markdown imports through the same Open
+  // flow, with its own result shape (no page setup/styles/bands — the
+  // format has none; defaults apply).
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
+    return openMarkdownDocument(editor, path);
+  }
 
   // M-IMAGES-0: v2 container — or v1 plain JSON via the PERMANENT
   // converter (openWpdoc detects the NOT_ZIP marker). Corrupted files
@@ -140,5 +159,34 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
     lineNumbers: file.metadata.lineNumbers ?? null,
     coreProperties: normalizeCoreProperties({ title, author, subject, keywords, comments }),
     headerFooter: settings,
+  };
+}
+
+/**
+ * M-MD — the markdown open path (ruling 5): parse + ingest OUTSIDE the
+ * editor, then setContent. The format carries no page setup, styles,
+ * line numbers or bands — defaults apply; the title is the filename.
+ * path is NULL (Untitled until Save As) and skippedImages rides back
+ * for the loud notice. The dynamic import keeps marked out of the
+ * startup path (the same lazy pattern the backfill uses).
+ */
+async function openMarkdownDocument(editor: Editor, path: string): Promise<OpenDocumentResult> {
+  const { importMarkdown } = await import('@/lib/markdown/importMarkdown');
+  const { json, skippedImages } = await importMarkdown(path);
+  editor.commands.setContent(json);
+  // M-IMAGES-1: markdown carries no dimensions — the standard dim
+  // backfill measures them (the same fire-and-forget pass above).
+  void import('@/lib/media/backfill').then(({ backfillImageDims }) =>
+    backfillImageDims(editor),
+  );
+  const name = path.split(/[\\/]/).pop() ?? 'Untitled';
+  return {
+    path: null,
+    pageSetup: null,
+    styleDefinitions: [],
+    lineNumbers: null,
+    coreProperties: { title: name.replace(/\.(md|markdown)$/i, '') },
+    headerFooter: null,
+    skippedImages,
   };
 }

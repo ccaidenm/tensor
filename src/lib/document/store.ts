@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Editor } from '@tiptap/core';
 import { message } from '@tauri-apps/plugin-dialog';
 import { saveDocument, saveDocumentAs, openDocument } from './fileOperations';
+import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMarkdown';
 import { clearRecoveryCopy } from './recovery';
 import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
@@ -47,6 +48,11 @@ interface DocumentStore {
   save: () => Promise<void>;
   saveAs: () => Promise<void>;
   openFile: () => Promise<void>;
+  /** M-MD: export the current document as Markdown. Never mutates
+   *  filePath/isDirty — an export is a copy, not a conversion. The
+   *  lossy confirm (ruling 2) lives inside exportMarkdownFile, so the
+   *  menu and the palette share the exact same body. */
+  exportMarkdown: () => Promise<void>;
   pageCount: number;
   currentPage: number;
   setPageInfo: (pageCount: number, currentPage: number) => void;
@@ -118,6 +124,19 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     }
   },
 
+  exportMarkdown: async () => {
+    const { editor, filePath } = get();
+    if (!editor) return;
+    try {
+      await exportMarkdownFile(editor.getJSON(), { defaultPath: markdownDefaultPath(filePath) });
+    } catch (err) {
+      await message(err instanceof Error ? err.message : 'Failed to export Markdown', {
+        title: 'Error',
+        kind: 'error',
+      });
+    }
+  },
+
   openFile: async () => {
     const { editor } = get();
     if (!editor) return;
@@ -130,7 +149,11 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         useStyleRegistryStore.getState().applyDocLayer(result.styleDefinitions);
         set({
           filePath: result.path,
-          isDirty: false,
+          // M-MD: a markdown import carries real content with no file
+          // behind it — unsaved work (isDirty: true also keeps the
+          // pristine-config subscription from resetting the page setup
+          // under it). A .wpdoc open is clean by definition.
+          isDirty: result.path === null,
           pageSetup: result.pageSetup ?? defaultPageSetup(),
           lineNumbers: result.lineNumbers ?? null,
           // M-META: normalized in openDocument — {} for old files.
@@ -140,6 +163,15 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           // instances off this write (its own subscription).
           headerFooter: result.headerFooter,
         });
+        // M-MD: the LOUD posture for dropped images — one dialog naming
+        // the count, after the content has landed (never a crash,
+        // never silent loss).
+        if (result.skippedImages) {
+          await message(
+            `${result.skippedImages} image${result.skippedImages === 1 ? ' was' : 's were'} not imported — remote, missing, or unreadable sources are refused rather than silently fetched.`,
+            { title: 'Markdown import', kind: 'warning' },
+          );
+        }
       }
     } catch (err) {
       await message(err instanceof Error ? err.message : 'Failed to open document', {
