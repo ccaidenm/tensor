@@ -6,6 +6,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDocumentStore } from "@/lib/document/store";
@@ -53,6 +56,7 @@ export function Ribbon() {
   const save = useDocumentStore((s) => s.save);
   const saveAs = useDocumentStore((s) => s.saveAs);
   const openFile = useDocumentStore((s) => s.openFile);
+  const exportMarkdown = useDocumentStore((s) => s.exportMarkdown);
 
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
 
@@ -115,6 +119,15 @@ export function Ribbon() {
                   <DropdownMenuItem onClick={openFile}>Open…</DropdownMenuItem>
                   <DropdownMenuItem onClick={save}>Save</DropdownMenuItem>
                   <DropdownMenuItem onClick={saveAs}>Save As…</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {/* M-MD: the export surface — Markdown first; PDF/DOCX
+                      join here as their milestones land (ruling 6). */}
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuItem onClick={exportMarkdown}>Markdown (.md)…</DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => useSettingsDialogStore.getState().open()}>Settings</DropdownMenuItem>
                 </DropdownMenuContent>

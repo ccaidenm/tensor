@@ -12,6 +12,7 @@ import { StyleDialog } from './components/dialogs/StyleDialog';
 import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
 import { AltTextDialog } from './components/dialogs/ImageDialogs';
 import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
+import { ExportMarkdownDialog } from './components/dialogs/ExportMarkdownDialog';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
@@ -185,6 +186,10 @@ function App() {
       <FontBrowserDialog />
       <AltTextDialog />
       <InsertTableDialog />
+      {/* M-MD: the export lossy confirm — store-driven, one mount like
+          its InsertTableDialog twin (the developer-mode warning's
+          in-app spelling; never a native popup). */}
+      <ExportMarkdownDialog />
       {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
           one mount like its InsertTableDialog twin. */}
       <InsertReferenceTableDialog />

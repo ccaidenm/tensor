@@ -60,6 +60,7 @@ import {
   PanelBottom,
   Eye,
   Eraser,
+  FileDown,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -286,6 +287,18 @@ export const COMMANDS: CommandAction[] = [
     menuEventId: 'menu-save-as',
     keywords: ['save', 'save as', 'export', 'rename', 'file'],
     run: () => void doc().saveAs(),
+  },
+  {
+    id: 'exportMarkdown',
+    title: 'Export Markdown',
+    icon: FileDown,
+    group: 'actions',
+    // M-MD: palette-only for now (ruling 6) — the native menu item can
+    // ride along with the PDF/DOCX export entries. The lossy confirm
+    // lives inside exportMarkdownFile, so palette and menu share it.
+    keywords: ['export', 'markdown', 'md', 'convert', 'save as'],
+    enablement: () => !!doc().editor,
+    run: () => void doc().exportMarkdown(),
   },
   {
     id: 'undo',
