@@ -40,6 +40,16 @@ export function pxToHalfPoints(px: number): number {
   return Math.round((px / PX_PER_PT) * 2);
 }
 
+// ─── The inverse directions (#38a import reads twips/half-points) ──────
+
+export function twipToPx(twip: number): number {
+  return twip / TWIPS_PER_PX;
+}
+
+export function halfPointsToPx(halfPoints: number): number {
+  return (halfPoints / 2) * PX_PER_PT;
+}
+
 /**
  * THE NUMERIC COERCION SEAM. TipTap stores several dimensional attrs
  * as STRINGS (the FontSize extension keeps the user's spelling —

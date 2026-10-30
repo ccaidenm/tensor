@@ -13,6 +13,7 @@ import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
 import { AltTextDialog } from './components/dialogs/ImageDialogs';
 import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
 import { ExportConfirmDialog } from './components/dialogs/ExportConfirmDialog';
+import { ImportOptionsDialog } from './components/dialogs/ImportOptionsDialog';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
@@ -191,6 +192,9 @@ function App() {
           InsertTableDialog twin (the developer-mode warning's in-app
           spelling; never a native popup). */}
       <ExportConfirmDialog />
+      {/* M-DOCX: the import options surface (the font policy) — the
+          same promise-bridge pattern, one mount. */}
+      <ImportOptionsDialog />
       {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
           one mount like its InsertTableDialog twin. */}
       <InsertReferenceTableDialog />

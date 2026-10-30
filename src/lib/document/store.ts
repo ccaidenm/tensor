@@ -200,11 +200,18 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         });
         // M-MD: the LOUD posture for dropped images — one dialog naming
         // the count, after the content has landed (never a crash,
-        // never silent loss).
+        // never silent loss). M-DOCX: the Word import's notices use
+        // the same surface.
         if (result.skippedImages) {
           await message(
             `${result.skippedImages} image${result.skippedImages === 1 ? ' was' : 's were'} not imported — remote, missing, or unreadable sources are refused rather than silently fetched.`,
             { title: 'Markdown import', kind: 'warning' },
+          );
+        }
+        if (result.importNotices?.length) {
+          await message(
+            result.importNotices.map((line) => `• ${line}`).join('\n'),
+            { title: 'Word import', kind: 'warning' },
           );
         }
       }

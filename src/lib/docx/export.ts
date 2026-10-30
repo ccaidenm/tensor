@@ -165,6 +165,23 @@ interface WalkState {
   defs: Map<string, StyleDefinition>;
   /** Per-reference instance counters — each top-level list restarts. */
   instances: { next: (reference: string) => number };
+  /** THE NUMBERING REDESIGN: one abstractNum per top-level list
+   *  instance, whose LEVELS carry the formats of the actual nesting
+   *  (level 0 = the list's own style, level 1 = a nested list's style,
+   *  …). Word derives list nesting from ilvl, so mixed nesting (a
+   *  roman list inside a bullet list) needs per-level formats — six
+   *  identical levels cannot express it, and a separate numId per
+   *  nested list would render flat. */
+  numberingLevels: Map<string, (string | undefined)[]>;
+  listIds: { next: number };
+}
+
+/** Record a nesting level's format on the reference (idempotent per
+ *  walk — the first writer wins, matching the document's first use). */
+function registerLevel(state: WalkState, reference: string, level: number, styleType: string): void {
+  const levels = state.numberingLevels.get(reference) ?? [];
+  if (levels[level] == null) levels[level] = styleType;
+  state.numberingLevels.set(reference, levels);
 }
 
 // ─── Style helpers ───────────────────────────────────────────────────────
@@ -252,26 +269,12 @@ function applyMark(format: RunFormat, mark: JSONContent, state: WalkState): void
   }
 }
 
-/** THE TAB LAW: a literal \t never reaches w:t — it splits into real
- *  w:tab elements (the Word-for-Web lesson, spike round 2). */
-function textToRunChildren(text: string): (string | Tab)[] | undefined {
-  if (!text.includes('\t')) return undefined; // plain text path — cleaner XML
-  const parts = text.split('\t');
-  const children: (string | Tab)[] = [parts[0] ?? ''];
-  for (let i = 1; i < parts.length; i++) {
-    children.push(new Tab());
-    children.push(parts[i] ?? '');
-  }
-  return children;
-}
-
-interface RunOpts {
-  /** The resolved paragraph style's cascade (fills gaps below marks). */
-  paragraphStyle?: StyleProperties;
-  skipLinkMark?: boolean;
-}
-
-function mapTextRun(node: JSONContent, state: WalkState, opts: RunOpts = {}): TextRun {
+/** THE TAB LAW (the Word-for-Web lesson): tabs split the text into
+ *  SEPARATE RUNS with a w:tab run between — one run mixing t/tab/t
+ *  would round-trip through any grouped XML reading with the pieces
+ *  REORDERED (document order is content). The format carries to every
+ *  piece. Returns a single-element array for tab-free text. */
+function mapTextRuns(node: JSONContent, state: WalkState, opts: RunOpts = {}): TextRun[] {
   const format: RunFormat = {};
   let text = typeof node.text === 'string' ? node.text : '';
   for (const mark of node.marks ?? []) {
@@ -288,18 +291,21 @@ function mapTextRun(node: JSONContent, state: WalkState, opts: RunOpts = {}): Te
   if (format.transform && format.transform !== 'none') transforms.push(format.transform);
   const effective = transforms[transforms.length - 1];
   if (effective) text = transformText(text, effective);
-  // The paragraph style fills gaps ONLY — direct marks win (the same
-  // cascade order Tensor's resolver uses: direct > style).
-  if (opts.paragraphStyle) {
-    const cascade = styleRunProps(opts.paragraphStyle);
-    if (cascade.font && !format.font) format.font = cascade.font;
-    if (cascade.size && !format.size) format.size = cascade.size;
-    if (cascade.color && !format.color) format.color = cascade.color;
-    if (cascade.smallCaps && !format.smallCaps) format.smallCaps = true;
-  }
-  const children = textToRunChildren(text);
-  return new TextRun({
-    ...(children ? { children } : { text }),
+  // NO paragraph-style cascade here: the Word STYLE carries the style
+  // properties (inlining them onto runs is redundant and pollutes the
+  // round-trip — the imported run would carry marks the source never
+  // had). Direct marks ride alone; the style does the rest.
+  const pieces = text.split('\t');
+  return pieces.map((piece, index) => {
+    if (index === 0) return piece === '' ? new TextRun({}) : new TextRun({ text: piece, ...runFormatOpts(format) });
+    const tabRun = new TextRun({ children: [new Tab()], ...runFormatOpts(format) });
+    return piece === '' ? tabRun : [tabRun, new TextRun({ text: piece, ...runFormatOpts(format) })];
+  }).flat();
+}
+
+/** The RunFormat → TextRun options bag (minus text/children). */
+function runFormatOpts(format: RunFormat): object {
+  return {
     bold: format.bold,
     italics: format.italics,
     strike: format.strike,
@@ -311,7 +317,13 @@ function mapTextRun(node: JSONContent, state: WalkState, opts: RunOpts = {}): Te
     shading: format.shading,
     smallCaps: format.smallCaps,
     style: format.style,
-  });
+  };
+}
+
+interface RunOpts {
+  /** The resolved paragraph style's cascade (fills gaps below marks). */
+  paragraphStyle?: StyleProperties;
+  skipLinkMark?: boolean;
 }
 
 type InlineChild = TextRun | ImageRun | ExternalHyperlink;
@@ -338,15 +350,18 @@ function mapInlineContent(nodes: JSONContent[], state: WalkState, paragraphStyle
       }
       out.push(new ExternalHyperlink({
         link: href,
-        children: group.map((n) => mapTextRun(n, state, { paragraphStyle, skipLinkMark: true })),
+        children: group.flatMap((n) => mapTextRuns(n, state, { paragraphStyle, skipLinkMark: true })),
       }));
       i = j;
       continue;
     }
     if (node.type === 'text') {
-      out.push(mapTextRun(node, state, { paragraphStyle }));
+      out.push(...mapTextRuns(node, state, { paragraphStyle }));
     } else if (node.type === 'inlineImage') {
       out.push(mapImageRun(node, state));
+    } else if (node.type === 'hardBreak') {
+      // OOXML's line break rides a run with break-before (w:br).
+      out.push(new TextRun({ break: 1 }));
     } else {
       state.report.unknownNodes[node.type ?? 'unknown'] = (state.report.unknownNodes[node.type ?? 'unknown'] ?? 0) + 1;
     }
@@ -480,15 +495,23 @@ function mapParagraph(node: JSONContent, state: WalkState): Paragraph {
   return new Paragraph({ ...options, children: mapInlineContent(node.content ?? [], state, paragraphStyle) });
 }
 
+/** THE HEADING paragraph option: the level rides the options bag (used
+ *  by mapParagraph via paragraphOptions) — the heading's TEXT rides
+ *  like any paragraph's (content never drops). */
+
 // ─── Lists ───────────────────────────────────────────────────────────────
 
 function listReference(styleType: string): string {
   return `t-list-${styleType.replace(/[^a-z0-9]/gi, '-')}`;
 }
+void listReference;
 
-/** PM lists nest as list(listItem(paragraph, list…)); each TOP-LEVEL
- *  list gets a fresh numbering INSTANCE so ordered lists restart where
- *  Tensor's do (one shared instance would continue 3. 4. …). */
+/** PM lists nest as list(listItem(paragraph, list…)). Every list — top
+ *  or nested — maps its ITEMS onto the TOP-LEVEL list's numbering
+ *  instance at its nesting depth (Word derives nesting from ilvl); a
+ *  nested list registers its OWN format at that level. Numbering
+ *  restarts where Tensor's does because each top-level list is a fresh
+ *  reference+instance. */
 function mapList(node: JSONContent, level: number, reference: string, instance: number, state: WalkState): Paragraph[] {
   const out: Paragraph[] = [];
   for (const item of node.content ?? []) {
@@ -502,6 +525,8 @@ function mapList(node: JSONContent, level: number, reference: string, instance: 
           children: mapInlineContent(child.content ?? [], state, paragraphStyle),
         }));
       } else if (child.type === 'bulletList' || child.type === 'orderedList') {
+        const childStyle = String((child.attrs as { listStyleType?: string } | null)?.listStyleType ?? (child.type === 'orderedList' ? 'decimal' : 'disc'));
+        registerLevel(state, reference, level + 1, childStyle);
         out.push(...mapList(child, level + 1, reference, instance, state));
       } else {
         state.report.unknownNodes[child.type ?? 'unknown'] = (state.report.unknownNodes[child.type ?? 'unknown'] ?? 0) + 1;
@@ -511,27 +536,21 @@ function mapList(node: JSONContent, level: number, reference: string, instance: 
   return out;
 }
 
-function collectListStyles(nodes: JSONContent[], into: Set<string>): void {
-  for (const node of nodes) {
-    if (node.type === 'bulletList' || node.type === 'orderedList') {
-      into.add(String((node.attrs as { listStyleType?: string } | null)?.listStyleType ?? (node.type === 'orderedList' ? 'decimal' : 'disc')));
-    }
-    if (Array.isArray(node.content)) collectListStyles(node.content, into);
-  }
-}
-
-function numberingConfigs(used: Set<string>, state: WalkState): { reference: string; levels: object[] }[] {
+function numberingConfigs(state: WalkState): { reference: string; levels: object[] }[] {
   const configs: { reference: string; levels: object[] }[] = [];
-  for (const styleType of used) {
-    const spec = LIST_FORMATS[styleType] ?? FALLBACK_LIST_FORMAT;
-    if (!LIST_FORMATS[styleType]) state.report.unknownListStyles += 1;
-    const levels = Array.from({ length: 6 }, (_, level) => ({
-      level,
-      format: spec.format,
-      text: spec.text.replace('%1', `%${level + 1}`),
-      alignment: AlignmentType.LEFT,
-    }));
-    configs.push({ reference: listReference(styleType), levels });
+  for (const [reference, levelStyles] of state.numberingLevels) {
+    const levels = Array.from({ length: 6 }, (_, level) => {
+      const styleType = levelStyles[level] ?? 'decimal';
+      const spec = LIST_FORMATS[styleType] ?? FALLBACK_LIST_FORMAT;
+      if (!LIST_FORMATS[styleType]) state.report.unknownListStyles += 1;
+      return {
+        level,
+        format: spec.format,
+        text: spec.text.replace('%1', `%${level + 1}`),
+        alignment: AlignmentType.LEFT,
+      };
+    });
+    configs.push({ reference, levels });
   }
   return configs;
 }
@@ -656,7 +675,8 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
       case 'bulletList':
       case 'orderedList': {
         const styleType = String((node.attrs as { listStyleType?: string } | null)?.listStyleType ?? (node.type === 'orderedList' ? 'decimal' : 'disc'));
-        const reference = listReference(styleType);
+        const reference = `t-list-${state.listIds.next++}`;
+        registerLevel(state, reference, 0, styleType);
         const instance = state.instances.next(reference);
         out.push(...mapList(node, 0, reference, instance, state));
         break;
@@ -875,13 +895,12 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     media: input.media,
     defs: new Map(input.styleDefinitions.map((d) => [d.id, d])),
     instances: makeInstanceCounter(),
+    numberingLevels: new Map(),
+    listIds: { next: 1 },
   };
 
   const bands = collectBands(input.json.content ?? []);
   const body = mapBlocks(input.json.content ?? [], state);
-
-  const usedListStyles = new Set<string>();
-  collectListStyles([input.json], usedListStyles);
 
   const { width, height, orientation } = pageDims(input.pageSetup);
   const differentFirst = input.headerFooter?.differentFirstPage === true;
@@ -895,7 +914,7 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     ...input.coreProperties,
     ...(input.pageSetup.pageColor ? { background: { color: input.pageSetup.pageColor.replace('#', '').toUpperCase() } } : {}),
     styles: buildStylesConfig(input, state.defs) as never,
-    numbering: { config: numberingConfigs(usedListStyles, state) as never },
+    numbering: { config: numberingConfigs(state) as never },
     sections: [
       {
         properties: {
