@@ -345,9 +345,14 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
   return { document, styles, numbering, core, theme, rels, parts };
 }
 
-/** The font families the file references (styles.xml + document.xml). */
+/** The font families the file references (styles.xml + document.xml).
+ *  The theme fonts count ONLY when something references them via
+ *  asciiTheme/hAnsiTheme — every docx carries a default theme part
+ *  (Calibri) that the document may never use; flagging it would fire
+ *  the font dialog on documents that don't touch it. */
 export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknown: string[] } {
   const families = new Set<string>();
+  const themeSlots = new Set<string>();
   const scan = (node: ONode | undefined): void => {
     if (!node) return;
     if (node.tag === 'rFonts') {
@@ -355,16 +360,22 @@ export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknow
         const family = oat(node, slot);
         if (family) families.add(family);
       }
+      for (const slot of ['asciiTheme', 'hAnsiTheme'] as const) {
+        const slotName = oat(node, slot);
+        if (slotName) themeSlots.add(slotName);
+      }
     }
     for (const kid of node.kids) scan(kid);
   };
   scan(trees.styles);
   scan(trees.document);
-  // The theme fonts ARE the document's fonts (minor = body, major =
-  // headings) — the inventory includes them even when no literal
-  // rFonts spell them.
-  if (trees.theme?.minor) families.add(trees.theme.minor);
-  if (trees.theme?.major) families.add(trees.theme.major);
+  // The referenced theme slots resolve through theme1.xml.
+  if (trees.theme) {
+    for (const slot of themeSlots) {
+      const family = themeSlot(trees.theme, slot);
+      if (family) families.add(family);
+    }
+  }
   const known: string[] = [];
   const unknown: string[] = [];
   for (const family of families) {
@@ -722,6 +733,18 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
       case 'fldSimple': {
         const instr = oat(kid, 'instr') ?? '';
         const kind = fieldKind(instr);
+        if (kind === 'toc') {
+          // THE CONVERSION'S OTHER HALF: a Word TOC field (simple
+          // spelling — the export emits it this way) becomes a LIVE
+          // Tensor referenceTable; the generator rebuilds the entries
+          // from the document's headings on open.
+          ctx.report.tocFields += 1;
+          content.push({
+            type: 'referenceTable',
+            attrs: { kind: 'toc', depth: parseTocDepth(instr), leaders: true, numberDisplay: 'plain' },
+          });
+          break;
+        }
         countField(ctx, kind, instr);
         if (kind === 'page') break; // cached digits suppressed
         for (const run of oKids(kid, 'r')) {

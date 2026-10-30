@@ -80,7 +80,10 @@ export async function saveDocumentAs(
   editor: Editor,
   options: SaveDocumentOptions,
 ): Promise<string | null> {
-  const path = await save({ filters: FILE_FILTERS, defaultPath: 'Untitled.wpdoc' });
+  // WPDOC-ONLY: the store's saveAs dispatches .docx to the Word writer
+  // — this legacy helper must never write a zip container into a
+  // .docx path.
+  const path = await save({ filters: [{ name: 'Word Processor Document', extensions: ['wpdoc'] }], defaultPath: 'Untitled.wpdoc' });
   if (!path) return null;
   await saveDocument(editor, path, options);
   return path;
@@ -175,14 +178,35 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
  * for the loud notice. The dynamic import keeps marked out of the
  * startup path (the same lazy pattern the backfill uses).
  */
+/** The Save-As surface: Tensor's own format OR Word's — markdown is
+ *  deliberately absent (an export-only format; saving a document as
+ *  .md would be lossy on every save). The chosen extension decides
+ *  the writer. */
+const SAVE_AS_FILTERS = [
+  { name: 'Word Processor Document', extensions: ['wpdoc'] },
+  { name: 'Word Document', extensions: ['docx'] },
+];
+
+/** The Save-As dialog's path (the caller dispatches on the extension). */
+export async function chooseSavePath(defaultName: string): Promise<string | null> {
+  return save({ filters: SAVE_AS_FILTERS, defaultPath: defaultName });
+}
+
+/** The default Save-As name for the current document (its own
+ *  extension preserved; Untitled docs default to Tensor's format). */
+export function saveAsDefaultName(filePath: string | null): string {
+  if (!filePath) return 'Untitled.wpdoc';
+  return filePath.split(/[\\/]/).pop() ?? 'Untitled.wpdoc';
+}
+
 /**
- * M-DOCX — the Word open path (#38a): unzip → parse → the font choice
- * (the ImportOptionsDialog fires only for out-of-catalog families) →
- * the inverse mapping → setContent. The doc's OWN settings travel
- * (pageSetup/styles/bands/line numbers/core properties); path stays
- * NULL for now — in-place .docx saving is the follow-up slice (the
- * save dispatch must exist before a .docx can be adopted as the
- * document's file, or Save would write a zip container into it).
+ * M-DOCX — the Word open path (#38a + the in-place ruling): unzip →
+ * parse → the font choice (the ImportOptionsDialog fires only for
+ * out-of-catalog families) → the inverse mapping → setContent. The
+ * doc's OWN settings travel (pageSetup/styles/bands/line numbers/core
+ * properties), and the .docx file is ADOPTED — filePath becomes the
+ * Word file, so Save writes it in place (the save dispatch owns that
+ * path; opening a Word document is opening a document).
  */
 async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocumentResult> {
   const { importDocxFile } = await import('@/lib/docx/importFlow');
@@ -190,7 +214,7 @@ async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocum
   const result = await importDocxFile(path, name.replace(/\.docx$/i, ''));
   editor.commands.setContent(result.json);
   return {
-    path: null,
+    path,
     pageSetup: result.pageSetup,
     styleDefinitions: result.styleDefinitions,
     lineNumbers: result.lineNumbers,

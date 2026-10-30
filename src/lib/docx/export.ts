@@ -13,6 +13,7 @@ import {
   PageOrientation,
   Packer,
   Paragraph,
+  SimpleField,
   ShadingType,
   Tab,
   TabStopType,
@@ -123,7 +124,6 @@ export interface DocxExportInput {
 }
 
 export interface DocxExportReport {
-  referenceTables: number;
   equationsAsText: number;
   floatedImagesInline: number;
   missingImages: number;
@@ -134,9 +134,6 @@ export interface DocxExportReport {
 
 export function docxReportLines(report: DocxExportReport): string[] {
   const lines: string[] = [];
-  if (report.referenceTables > 0) {
-    lines.push(`Reference tables (${report.referenceTables}) — the live TOC field lands in a later update`);
-  }
   if (report.equationsAsText > 0) {
     lines.push(`Equations exported as plain text (${report.equationsAsText}) — the converter could not read the LaTeX`);
   }
@@ -174,6 +171,9 @@ interface WalkState {
    *  nested list would render flat. */
   numberingLevels: Map<string, (string | undefined)[]>;
   listIds: { next: number };
+  /** A TOC field was emitted — Document features.updateFields makes
+   *  Word refresh fields on open. */
+  needsUpdateFields: boolean;
 }
 
 /** Record a nesting level's format on the reference (idempotent per
@@ -722,11 +722,21 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
       case 'headerBlock':
       case 'footerBlock':
         break; // bands are collected by buildDocx, never body flow
-      case 'referenceTable':
-        // Entries are DERIVED content (the generator owns them); the
-        // real TOC field lands in #37b — skipped + counted.
-        state.report.referenceTables += 1;
+      case 'referenceTable': {
+        // THE TOC FIELD (the round-trip closes): a Tensor referenceTable
+        // exports as Word's OWN TOC field — the entries are derived
+        // content (Tensor's generator owns them Tensor-side; Word owns
+        // them Word-side), so the field carries an instruction and
+        // Word refreshes it on open (updateFields). The in-place save
+        // loop then never loses a ToC.
+        const refAttrs = (node.attrs ?? {}) as { kind?: string; depth?: number };
+        const depth = Math.min(6, Math.max(1, Number(refAttrs.depth ?? 3)));
+        state.needsUpdateFields = true;
+        out.push(new Paragraph({
+          children: [new SimpleField(`TOC \\o "1-${depth}"`, 'Right-click this field and choose Update Field to build the table of contents.')],
+        }));
         break;
+      }
       default:
         state.report.unknownNodes[node.type ?? 'unknown'] = (state.report.unknownNodes[node.type ?? 'unknown'] ?? 0) + 1;
         break;
@@ -891,12 +901,13 @@ function pageDims(pageSetup: PageSetup): { width: number; height: number; orient
 
 export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8Array; report: DocxExportReport }> {
   const state: WalkState = {
-    report: { referenceTables: 0, equationsAsText: 0, floatedImagesInline: 0, missingImages: 0, unsupportedImages: 0, unknownListStyles: 0, unknownNodes: {} },
+    report: { equationsAsText: 0, floatedImagesInline: 0, missingImages: 0, unsupportedImages: 0, unknownListStyles: 0, unknownNodes: {} },
     media: input.media,
     defs: new Map(input.styleDefinitions.map((d) => [d.id, d])),
     instances: makeInstanceCounter(),
     numberingLevels: new Map(),
     listIds: { next: 1 },
+    needsUpdateFields: false,
   };
 
   const bands = collectBands(input.json.content ?? []);
@@ -913,6 +924,7 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
   const doc = new Document({
     ...input.coreProperties,
     ...(input.pageSetup.pageColor ? { background: { color: input.pageSetup.pageColor.replace('#', '').toUpperCase() } } : {}),
+    ...(state.needsUpdateFields ? { features: { updateFields: true } } : {}),
     styles: buildStylesConfig(input, state.defs) as never,
     numbering: { config: numberingConfigs(state) as never },
     sections: [

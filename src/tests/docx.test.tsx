@@ -383,14 +383,23 @@ describe('docx export — bands, styles, properties, degradation', () => {
     expect(text('word/document.xml')).toContain('<w:rStyle w:val="Tensor-strong"/>');
   });
 
-  it('reference tables are skipped and counted (the TOC field lands in #37b)', async () => {
+  it('a Tensor ToC exports as a REAL Word TOC field (the round-trip closes)', async () => {
     const { text, report } = await exportParts(makeInput(doc(
-      { type: 'referenceTable', attrs: { kind: 'toc', depth: 3 }, content: [para('1.2 An entry')] },
+      { type: 'referenceTable', attrs: { kind: 'toc', depth: 3, leaders: true, numberDisplay: 'plain' }, content: [para('1.2 An entry')] },
       para('body'),
     )));
-    expect(report.referenceTables).toBe(1);
-    expect(text('word/document.xml')).not.toContain('An entry');
-    expect(docxReportLines(report).some((l) => l.includes('Reference tables (1)'))).toBe(true);
+    const body = text('word/document.xml');
+    // the field instruction rides (XML-escaped quotes); the entries
+    // are Word's to regenerate
+    expect(body).toContain('<w:fldSimple w:instr="TOC');
+    expect(body).toContain('&quot;1-3&quot;'); // quotes are XML-escaped in the attribute
+    expect(body).toContain('w:fldSimple');
+    // updateFields makes Word refresh the field on open
+    expect(text('word/settings.xml')).toContain('updateFields');
+    // the derived entries do NOT export (Word owns them Word-side)
+    expect(body).not.toContain('An entry');
+    // and it is no longer a reported loss — the round-trip is clean
+    expect(docxReportLines(report)).toEqual([]);
   });
 
   it('unknown node types are counted, never silently dropped', async () => {

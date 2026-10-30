@@ -50,7 +50,7 @@ function zipParts(entries: Record<string, string | Uint8Array>): Record<string, 
 const STYLES_XML = `${W_DECL}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults>
 <w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
-<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/><w:sz w:val="48"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/></w:pPr><w:rPr><w:b/><w:sz w:val="48"/><w:rFonts w:asciiTheme="majorHAnsi"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="MyCallout"><w:name w:val="Callout"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:color w:val="224488"/></w:rPr></w:style>
 <w:style w:type="character" w:styleId="KeyTerm"><w:name w:val="Key Term"/><w:rPr><w:b/></w:rPr></w:style>
 </w:styles>`;
