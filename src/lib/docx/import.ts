@@ -92,6 +92,18 @@ export function substituteFontFamily(family: string): string {
   return 'Open Sans';
 }
 
+/** THE rFonts RESOLUTION: a literal ascii/hAnsi wins; the theme slot
+ *  (asciiTheme="minorHAnsi" — how modern Word spells it) resolves
+ *  through theme1.xml; the policy applies to the RESOLVED name. */
+function resolveFontFamily(rFonts: ONode | undefined, theme: DocxThemeFonts | undefined, policy: 'keep' | 'substitute'): string | undefined {
+  if (!rFonts) return undefined;
+  const literal = oat(rFonts, 'ascii') ?? oat(rFonts, 'hAnsi');
+  if (literal) return applyFontPolicy(literal, policy);
+  const themed = themeSlot(theme, oat(rFonts, 'asciiTheme') ?? oat(rFonts, 'hAnsiTheme'));
+  if (themed) return applyFontPolicy(themed, policy);
+  return undefined;
+}
+
 function applyFontPolicy(family: string | undefined, policy: 'keep' | 'substitute'): string | undefined {
   if (!family) return undefined;
   if (policy === 'substitute' && !KNOWN_FAMILIES.has(family)) return substituteFontFamily(family);
@@ -135,7 +147,7 @@ function emptyReport(): DocxImportReport {
 export function docxImportNoticeLines(report: DocxImportReport): string[] {
   const lines: string[] = [];
   if (report.tocFields > 0) {
-    lines.push(`Table of contents imported as static text (${report.tocFields}) — Word regenerates real TOCs on open`);
+    lines.push(`Word ToC converted to a live Tensor ToC (${report.tocFields}) — entries regenerate from the document's headings`);
   }
   if (report.trackedChanges > 0) {
     lines.push(`Tracked changes imported as final text (${report.trackedChanges} deletions accepted)`);
@@ -183,11 +195,10 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
 
 // ─── Style properties from rPr/pPr (ONode) ───────────────────────────────
 
-function runPropsFromRPr(rPr: ONode | undefined, policy: 'keep' | 'substitute'): StyleProperties {
+function runPropsFromRPr(rPr: ONode | undefined, policy: 'keep' | 'substitute', theme?: DocxThemeFonts): StyleProperties {
   const props: StyleProperties = {};
   if (!rPr) return props;
-  const fonts = oSub(rPr, 'rFonts');
-  const family = applyFontPolicy(fonts ? oat(fonts, 'ascii') ?? oat(fonts, 'hAnsi') : undefined, policy);
+  const family = resolveFontFamily(oSub(rPr, 'rFonts'), theme, policy);
   if (family) props.fontFamily = family;
   const sz = ovalNum(rPr, 'sz');
   if (sz != null) props.fontSize = halfPointsToPx(sz);
@@ -271,14 +282,43 @@ function resolveStyleProps(
 
 // ─── The trees ───────────────────────────────────────────────────────────
 
+export interface DocxThemeFonts {
+  minor: string | null;
+  major: string | null;
+}
+
 export interface DocxTrees {
   document: ONode;
   styles: ONode | undefined;
   numbering: ONode | undefined;
   core: ONode | undefined;
+  theme: DocxThemeFonts | undefined;
   /** rId → resolved part name (word/-prefixed) or external URL. */
   rels: Map<string, { target: string; external: boolean }>;
   parts: Record<string, Uint8Array>;
+}
+
+/** Theme font resolution: modern Word documents reference fonts as
+ *  asciiTheme="minorHAnsi" (pointing at theme1.xml), never literal
+ *  names — without this the document's real font is invisible to the
+ *  mapper and the ruling-4 dialog never fires. */
+function themeFonts(themePart: string | undefined): DocxThemeFonts | undefined {
+  if (!themePart) return undefined;
+  const root = parseOrdered(themePart);
+  const fontScheme = oSub(oSub(root, 'themeElements'), 'fontScheme');
+  if (!fontScheme) return undefined;
+  const pick = (kind: string): string | null => {
+    const latin = oSub(oSub(fontScheme, kind), 'latin');
+    const face = oat(latin, 'typeface');
+    return face && face !== '+mn-lt' && face !== '+mj-lt' ? face : null;
+  };
+  return { minor: pick('minorFont'), major: pick('majorFont') };
+}
+
+/** rFonts asciiTheme/hAnsiTheme spellings → the theme font. */
+function themeSlot(theme: DocxThemeFonts | undefined, slot: string | undefined): string | undefined {
+  if (!theme || !slot) return undefined;
+  return slot.toLowerCase().startsWith('major') ? theme.major ?? undefined : theme.minor ?? undefined;
 }
 
 export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
@@ -287,6 +327,7 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
   const styles = parts['word/styles.xml'] ? parseOrdered(decode(parts['word/styles.xml'])) : undefined;
   const numbering = parts['word/numbering.xml'] ? parseOrdered(decode(parts['word/numbering.xml'])) : undefined;
   const core = parts['docProps/core.xml'] ? parseOrdered(decode(parts['docProps/core.xml'])) : undefined;
+  const theme = themeFonts(parts['word/theme/theme1.xml'] ? decode(parts['word/theme/theme1.xml']) : undefined);
 
   const rels = new Map<string, { target: string; external: boolean }>();
   const relsXml = parts['word/_rels/document.xml.rels'];
@@ -301,7 +342,7 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
       }
     }
   }
-  return { document, styles, numbering, core, rels, parts };
+  return { document, styles, numbering, core, theme, rels, parts };
 }
 
 /** The font families the file references (styles.xml + document.xml). */
@@ -319,6 +360,11 @@ export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknow
   };
   scan(trees.styles);
   scan(trees.document);
+  // The theme fonts ARE the document's fonts (minor = body, major =
+  // headings) — the inventory includes them even when no literal
+  // rFonts spell them.
+  if (trees.theme?.minor) families.add(trees.theme.minor);
+  if (trees.theme?.major) families.add(trees.theme.major);
   const known: string[] = [];
   const unknown: string[] = [];
   for (const family of families) {
@@ -331,6 +377,7 @@ export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknow
 
 interface MapContext {
   policy: 'keep' | 'substitute';
+  theme: DocxThemeFonts | undefined;
   mediaPartToId: Map<string, string>;
   report: DocxImportReport;
   numberingMap: Map<string, string>;
@@ -338,6 +385,13 @@ interface MapContext {
   /** the field state machine (spans paragraphs via the run mapping) */
   fieldDepth: number;
   fieldInstr: string[];
+  /** THE TOC CONVERSION (the user's ruling): a Word TOC field's cached
+   *  paragraphs are CAPTURED (never emitted as static text) and, at the
+   *  field's end, built into a Tensor referenceTable {kind: 'toc'} —
+   *  whose entries the generator immediately rebuilds from the
+   *  document's headings. A live ToC from a dead field. */
+  tocCapture: { depth: number; entries: JSONContent[] } | null;
+  tocEnd: boolean;
 }
 
 type FieldKind = 'toc' | 'page' | 'hyperlink' | 'other' | null;
@@ -352,6 +406,8 @@ function fieldKind(instr: string): FieldKind {
 
 function countField(ctx: MapContext, kind: FieldKind, instr: string): void {
   if (kind == null) return;
+  if (ctx.tocCapture && kind === 'page') return; // the ToC's own PAGEREFs
+
   if (kind === 'toc') ctx.report.tocFields += 1;
   else if (kind === 'page') ctx.report.pageFields += 1;
   else if (kind === 'hyperlink') { /* the link shape carries it */ }
@@ -381,6 +437,7 @@ interface RunFormat {
 function runFormatFromRPr(rPr: ONode | undefined, ctx: MapContext): RunFormat {
   const format: RunFormat = {};
   if (!rPr) return format;
+  void ctx.theme;
   if (oflag(oSub(rPr, 'b')) === true) format.bold = true;
   if (oflag(oSub(rPr, 'i')) === true) format.italic = true;
   if (oSub(rPr, 'strike') || oSub(rPr, 'dstrike')) format.strike = true;
@@ -395,8 +452,7 @@ function runFormatFromRPr(rPr: ONode | undefined, ctx: MapContext): RunFormat {
   if (highlightHex) format.highlightHex = highlightHex.toUpperCase();
   const color = oat(oSub(rPr, 'color'), 'val');
   if (color && color !== 'auto') format.color = color.toUpperCase();
-  const fonts = oSub(rPr, 'rFonts');
-  const family = applyFontPolicy(fonts ? oat(fonts, 'ascii') ?? oat(fonts, 'hAnsi') : undefined, ctx.policy);
+  const family = resolveFontFamily(oSub(rPr, 'rFonts'), ctx.theme, ctx.policy);
   if (family) format.fontFamily = family;
   const sz = ovalNum(rPr, 'sz');
   if (sz != null) format.fontSizePx = halfPointsToPx(sz);
@@ -490,10 +546,18 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
           ctx.fieldDepth += 1;
           ctx.fieldInstr.push('');
         } else if (type === 'separate') {
-          countField(ctx, currentFieldKind(ctx), ctx.fieldInstr[ctx.fieldInstr.length - 1] ?? '');
+          const instr = ctx.fieldInstr[ctx.fieldInstr.length - 1] ?? '';
+          const kind = fieldKind(instr);
+          if (kind === 'toc' && !ctx.tocCapture) {
+            ctx.tocCapture = { depth: parseTocDepth(instr), entries: [] };
+            ctx.report.tocFields += 1;
+          } else {
+            countField(ctx, kind, instr);
+          }
         } else if (type === 'end') {
+          const popped = ctx.fieldInstr.pop() ?? '';
           ctx.fieldDepth = Math.max(0, ctx.fieldDepth - 1);
-          ctx.fieldInstr.pop();
+          if (fieldKind(popped) === 'toc') ctx.tocEnd = true;
         }
         break;
       }
@@ -626,7 +690,7 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         // Internal anchors (w:anchor) have no relationship — plain text
         // + counted (#57's bookmark model lands later).
         if (oat(kid, 'anchor') != null) {
-          ctx.report.internalLinks += 1;
+          if (!ctx.tocCapture) ctx.report.internalLinks += 1;
           for (const run of oKids(kid, 'r')) {
             const format = runFormatFromRPr(oSub(run, 'rPr'), ctx);
             content.push(...mapRunChildren(run, format, ctx, rels).pieces);
@@ -636,7 +700,7 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         const relId = oat(kid, 'id');
         const rel = relId ? rels.get(relId) : undefined;
         if (!rel || !rel.external) {
-          ctx.report.internalLinks += 1;
+          if (!ctx.tocCapture) ctx.report.internalLinks += 1;
           for (const run of oKids(kid, 'r')) {
             const format = runFormatFromRPr(oSub(run, 'rPr'), ctx);
             content.push(...mapRunChildren(run, format, ctx, rels).pieces);
@@ -1046,6 +1110,7 @@ function importStyles(trees: DocxTrees, policy: 'keep' | 'substitute'): { defini
   const docDefaults = runPropsFromRPr(
     oSub(oSub(oSub(stylesRoot, 'docDefaults'), 'rPrDefault'), 'rPr'),
     policy,
+    trees.theme,
   );
 
   const raw = new Map<string, { basedOn?: string; name: string; kind: 'paragraph' | 'character'; run: StyleProperties; para: StyleProperties }>();
@@ -1058,7 +1123,7 @@ function importStyles(trees: DocxTrees, policy: 'keep' | 'substitute'): { defini
       basedOn: oat(oSub(style, 'basedOn'), 'val') ?? undefined,
       name: oat(oSub(style, 'name'), 'val') ?? id,
       kind: kind === 'character' ? 'character' : 'paragraph',
-      run: runPropsFromRPr(oSub(style, 'rPr'), policy),
+      run: runPropsFromRPr(oSub(style, 'rPr'), policy, trees.theme),
       para: paraPropsFromPPPr(oSub(style, 'pPr')),
     });
   }
@@ -1133,12 +1198,15 @@ export function mapDocxDocument(
 ): DocxImportParsed {
   const ctx: MapContext = {
     policy: opts.fontPolicy,
+    theme: trees.theme,
     mediaPartToId: opts.mediaPartToId,
     report: emptyReport(),
     numberingMap: new Map(),
     numberingLevels: new Map(),
     fieldDepth: 0,
     fieldInstr: [],
+    tocCapture: null,
+    tocEnd: false,
   };
   numberingTables(trees.numbering, ctx);
   const styles = importStyles(trees, ctx.policy);
@@ -1186,15 +1254,33 @@ export function mapDocxDocument(
     }
   };
 
+  /** THE CAPTURE-AWARE EMIT: while a TOC field is being read, mapped
+   *  paragraphs are its entries; the field's end builds the live
+   *  referenceTable. */
+  const emitMapped = (mapped: ParagraphResult): void => {
+    if (!mapped.json) return;
+    if (ctx.tocCapture) {
+      ctx.tocCapture.entries.push(mapped.json);
+      listStack.length = 0; // a ToC block ends any open list run
+      if (ctx.tocEnd) {
+        output.push(buildTocRefTable(ctx.tocCapture));
+        ctx.tocCapture = null;
+        ctx.tocEnd = false;
+      }
+      return;
+    }
+    ctx.tocEnd = false;
+    emitBlock(mapped.json, mapped.numPr);
+  };
+
   for (const kid of body?.kids ?? []) {
     switch (kid.tag) {
       case 'p': {
-        const mapped = mapParagraph(kid, ctx, trees.rels);
-        if (mapped.json) emitBlock(mapped.json, mapped.numPr);
+        emitMapped(mapParagraph(kid, ctx, trees.rels));
         break;
       }
       case 'tbl':
-        emitBlock(mapTable(kid, ctx, trees.rels), null);
+        if (!ctx.tocCapture) emitBlock(mapTable(kid, ctx, trees.rels), null);
         break;
       case 'sectPr':
         if (section) sectionBreaks += 1;
@@ -1203,8 +1289,7 @@ export function mapDocxDocument(
       case 'ins': {
         // block-level tracked insertion — its paragraphs are kept
         for (const p of oKids(kid, 'p')) {
-          const mapped = mapParagraph(p, ctx, trees.rels);
-          if (mapped.json) emitBlock(mapped.json, mapped.numPr);
+          emitMapped(mapParagraph(p, ctx, trees.rels));
         }
         break;
       }
@@ -1214,11 +1299,10 @@ export function mapDocxDocument(
       case 'sdt': {
         const inner = oSub(kid, 'sdtContent');
         for (const p of oKids(inner, 'p')) {
-          const mapped = mapParagraph(p, ctx, trees.rels);
-          if (mapped.json) emitBlock(mapped.json, mapped.numPr);
+          emitMapped(mapParagraph(p, ctx, trees.rels));
         }
         for (const tbl of oKids(inner, 'tbl')) {
-          emitBlock(mapTable(tbl, ctx, trees.rels), null);
+          if (!ctx.tocCapture) emitBlock(mapTable(tbl, ctx, trees.rels), null);
         }
         break;
       }
@@ -1271,6 +1355,26 @@ function promoteSoloImage(block: JSONContent): JSONContent {
     };
   }
   return block;
+}
+
+/** THE TOC CONVERSION: Word's field becomes a Tensor referenceTable —
+ *  the depth rides the \o switch ("1-3" → 3); the captured entry
+ *  paragraphs seed the container (the generator rebuilds them from the
+ *  document's headings on open — a live ToC from a dead field). */
+function parseTocDepth(instr: string): number {
+  const range = /\o\s+"?([0-9])[-\u2013]([0-9])"?/i.exec(instr);
+  if (range) return Math.min(6, Math.max(1, Number(range[2])));
+  const single = /\o\s+"?(\d)"?/i.exec(instr);
+  if (single) return Math.min(6, Math.max(1, Number(single[1])));
+  return 3;
+}
+
+function buildTocRefTable(capture: { depth: number; entries: JSONContent[] }): JSONContent {
+  return {
+    type: 'referenceTable',
+    attrs: { kind: 'toc', depth: capture.depth, leaders: true, numberDisplay: 'plain' },
+    content: capture.entries,
+  };
 }
 
 // ─── Media ingest (the flow's seam) ──────────────────────────────────────

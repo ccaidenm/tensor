@@ -365,11 +365,12 @@ describe('docx import — the loud postures', () => {
     expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('Tracked changes imported as final'))).toBe(true);
   });
 
-  it('PAGE fields are suppressed and counted; TOC keeps its cached text', () => {
+  it('PAGE fields are suppressed and counted; a TOC becomes a LIVE Tensor ToC', () => {
     const parts = zipParts({
       'word/document.xml': body(
         `<w:p>${runXml('page ')}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>3</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>` +
-        `<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o 1-3</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:hyperlink w:anchor="_Toc1">${runXml('cached entry')}</w:hyperlink><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`,
+        `<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>TOC \o "1-3"</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:hyperlink w:anchor="_Toc1">${runXml('cached entry')}</w:hyperlink></w:p>` +
+        `<w:p><w:hyperlink w:anchor="_Toc2">${runXml('second entry')}</w:hyperlink><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>`,
       ),
       'word/styles.xml': STYLES_XML,
     });
@@ -378,10 +379,18 @@ describe('docx import — the loud postures', () => {
     const firstPara = parsed.json.content![0]!.content![0]!;
     expect(firstPara.text).toBe('page '); // the cached "3" never landed
     expect(parsed.report.pageFields).toBe(1);
-    const tocPara = parsed.json.content![1]!;
-    expect(JSON.stringify(tocPara)).toContain('cached entry'); // static text survives
+    // THE CONVERSION: the dead Word field became a LIVE reference table
+    const toc = parsed.json.content![1]!;
+    expect(toc.type).toBe('referenceTable');
+    expect(toc.attrs!.kind).toBe('toc');
+    expect(toc.attrs!.depth).toBe(3); // parsed from \o "1-3"
+    const entryTexts = JSON.stringify(toc.content);
+    expect(entryTexts).toContain('cached entry');
+    expect(entryTexts).toContain('second entry');
     expect(parsed.report.tocFields).toBe(1);
-    expect(parsed.report.internalLinks).toBe(1); // the _Toc anchor
+    // the ToC's own anchors are its machinery, not dropped content
+    expect(parsed.report.internalLinks).toBe(0);
+    expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('live Tensor ToC'))).toBe(true);
   });
 
   it('footnote references and comments are counted, not imported', () => {
@@ -396,6 +405,43 @@ describe('docx import — the loud postures', () => {
     expect(parsed.report.footnotes).toBe(1);
     expect(parsed.report.comments).toBeGreaterThanOrEqual(1);
     expect(parsed.json.content![0]!.content![0]!.text).toBe('text more');
+  });
+});
+
+describe('docx import — THEME fonts (the dialog that never fired)', () => {
+  // Modern Word documents reference fonts as asciiTheme="minorHAnsi"
+  // (pointing at theme1.xml) — never literal rFonts. The theme part
+  // resolves: the inventory flags Calibri (the dialog fires) and the
+  // docDefaults/normal definition carries the document's real font.
+  const THEME_XML = `${W_DECL}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:fontScheme><a:majorFont><a:latin typeface="Calibri Light"/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>`;
+
+  it('asciiTheme resolves through theme1.xml; the inventory flags it', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p><w:r><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/></w:rPr><w:t>body text</w:t></w:r></w:p>` +
+        `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML.replace('<w:rFonts w:ascii="Times New Roman"/>', '<w:rFonts w:asciiTheme="minorHAnsi"/>'),
+      'word/theme/theme1.xml': THEME_XML,
+    });
+    const trees = parseDocxTrees(parts);
+    expect(trees.theme!.minor).toBe('Calibri');
+    expect(trees.theme!.major).toBe('Calibri Light');
+    // the inventory: the theme fonts are the document's fonts
+    const fonts = collectFontFamilies(trees);
+    expect(fonts.unknown).toContain('Calibri');
+    expect(fonts.unknown).toContain('Calibri Light');
+    // keep: the resolved theme name rides the run mark AND the normal def
+    const kept = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const bodyRun = kept.json.content![0]!.content![0]!;
+    const mark = (bodyRun.marks ?? []).find((m) => m.type === 'textStyle');
+    expect(mark!.attrs!.fontFamily).toBe('Calibri');
+    const normal = kept.styleDefinitions.find((d) => d.id === 'normal')!;
+    expect(normal.properties.fontFamily).toBe('Calibri');
+    // substitute: Calibri → Open Sans everywhere
+    const substituted = mapDocxDocument(trees, { fontPolicy: 'substitute', mediaPartToId: new Map() });
+    const subNormal = substituted.styleDefinitions.find((d) => d.id === 'normal')!;
+    expect(subNormal.properties.fontFamily).toBe('Open Sans');
   });
 });
 

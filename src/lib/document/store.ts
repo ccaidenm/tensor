@@ -6,6 +6,7 @@ import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMa
 import { docxDefaultPath, exportDocxFile } from '@/lib/docx/exportFlow';
 import { toDocxCoreProperties } from './coreProperties';
 import { useMediaStore } from '@/lib/media/store';
+import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 import { clearRecoveryCopy } from './recovery';
 import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
@@ -198,21 +199,21 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           // instances off this write (its own subscription).
           headerFooter: result.headerFooter,
         });
-        // M-MD: the LOUD posture for dropped images — one dialog naming
-        // the count, after the content has landed (never a crash,
-        // never silent loss). M-DOCX: the Word import's notices use
-        // the same surface.
+        // M-MD/M-DOCX: the LOUD posture — one in-app report dialog
+        // naming what changed, after the content has landed (never a
+        // crash, never silent loss).
+        const notices: string[] = [];
         if (result.skippedImages) {
-          await message(
+          notices.push(
             `${result.skippedImages} image${result.skippedImages === 1 ? ' was' : 's were'} not imported — remote, missing, or unreadable sources are refused rather than silently fetched.`,
-            { title: 'Markdown import', kind: 'warning' },
           );
         }
-        if (result.importNotices?.length) {
-          await message(
-            result.importNotices.map((line) => `• ${line}`).join('\n'),
-            { title: 'Word import', kind: 'warning' },
-          );
+        if (result.importNotices?.length) notices.push(...result.importNotices);
+        if (notices.length) {
+          useImportReportDialogStore.getState().show({
+            title: result.importNotices ? 'Word import' : 'Markdown import',
+            lines: notices,
+          });
         }
       }
     } catch (err) {

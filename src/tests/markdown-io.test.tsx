@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { save, message } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
 import { mkdir, readFile } from '@tauri-apps/plugin-fs';
 import type { JSONContent } from '@tiptap/core';
 import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMarkdown';
@@ -11,6 +11,7 @@ import {
   ExportConfirmDialog,
   useExportConfirmDialogStore,
 } from '@/components/dialogs/ExportConfirmDialog';
+import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 
 /**
  * M-MD — the file-flow suite: export (confirm gate → save dialog →
@@ -151,7 +152,9 @@ describe('export flow', () => {
     );
     const md = files.get('/dir/gone.md') as string;
     expect(md).toContain(`media://${SHA}`);
-    expect(message).toHaveBeenCalledTimes(1);
+    // the loud surface is the IN-APP report dialog, never a native popup
+    expect(useImportReportDialogStore.getState().pending?.lines.length).toBeGreaterThan(0);
+    useImportReportDialogStore.getState().dismiss();
   });
 });
 

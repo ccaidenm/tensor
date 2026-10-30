@@ -14,6 +14,7 @@ import { AltTextDialog } from './components/dialogs/ImageDialogs';
 import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
 import { ExportConfirmDialog } from './components/dialogs/ExportConfirmDialog';
 import { ImportOptionsDialog } from './components/dialogs/ImportOptionsDialog';
+import { ImportReportDialog } from './components/dialogs/ImportReportDialog';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
@@ -195,6 +196,9 @@ function App() {
       {/* M-DOCX: the import options surface (the font policy) — the
           same promise-bridge pattern, one mount. */}
       <ImportOptionsDialog />
+      {/* M-MD/M-DOCX: the import report (what an import dropped or
+          converted) — the loud posture's in-app surface. */}
+      <ImportReportDialog />
       {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
           one mount like its InsertTableDialog twin. */}
       <InsertReferenceTableDialog />
