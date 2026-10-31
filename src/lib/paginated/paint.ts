@@ -1,6 +1,7 @@
 import type { LayoutResult, LineBox, Run, TextMetrics, TextStyle } from '@tensor-editor/engine';
 import type { BlockPaint, RunDecor, TextAlign } from './adapter';
 import { applyVariantCaps, fontString } from './metrics';
+import { bulletMarkerText, orderedMarkerText } from '@/lib/print/markers';
 import { alignOffset, fieldShiftBefore } from './positionMap';
 import { fitDownImage } from '@tensor-editor/engine';
 import { FAILED_HATCH, FAILED_TINT, PENDING_TINT } from '@/lib/media/bitmapCache';
@@ -161,61 +162,6 @@ function npcSubstitute(s: string): string {
   return s.replace(/\u00A0/g, '·').replace(/\t/g, '→');
 }
 
-/** Ordered-number spelling per CSS list-style-type (the extensions'
- * value set — the M6.1 receipt). */
-function orderedMarkerText(index: number, styleType: string): string {
-  switch (styleType) {
-    case 'lower-alpha':
-      return `${toAlpha(index).toLowerCase()}.`;
-    case 'upper-alpha':
-      return `${toAlpha(index)}.`;
-    case 'lower-roman':
-      return `${toRoman(index).toLowerCase()}.`;
-    case 'upper-roman':
-      return `${toRoman(index)}.`;
-    default:
-      return `${index}.`;
-  }
-}
-
-/** Bullet-glyph spelling per CSS list-style-type. */
-function bulletMarkerText(styleType: string): string {
-  switch (styleType) {
-    case 'circle':
-      return '○';
-    case 'square':
-      return '▪';
-    default:
-      return '•';
-  }
-}
-
-function toAlpha(n: number): string {
-  // 1-based spreadsheet spelling: 27 → AA.
-  let s = '';
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s || 'A';
-}
-
-function toRoman(n: number): string {
-  const table: Array<[number, string]> = [
-    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
-    [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
-    [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
-  ];
-  let s = '';
-  for (const [value, glyph] of table) {
-    while (n >= value) {
-      s += glyph;
-      n -= value;
-    }
-  }
-  return s || 'I';
-}
 
 export function paintLines(
   ctx: CanvasRenderingContext2D,
