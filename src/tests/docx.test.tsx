@@ -390,6 +390,31 @@ describe('docx export — bands, styles, properties, degradation', () => {
     expect(text('word/document.xml')).toContain('<w:rStyle w:val="Tensor-strong"/>');
   });
 
+  it('a page field exports as a REAL PAGE field inside band content', async () => {
+    const { text, report } = await exportParts(makeInput(doc(
+      {
+        type: 'headerBlock',
+        attrs: { variant: 'default' },
+        content: [{
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Page ' },
+            { type: 'pageField', attrs: { kind: 'page' } },
+            { type: 'text', text: ' of ' },
+            { type: 'pageField', attrs: { kind: 'pages' } },
+          ],
+        }],
+      },
+      para('body'),
+    )));
+    const header = text('word/header1.xml');
+    // the fields are Word's OWN — Word resolves them per page
+    expect(header).toContain('w:instr="PAGE"');
+    expect(header).toContain('w:instr="NUMPAGES"');
+    // and it is not a reported loss — the round-trip is clean
+    expect(docxReportLines(report)).toEqual([]);
+  });
+
   it('a Tensor ToC exports as a REAL Word TOC field (the round-trip closes)', async () => {
     const { text, report } = await exportParts(makeInput(doc(
       { type: 'referenceTable', attrs: { kind: 'toc', depth: 3, leaders: true, numberDisplay: 'plain' }, content: [para('1.2 An entry')] },

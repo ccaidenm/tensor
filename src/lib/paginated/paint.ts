@@ -118,6 +118,15 @@ export interface PaintExtras {
    * run text — the round-8 stretch revert).
    */
   referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
+    /**
+     * M-PAGEFIELD — the per-page field resolution: THIS page's 1-based
+     * number + the document's total. A segment whose run carries
+     * fieldKind draws the resolved text instead of the measured
+     * placeholder (the pages field draws EXACTLY the placeholder —
+     * total == measured; the page field right-anchors in the slot, the
+     * units column staying put across pages). Absent = no fields.
+     */
+    fieldPage?: { number: number; total: number };
   /** The marker's font — resolved by the caller from the block's first
    *  run, falling back to the document default for empty items
    *  ("style from the block's runs"). */
@@ -351,6 +360,18 @@ export function paintLines(
       // model tab advances (a \t's jump is pen-dependent; center/right
       // stops reposition their text).
       const x = baseX + segment.x;
+      // M-PAGEFIELD — the per-page resolution: a field run's segment
+      // text is the MEASURED placeholder (the max-width digits); the
+      // drawn text is THIS page's resolution. The pages field draws
+      // exactly the placeholder (the total IS the measured string);
+      // the page field right-anchors in the slot — the units digit
+      // stays put across pages (9/10/11 keep their columns).
+      const fieldResolved =
+        run.kind !== 'inlineImage' && run.fieldKind && extras.fieldPage
+          ? run.fieldKind === 'pages'
+            ? String(extras.fieldPage.total)
+            : String(extras.fieldPage.number)
+          : null;
       // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): the U+FFFC token paints
       // as the image itself, BASELINE-SEATED (bottom at the baseline;
       // the engine grew the line's ascent for it — the shell fills the
@@ -402,12 +423,20 @@ export function paintLines(
       if (isTab && !npc) continue;
       const paintText = npc ? npcSubstitute(segmentText) : segmentText;
       const width = metrics.measure(isTab ? npcSubstitute(segmentText) : segmentText, run.style);
+      let drawX = x;
+      let paintWidth = width;
+      let drawn = fieldResolved ?? paintText;
+      if (fieldResolved != null) {
+        const resolvedWidth = metrics.measure(fieldResolved, run.style);
+        drawX = x + Math.max(0, width - resolvedWidth);
+        paintWidth = resolvedWidth;
+      }
 
       if (decor.highlight) {
         const ascent = metrics.ascent(run.style);
         const descent = metrics.descent(run.style);
         ctx.fillStyle = decor.highlight;
-        ctx.fillRect(x, baselineY - ascent, width, ascent + descent);
+        ctx.fillRect(drawX, baselineY - ascent, paintWidth, ascent + descent);
       }
 
       // M-HEADER-FOOTER-3: muted band ink DESATURATES the run's own
@@ -421,7 +450,7 @@ export function paintLines(
       // singleton used to MEASURE this run — painted advances can
       // never diverge from measured widths (the one-ruler rule).
       applyVariantCaps(ctx, run.style);
-      ctx.fillText(paintText, x, baselineY);
+      ctx.fillText(drawn, drawX, baselineY);
 
       // TODO(typographic polish): proper underline/strike metrics per
       // font (nskipping ink gaps, weight-scaled thickness) — the
@@ -436,10 +465,10 @@ export function paintLines(
         const thickness = Math.max(1, Math.round(run.style.fontSize / 16));
         ctx.fillStyle = decorationColor;
         if (decor.underline) {
-          ctx.fillRect(x, baselineY + 0.08 * run.style.fontSize, width, thickness);
+          ctx.fillRect(drawX, baselineY + 0.08 * run.style.fontSize, paintWidth, thickness);
         }
         if (decor.strike) {
-          ctx.fillRect(x, baselineY - 0.3 * run.style.fontSize, width, thickness);
+          ctx.fillRect(drawX, baselineY - 0.3 * run.style.fontSize, paintWidth, thickness);
         }
       }
     }

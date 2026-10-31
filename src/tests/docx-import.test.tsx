@@ -397,9 +397,14 @@ describe('docx import — the loud postures', () => {
     });
     const trees = parseDocxTrees(parts);
     const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
-    const firstPara = parsed.json.content![0]!.content![0]!;
-    expect(firstPara.text).toBe('page '); // the cached "3" never landed
-    expect(parsed.report.pageFields).toBe(1);
+    const firstPara = parsed.json.content![0]!;
+    // M-PAGEFIELD: the field IMPORTS as the live node — the cached
+    // "3" never landed (the node resolves per page).
+    expect(firstPara.type).toBe('paragraph');
+    expect(firstPara.content!.some((c) => c.type === 'pageField' && c.attrs!.kind === 'page')).toBe(true);
+    expect(firstPara.content!.some((c) => c.type === 'text' && c.text === '3')).toBe(false);
+    expect(parsed.report.pageFields).toBe(0); // they import — never dropped
+    expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('Page-number fields'))).toBe(false);
     // THE CONVERSION: the dead Word field became a LIVE reference table
     const toc = parsed.json.content![1]!;
     expect(toc.type).toBe('referenceTable');
@@ -463,6 +468,29 @@ describe('docx import — THEME fonts (the dialog that never fired)', () => {
     const substituted = mapDocxDocument(trees, { fontPolicy: 'substitute', mediaPartToId: new Map() });
     const subNormal = substituted.styleDefinitions.find((d) => d.id === 'normal')!;
     expect(subNormal.properties.fontFamily).toBe('Open Sans');
+  });
+});
+
+describe('docx import — page fields (M-PAGEFIELD round-trip)', () => {
+  it('fldSimple PAGE/NUMPAGES in a band part import as live fields', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p><w:r><w:t>x</w:t></w:r></w:p>` +
+        `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:headerReference w:type="default" r:id="rIdHDR"/></w:sectPr>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+      'word/_rels/document.xml.rels': relsXml(''),
+      'word/header1.xml': `${W_DECL}<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p>${runXml('Page ')}<w:fldSimple w:instr="PAGE"/><w:r><w:t xml:space="preserve"> of </w:t></w:r><w:fldSimple w:instr="NUMPAGES"/></w:p></w:hdr>`,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const header = parsed.json.content!.find((n) => n.type === 'headerBlock')!;
+    const para = header.content![0]!;
+    const kinds = para.content!.filter((c) => c.type === 'pageField').map((c) => (c.attrs as { kind?: string }).kind);
+    expect(kinds).toEqual(['page', 'pages']);
+    // the literal text survives around the fields
+    expect(para.content!.some((c) => c.type === 'text' && c.text === 'Page ')).toBe(true);
+    expect(para.content!.some((c) => c.type === 'text' && c.text === ' of ')).toBe(true);
   });
 });
 

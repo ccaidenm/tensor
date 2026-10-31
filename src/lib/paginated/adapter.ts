@@ -635,7 +635,8 @@ function walkProseRuns(
   paraDef: StyleDefinition | null,
   base: RunStyle,
   definitions: Record<string, StyleDefinition>,
-  dropped: Set<string>
+  dropped: Set<string>,
+  fieldTotal?: number
 ): RunConversion {
   const runs: Run[] = [];
   const runDecor: RunDecor[] = [];
@@ -647,6 +648,27 @@ function walkProseRuns(
         // runs — ONE position per object (the U+FFFC token appended to
         // the block's concatenated text keeps the PM-offset identity:
         // shell text/offsets stay source-coordinate-exact).
+        // M-PAGEFIELD — the page-number FIELD: an inline atom whose
+        // run text is the MEASURED PLACEHOLDER (the warm total's
+        // max-width digits — every page's number fits the slot); the
+        // shell's painter substitutes the per-page resolution at draw
+        // time (fieldKind rides the run — the engine treats the run
+        // as plain text). The style resolves from the paragraph tier
+        // (no marks on an atom) — the field renders in the running
+        // text's look.
+        if (child.type.name === 'pageField') {
+          const kind = (child.attrs as { kind?: string }).kind === 'pages' ? 'pages' : 'page';
+          const placeholder = fieldTotal != null ? String(fieldTotal) : '8';
+          const resolved = resolveRun({ base, para: paraDef, char: null, direct: {} });
+          runs.push({
+            text: transformText(placeholder, resolved.textTransform),
+            style: textStyleOf(resolved, undefined),
+            fieldKind: kind,
+          } as Run);
+          runDecor.push({});
+          text += placeholder;
+          return;
+        }
         if (child.type.name === 'inlineImage') {
           const ia = child.attrs as {
             src?: string | null;
@@ -805,7 +827,8 @@ function convertNode(
   blockId: string,
   base: RunStyle,
   definitions: Record<string, StyleDefinition>,
-  dropped: Set<string>
+  dropped: Set<string>,
+  fieldTotal?: number
 ): CachedConversion {
   const kind = projection.kind;
 
@@ -941,7 +964,7 @@ function convertNode(
                     : 'normal',
                   definitions
                 );
-          const conv = walkProseRuns(para, para.type.name, cellParaDef, base, definitions, dropped);
+          const conv = walkProseRuns(para, para.type.name, cellParaDef, base, definitions, dropped, fieldTotal);
           if (conv.runs.length === 0) {
             conv.runs.push(emptyTextBlockRun(para, cellParaDef, base));
           }
@@ -1130,7 +1153,7 @@ function convertNode(
           : 'normal',
         definitions
       );
-      const prose = walkProseRuns(child, 'paragraph', paraDef, base, definitions, dropped);
+      const prose = walkProseRuns(child, 'paragraph', paraDef, base, definitions, dropped, fieldTotal);
       const textStart = refText.length;
 
       // The entry's targets: the scan join by refId (null = the
@@ -1280,7 +1303,7 @@ function convertNode(
   } else {
     // M-TABLES: the walk is SHARED — table cell paragraphs convert
     // through the same walkProseRuns (one run mapping, no fork).
-    const prose = walkProseRuns(node, kind, paraDef, base, definitions, dropped);
+    const prose = walkProseRuns(node, kind, paraDef, base, definitions, dropped, fieldTotal);
     runs.push(...prose.runs);
     runDecor.push(...prose.runDecor);
     text = prose.text;
@@ -1410,6 +1433,14 @@ export function pmDocToSemantic(
    * steady state.
    */
   referencePages?: ReferencePagesMap,
+  /**
+   * M-PAGEFIELD — the WARM PAGE TOTAL (the two-pass fixpoint's other
+   * input): the field runs' measured placeholder is the total's
+   * max-width digit string (layout-stable across pages — every page's
+   * number fits); pass 1 guesses 1 digit, the fixpoint re-lays-out
+   * when the real total widens. Absent on cold start.
+   */
+  fieldTotal?: number,
 ): AdapterResult {
   // THE REGISTRY EPOCH (M-STYLES STEP 3): the shell-side mirror of the
   // engine's baseStyleHash. A baseStyle change OR any definition edit
@@ -1505,7 +1536,7 @@ export function pmDocToSemantic(
           'BlockIdExtension must mint ids on creation/load/paste before any layout call'
       );
     }
-    const conv = convertNode(node, projection, blockId, base, definitions, dropped);
+    const conv = convertNode(node, projection, blockId, base, definitions, dropped, fieldTotal);
     nodeCache.set(node, conv);
     return conv;
   };

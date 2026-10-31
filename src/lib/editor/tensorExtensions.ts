@@ -32,6 +32,7 @@ import { FooterBlock, HeaderBlock } from '@/lib/editor/HeaderFooterNodes';
 // editor (nothing there builds a manager); lib/markdown/manager.ts
 // builds its standalone MarkdownManager from this very list.
 import { MarkdownImageNode, MarkdownInlineImageNode, MarkdownEquationNode } from '@/lib/markdown/specs';
+import { PageFieldNode } from '@/lib/editor/PageFieldNode';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
 // M-EQ: display equations — a block atom (the ImageNode family);
 // latex is the node's only document data, rendering is a
@@ -97,10 +98,12 @@ export function tensorExtensions(): Extensions {
     // atom renders its marker, and the adapter translates it into the
     // engine's forced-break spelling (flow.breakBefore: 'page').
     PageBreakNode,
-    // M-MD: the markdown-mapped image/equation nodes (same schema, same
+        // M-MD: the markdown-mapped image/equation nodes (same schema, same
     // names — the markdown handlers ride along, inert in production).
     MarkdownImageNode,
     MarkdownInlineImageNode,
+    // M-PAGEFIELD: the page-number field (bands resolve per page).
+    PageFieldNode,
     // M-TABLES: the TipTap table family (schema + commands + the
     // built-in columnResizing plugin via `resizable`) plus Tensor's
     // borderStyle/backgroundColor attrs. Pages mode falls back to the

@@ -327,7 +327,7 @@ interface RunOpts {
   skipLinkMark?: boolean;
 }
 
-type InlineChild = TextRun | ImageRun | ExternalHyperlink;
+type InlineChild = TextRun | ImageRun | ExternalHyperlink | SimpleField;
 
 /** Consecutive link-marked texts group into ONE ExternalHyperlink —
  *  the OOXML hyperlink is a run CONTAINER, not a mark. */
@@ -360,6 +360,12 @@ function mapInlineContent(nodes: JSONContent[], state: WalkState, paragraphStyle
       out.push(...mapTextRuns(node, state, { paragraphStyle }));
     } else if (node.type === 'inlineImage') {
       out.push(mapImageRun(node, state));
+    } else if (node.type === 'pageField') {
+      // M-PAGEFIELD: the field exports as Word's OWN field — Word
+      // resolves it per page (the round-trip: import mapped the Word
+      // field to this node; export maps it back).
+      const kind = (node.attrs as { kind?: string }).kind === 'pages' ? 'NUMPAGES' : 'PAGE';
+      out.push(new SimpleField(kind));
     } else if (node.type === 'hardBreak') {
       // OOXML's line break rides a run with break-before (w:br).
       out.push(new TextRun({ break: 1 }));
