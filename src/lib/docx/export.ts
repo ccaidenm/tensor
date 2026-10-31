@@ -17,6 +17,9 @@ import {
   ShadingType,
   Tab,
   TabStopType,
+  TextWrappingType,
+  HorizontalPositionRelativeFrom,
+  VerticalPositionRelativeFrom,
   Table,
   TableCell,
   TableRow,
@@ -33,7 +36,7 @@ import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
 import { LEGACY_HEADING_FALLBACK } from '@/lib/styles/builtins';
 import { transformText } from '@/lib/styles/resolve';
 import type { TextTransform } from '@/lib/styles/types';
-import { pxToHalfPoints, pxToTwip, ptToTwip, toPx } from './units';
+import { pxToEmu, pxToHalfPoints, pxToTwip, ptToTwip, toPx } from './units';
 
 /**
  * M-DOCX — THE EXPORT MAPPING (#37a). Tensor JSON → the `docx` builders.
@@ -125,7 +128,6 @@ export interface DocxExportInput {
 
 export interface DocxExportReport {
   equationsAsText: number;
-  floatedImagesInline: number;
   missingImages: number;
   unsupportedImages: number;
   unknownListStyles: number;
@@ -136,9 +138,6 @@ export function docxReportLines(report: DocxExportReport): string[] {
   const lines: string[] = [];
   if (report.equationsAsText > 0) {
     lines.push(`Equations exported as plain text (${report.equationsAsText}) — the converter could not read the LaTeX`);
-  }
-  if (report.floatedImagesInline > 0) {
-    lines.push(`Floating images exported inline (${report.floatedImagesInline})`);
   }
   if (report.missingImages > 0) {
     lines.push(`Missing images left as placeholders (${report.missingImages})`);
@@ -170,6 +169,8 @@ interface WalkState {
    *  identical levels cannot express it, and a separate numId per
    *  nested list would render flat. */
   numberingLevels: Map<string, (string | undefined)[]>;
+  /** Tensor's ordered-list `start` per reference (restart fidelity). */
+  numberingStarts: Map<string, number>;
   listIds: { next: number };
   /** A TOC field was emitted — Document features.updateFields makes
    *  Word refresh fields on open. */
@@ -371,7 +372,10 @@ function mapInlineContent(nodes: JSONContent[], state: WalkState, paragraphStyle
 }
 
 function mapImageRun(node: JSONContent, state: WalkState): TextRun | ImageRun {
-  const attrs = (node.attrs ?? {}) as { src?: string; width?: number | null; height?: number | null; alt?: string; float?: unknown };
+  const attrs = (node.attrs ?? {}) as {
+    src?: string; width?: number | null; height?: number | null; alt?: string;
+    float?: { dx?: number; dy?: number; z?: string } | null;
+  };
   const id = typeof attrs.src === 'string' ? attrs.src.replace(/^media:\/\//, '') : '';
   const entry = state.media.get(id);
   if (!entry) {
@@ -385,16 +389,31 @@ function mapImageRun(node: JSONContent, state: WalkState): TextRun | ImageRun {
     state.report.unsupportedImages += 1;
     return new TextRun({ text: '[image not embeddable]', italics: true });
   }
-  if (attrs.float != null) {
-    // Floated images ride #37b (offset mapping) — inline for now, LOUD.
-    state.report.floatedImagesInline += 1;
-  }
-  return new ImageRun({
+  const base = {
     type,
     data: entry.bytes,
     transformation: { width: Math.round(width), height: Math.round(height) },
     altText: { title: attrs.alt || 'image', description: attrs.alt || 'image', name: attrs.alt || 'image' },
-  });
+  };
+  // THE FLOAT MAPPING: Tensor's overlay model ({dx, dy, z: front|behind})
+  // maps to Word's anchored drawing with wrapNone — offsets are
+  // anchor-relative px → EMU, and z rides behindDocument. Text-wrap
+  // floats (wrapSquare) are NOT in the model — Word wraps, Tensor
+  // overlays (the one honest approximation).
+  const float = attrs.float;
+  if (float) {
+    return new ImageRun({
+      ...base,
+      floating: {
+        horizontalPosition: { relative: HorizontalPositionRelativeFrom.COLUMN, offset: pxToEmu(float.dx ?? 0) },
+        verticalPosition: { relative: VerticalPositionRelativeFrom.PARAGRAPH, offset: pxToEmu(float.dy ?? 0) },
+        wrap: { type: TextWrappingType.NONE },
+        behindDocument: float.z === 'behind',
+        allowOverlap: true,
+      },
+    });
+  }
+  return new ImageRun(base);
 }
 
 function imageType(ext: string): 'png' | 'jpg' | 'gif' | 'bmp' | null {
@@ -539,6 +558,7 @@ function mapList(node: JSONContent, level: number, reference: string, instance: 
 function numberingConfigs(state: WalkState): { reference: string; levels: object[] }[] {
   const configs: { reference: string; levels: object[] }[] = [];
   for (const [reference, levelStyles] of state.numberingLevels) {
+    const start = state.numberingStarts.get(reference);
     const levels = Array.from({ length: 6 }, (_, level) => {
       const styleType = levelStyles[level] ?? 'decimal';
       const spec = LIST_FORMATS[styleType] ?? FALLBACK_LIST_FORMAT;
@@ -548,6 +568,8 @@ function numberingConfigs(state: WalkState): { reference: string; levels: object
         format: spec.format,
         text: spec.text.replace('%1', `%${level + 1}`),
         alignment: AlignmentType.LEFT,
+        // Restart fidelity: level 0 carries the list's Tensor start.
+        ...(level === 0 && start != null ? { start } : {}),
       };
     });
     configs.push({ reference, levels });
@@ -674,9 +696,15 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
         break;
       case 'bulletList':
       case 'orderedList': {
-        const styleType = String((node.attrs as { listStyleType?: string } | null)?.listStyleType ?? (node.type === 'orderedList' ? 'decimal' : 'disc'));
+        const listAttrs = (node.attrs ?? {}) as { listStyleType?: string; start?: number | null };
+        const styleType = String(listAttrs.listStyleType ?? (node.type === 'orderedList' ? 'decimal' : 'disc'));
         const reference = `t-list-${state.listIds.next++}`;
         registerLevel(state, reference, 0, styleType);
+        // Restart fidelity: Tensor's ordered-list start rides the
+        // reference's level-0 start value.
+        if (node.type === 'orderedList' && listAttrs.start != null && listAttrs.start !== 1) {
+          state.numberingStarts.set(reference, listAttrs.start);
+        }
         const instance = state.instances.next(reference);
         out.push(...mapList(node, 0, reference, instance, state));
         break;
@@ -686,14 +714,16 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
         break;
       case 'image': {
         // A block image is its own paragraph; align rides jc; the
-        // keepNext bond (caption below) rides keepNext. A placeholder
-        // (missing/unsupported — already counted in the report) still
-        // EMITS, so the image's position stays visible in Word.
-        const attrs = (node.attrs ?? {}) as { align?: string; keepNext?: boolean };
+        // keepNext bond (caption below) rides keepNext — EXCEPT on a
+        // floated image (the adapter's own law: floats carry no bond).
+        // A placeholder (missing/unsupported — already counted in the
+        // report) still EMITS, so the position stays visible in Word.
+        const attrs = (node.attrs ?? {}) as { align?: string; keepNext?: boolean; float?: unknown };
+        const floated = attrs.float != null;
         const run = mapImageRun(node, state);
         out.push(new Paragraph({
-          alignment: toAlignment(attrs.align),
-          keepNext: attrs.keepNext === true || undefined,
+          ...(floated ? {} : { alignment: toAlignment(attrs.align) }),
+          keepNext: (!floated && attrs.keepNext === true) || undefined,
           children: [run],
         }));
         break;
@@ -901,11 +931,12 @@ function pageDims(pageSetup: PageSetup): { width: number; height: number; orient
 
 export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8Array; report: DocxExportReport }> {
   const state: WalkState = {
-    report: { equationsAsText: 0, floatedImagesInline: 0, missingImages: 0, unsupportedImages: 0, unknownListStyles: 0, unknownNodes: {} },
+    report: { equationsAsText: 0, missingImages: 0, unsupportedImages: 0, unknownListStyles: 0, unknownNodes: {} },
     media: input.media,
     defs: new Map(input.styleDefinitions.map((d) => [d.id, d])),
     instances: makeInstanceCounter(),
     numberingLevels: new Map(),
+    numberingStarts: new Map(),
     listIds: { next: 1 },
     needsUpdateFields: false,
   };

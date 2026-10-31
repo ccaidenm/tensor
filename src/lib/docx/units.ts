@@ -35,6 +35,10 @@ export function pxToEmu(px: number): number {
   return Math.round(px * EMU_PER_PX);
 }
 
+export function emuToPx(emu: number): number {
+  return emu / EMU_PER_PX;
+}
+
 /** w:sz is HALF-points (24 = 12pt). */
 export function pxToHalfPoints(px: number): number {
   return Math.round((px / PX_PER_PT) * 2);

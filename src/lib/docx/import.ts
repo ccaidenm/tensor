@@ -6,7 +6,7 @@ import type { DocumentCoreProperties } from '@/lib/document/coreProperties';
 import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
 import { BUNDLED_FONTS } from '@/lib/fonts/bundled';
 import { ommlToLatex } from './omml';
-import { halfPointsToPx, twipToPx } from './units';
+import { emuToPx, halfPointsToPx, twipToPx } from './units';
 import { oKids, oSub, oat, oflag, onum, ovalNum, parseOrdered, type ONode } from './oxml';
 
 /**
@@ -125,7 +125,8 @@ export interface DocxImportReport {
   inlineEquations: number;
   degradedEquations: number;
   refusedImages: number;
-  floatedImagesBlock: number;
+  wrapAroundFloats: number;
+  vertAligns: number;
   evenOddHeaders: number;
   internalLinks: number;
   sectionBreaks: number;
@@ -138,8 +139,8 @@ export interface DocxImportReport {
 function emptyReport(): DocxImportReport {
   return {
     trackedChanges: 0, comments: 0, tocFields: 0, pageFields: 0, otherFields: 0,
-    inlineEquations: 0, degradedEquations: 0, refusedImages: 0, floatedImagesBlock: 0,
-    evenOddHeaders: 0, internalLinks: 0, sectionBreaks: 0, textboxes: 0,
+    inlineEquations: 0, degradedEquations: 0, refusedImages: 0, wrapAroundFloats: 0,
+    vertAligns: 0, evenOddHeaders: 0, internalLinks: 0, sectionBreaks: 0, textboxes: 0,
     footnotes: 0, unknownNodes: 0, unknownNumbering: 0,
   };
 }
@@ -171,8 +172,11 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
   if (report.refusedImages > 0) {
     lines.push(`Images in formats Tensor cannot read skipped (${report.refusedImages}) — emf/wmf`);
   }
-  if (report.floatedImagesBlock > 0) {
-    lines.push(`Floating images imported as inline images (${report.floatedImagesBlock})`);
+  if (report.wrapAroundFloats > 0) {
+    lines.push(`Floating images imported as overlays (${report.wrapAroundFloats}) — text wrap-around and page-anchored placement approximate`);
+  }
+  if (report.vertAligns > 0) {
+    lines.push(`Sub/superscripts dropped (${report.vertAligns}) — the feature lands in a later update`);
   }
   if (report.textboxes > 0) lines.push(`Text boxes/shapes skipped (${report.textboxes})`);
   if (report.evenOddHeaders > 0) {
@@ -195,7 +199,7 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
 
 // ─── Style properties from rPr/pPr (ONode) ───────────────────────────────
 
-function runPropsFromRPr(rPr: ONode | undefined, policy: 'keep' | 'substitute', theme?: DocxThemeFonts): StyleProperties {
+function runPropsFromRPr(rPr: ONode | undefined, policy: 'keep' | 'substitute', theme?: DocxThemeFonts, themeColors?: DocxThemeColors): StyleProperties {
   const props: StyleProperties = {};
   if (!rPr) return props;
   const family = resolveFontFamily(oSub(rPr, 'rFonts'), theme, policy);
@@ -207,14 +211,22 @@ function runPropsFromRPr(rPr: ONode | undefined, policy: 'keep' | 'substitute', 
   if (oSub(rPr, 'strike') || oSub(rPr, 'dstrike')) props.strike = true;
   const underline = oSub(rPr, 'u');
   if (underline && oat(underline, 'val') !== 'none') props.underline = true;
-  const color = oat(oSub(rPr, 'color'), 'val');
-  if (color && color !== 'auto') props.color = `#${color.toUpperCase()}`;
+  const colorNode = oSub(rPr, 'color');
+  const colorVal = oat(colorNode, 'val');
+  const colorResolved = colorVal && colorVal !== 'auto'
+    ? colorVal
+    : resolveThemeColor(themeColors, oat(colorNode, 'themeColor'), oat(colorNode, 'themeShade'), oat(colorNode, 'themeTint'));
+  if (colorResolved) props.color = `#${colorResolved.toUpperCase()}`;
   const highlight = oat(oSub(rPr, 'highlight'), 'val');
   const shading = oSub(rPr, 'shd');
   const fill = shading ? oat(shading, 'fill') : undefined;
+  const themeFill = shading ? oat(shading, 'themeFill') : undefined;
+  const fillResolved = fill && fill !== 'auto'
+    ? fill
+    : resolveThemeColor(themeColors, themeFill, shading ? oat(shading, 'themeFillShade') : undefined, shading ? oat(shading, 'themeFillTint') : undefined);
   const highlightHex = highlight && highlight !== 'none'
     ? HIGHLIGHT_NAME_TO_HEX[highlight.toLowerCase()]
-    : fill && fill !== 'auto' ? fill : undefined;
+    : fillResolved ? fillResolved : undefined;
   if (highlightHex) props.highlight = `#${highlightHex.toUpperCase()}`;
   if (oSub(rPr, 'smallCaps')) props.fontVariant = 'small-caps';
   if (oSub(rPr, 'caps')) props.textTransform = 'uppercase';
@@ -287,12 +299,64 @@ export interface DocxThemeFonts {
   major: string | null;
 }
 
+/** The theme's color scheme: dk1/lt1/dk2/lt2/accent1-6/hlink — the
+ *  names Word's themeColor attributes reference. sysClr entries carry
+ *  lastClr (windowText → 000000); srgbClr entries the literal val. */
+export interface DocxThemeColors {
+  [name: string]: string;
+}
+
+function themeColors(themePart: string | undefined): DocxThemeColors | undefined {
+  if (!themePart) return undefined;
+  const root = parseOrdered(themePart);
+  const clrScheme = oSub(oSub(root, 'themeElements'), 'clrScheme');
+  if (!clrScheme) return undefined;
+  const colors: DocxThemeColors = {};
+  for (const kid of clrScheme.kids) {
+    const srgb = oSub(kid, 'srgbClr');
+    const sys = oSub(kid, 'sysClr');
+    const hex = srgb ? oat(srgb, 'val') : sys ? oat(sys, 'lastClr') : undefined;
+    if (hex) colors[kid.tag] = hex.toUpperCase();
+  }
+  return colors;
+}
+
+/** OOXML themeShade/themeTint (00–FF hex): shade scales toward black,
+ *  tint mixes toward white. Returns the resolved 6-digit hex. */
+function applyShadeTint(hex: string, shade: string | undefined, tint: string | undefined): string {
+  const base = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const shadeVal = shade ? parseInt(shade, 16) : null;
+  const tintVal = tint ? parseInt(tint, 16) : null;
+  const factor = shadeVal != null ? shadeVal / 255 : null;
+  const mixed = base.map((c) => {
+    if (factor != null) return Math.round(c * factor);
+    if (tintVal != null) return Math.round(c * (tintVal / 255) + 255 * (1 - tintVal / 255));
+    return c;
+  });
+  return mixed.map((c) => c.toString(16).padStart(2, '0').toUpperCase()).join('');
+}
+
+/** Resolve a theme color reference (themeColor + optional shade/tint). */
+function resolveThemeColor(
+  theme: DocxThemeColors | undefined,
+  name: string | undefined,
+  shade: string | undefined,
+  tint: string | undefined,
+): string | undefined {
+  if (!theme || !name) return undefined;
+  const key = name === 'dark1' ? 'dk1' : name === 'light1' ? 'lt1' : name;
+  const base = theme[key] ?? theme['accent1'];
+  if (!base) return undefined;
+  return applyShadeTint(base, shade, tint);
+}
+
 export interface DocxTrees {
   document: ONode;
   styles: ONode | undefined;
   numbering: ONode | undefined;
   core: ONode | undefined;
   theme: DocxThemeFonts | undefined;
+  themeColors: DocxThemeColors | undefined;
   /** rId → resolved part name (word/-prefixed) or external URL. */
   rels: Map<string, { target: string; external: boolean }>;
   parts: Record<string, Uint8Array>;
@@ -327,7 +391,9 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
   const styles = parts['word/styles.xml'] ? parseOrdered(decode(parts['word/styles.xml'])) : undefined;
   const numbering = parts['word/numbering.xml'] ? parseOrdered(decode(parts['word/numbering.xml'])) : undefined;
   const core = parts['docProps/core.xml'] ? parseOrdered(decode(parts['docProps/core.xml'])) : undefined;
-  const theme = themeFonts(parts['word/theme/theme1.xml'] ? decode(parts['word/theme/theme1.xml']) : undefined);
+  const themePart = parts['word/theme/theme1.xml'] ? decode(parts['word/theme/theme1.xml']) : undefined;
+  const theme = themeFonts(themePart);
+  const clr = themeColors(themePart);
 
   const rels = new Map<string, { target: string; external: boolean }>();
   const relsXml = parts['word/_rels/document.xml.rels'];
@@ -342,7 +408,7 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
       }
     }
   }
-  return { document, styles, numbering, core, theme, rels, parts };
+  return { document, styles, numbering, core, theme, themeColors: clr, rels, parts };
 }
 
 /** The font families the file references (styles.xml + document.xml).
@@ -389,9 +455,13 @@ export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknow
 interface MapContext {
   policy: 'keep' | 'substitute';
   theme: DocxThemeFonts | undefined;
+  themeColors: DocxThemeColors | undefined;
   mediaPartToId: Map<string, string>;
   report: DocxImportReport;
   numberingMap: Map<string, string>;
+  /** Restart fidelity: numId → the level-0 startOverride (Word's own
+   *  "this list starts at N"), riding the rebuilt list's start. */
+  numberingStarts: Map<string, number>;
   numberingLevels: Map<string, Map<number, { fmt: string; text: string }>>;
   /** the field state machine (spans paragraphs via the run mapping) */
   fieldDepth: number;
@@ -457,16 +527,27 @@ function runFormatFromRPr(rPr: ONode | undefined, ctx: MapContext): RunFormat {
   const highlight = oat(oSub(rPr, 'highlight'), 'val');
   const shading = oSub(rPr, 'shd');
   const fill = shading ? oat(shading, 'fill') : undefined;
+  const themeFill = shading ? oat(shading, 'themeFill') : undefined;
+  const fillResolved = fill && fill !== 'auto'
+    ? fill
+    : resolveThemeColor(ctx.themeColors, themeFill, shading ? oat(shading, 'themeFillShade') : undefined, shading ? oat(shading, 'themeFillTint') : undefined);
   const highlightHex = highlight && highlight !== 'none'
     ? HIGHLIGHT_NAME_TO_HEX[highlight.toLowerCase()]
-    : fill && fill !== 'auto' ? fill : undefined;
+    : fillResolved ? fillResolved : undefined;
   if (highlightHex) format.highlightHex = highlightHex.toUpperCase();
-  const color = oat(oSub(rPr, 'color'), 'val');
-  if (color && color !== 'auto') format.color = color.toUpperCase();
+  const colorNode = oSub(rPr, 'color');
+  const colorVal = oat(colorNode, 'val');
+  const themeColor = oat(colorNode, 'themeColor');
+  const colorResolved = colorVal && colorVal !== 'auto'
+    ? colorVal
+    : resolveThemeColor(ctx.themeColors, themeColor, oat(colorNode, 'themeShade'), oat(colorNode, 'themeTint'));
+  if (colorResolved) format.color = colorResolved.toUpperCase();
   const family = resolveFontFamily(oSub(rPr, 'rFonts'), ctx.theme, ctx.policy);
   if (family) format.fontFamily = family;
   const sz = ovalNum(rPr, 'sz');
   if (sz != null) format.fontSizePx = halfPointsToPx(sz);
+  // vertAlign (sub/superscript) has NO Tensor mark — dropped, counted.
+  if (oSub(rPr, 'vertAlign')) ctx.report.vertAligns += 1;
   const rStyle = oat(oSub(rPr, 'rStyle'), 'val');
   if (rStyle) format.charStyleId = tensorStyleId(rStyle);
   return format;
@@ -602,14 +683,35 @@ function mapDrawing(drawing: ONode, ctx: MapContext, rels: DocxTrees['rels']): J
   if (!rel || rel.external) { ctx.report.refusedImages += 1; return null; }
   const mediaId = ctx.mediaPartToId.get(rel.target);
   if (!mediaId) { ctx.report.refusedImages += 1; return null; }
-  if (anchor) ctx.report.floatedImagesBlock += 1;
+
+  // THE FLOAT INVERSE: an anchored drawing → Tensor's overlay model
+  // ({dx, dy, z}). Word's offsets are EMU from the chosen relative-to
+  // (column/paragraph ≈ Tensor's anchor-relative px — the same frame).
+  // behindDoc is the z-order. Text-wrap shapes (square/tight/topAnd-
+  // Bottom) and page/margin anchoring have NO Tensor spelling — the
+  // placement approximates, LOUDLY counted.
+  let float: { dx: number; dy: number; z: 'front' | 'behind' } | null = null;
+  if (anchor) {
+    const posH = oSub(anchor, 'positionH');
+    const posV = oSub(anchor, 'positionV');
+    // wp:posOffset is a CHILD ELEMENT carrying the EMU value as text.
+    const dx = parseFloat(oSub(posH, 'posOffset')?.text ?? '0') || 0;
+    const dy = parseFloat(oSub(posV, 'posOffset')?.text ?? '0') || 0;
+    const behind = (oat(anchor, 'behindDoc') ?? '0') === '1';
+    float = { dx: Math.round(emuToPx(dx)), dy: Math.round(emuToPx(dy)), z: behind ? 'behind' : 'front' };
+    const wraps = ['wrapSquare', 'wrapTight', 'wrapTopAndBottom'].some((w) => oSub(anchor, w) != null);
+    const absolute = ['page', 'margin'].includes(oat(posH, 'relativeFrom') ?? '') || ['page', 'margin'].includes(oat(posV, 'relativeFrom') ?? '');
+    if (wraps || absolute) ctx.report.wrapAroundFloats += 1;
+  }
+
   return {
-    type: 'image',
+    type: anchor ? 'image' : 'image',
     attrs: {
       src: `media://${mediaId}`,
       width: Math.round(cx / 9525),
       height: Math.round(cy / 9525),
       alt,
+      ...(float ? { float } : {}),
     },
   };
 }
@@ -1003,15 +1105,25 @@ function numberingTables(numbering: ONode | undefined, ctx: MapContext): void {
     const numId = oat(num, 'numId');
     const abstract = ovalNum(num, 'abstractNumId');
     if (numId != null && abstract != null) ctx.numberingMap.set(numId, String(abstract));
+    // Restart fidelity: Word's startOverride at level 0 IS the list's
+    // start (Tensor's ordered-list start attr).
+    for (const override of oKids(num, 'lvlOverride')) {
+      if ((onum(override, 'ilvl') ?? 0) !== 0) continue;
+      const startOverride = onum(oSub(override, 'startOverride'), 'val');
+      if (startOverride != null && numId != null) ctx.numberingStarts.set(numId, startOverride);
+    }
   }
 }
 
-function listSpec(numId: number, ilvl: number, ctx: MapContext): { listType: 'bulletList' | 'orderedList'; styleType: string } {
+function listSpec(numId: number, ilvl: number, ctx: MapContext): { listType: 'bulletList' | 'orderedList'; styleType: string; start?: number } {
   const abstractId = ctx.numberingMap.get(String(numId));
   const levels = abstractId ? ctx.numberingLevels.get(abstractId) : undefined;
   const level = levels?.get(ilvl);
   const fmt = level?.fmt ?? 'decimal';
   if (!level) ctx.report.unknownNumbering += 1;
+  // Restart fidelity: the num's level-0 startOverride IS the Tensor
+  // start (only meaningful for the list's own top level).
+  const start = ilvl === 0 ? ctx.numberingStarts.get(String(numId)) : undefined;
   if (fmt === 'bullet') {
     const marker = level?.text ?? '';
     const styleType = marker === 'o' ? 'circle' : marker === '\u25A0' || marker === '\u25AA' ? 'square' : 'disc';
@@ -1025,9 +1137,9 @@ function listSpec(numId: number, ilvl: number, ctx: MapContext): { listType: 'bu
     upperLetter: 'upper-alpha',
   };
   const styleType = ordered[fmt];
-  if (styleType) return { listType: 'orderedList', styleType };
+  if (styleType) return { listType: 'orderedList', styleType, ...(start != null && start !== 1 ? { start } : {}) };
   ctx.report.unknownNumbering += 1;
-  return { listType: 'orderedList', styleType: 'decimal' };
+  return { listType: 'orderedList', styleType: 'decimal', ...(start != null && start !== 1 ? { start } : {}) };
 }
 
 // ─── Section properties → page setup + bands ─────────────────────────────
@@ -1134,6 +1246,7 @@ function importStyles(trees: DocxTrees, policy: 'keep' | 'substitute'): { defini
     oSub(oSub(oSub(stylesRoot, 'docDefaults'), 'rPrDefault'), 'rPr'),
     policy,
     trees.theme,
+    trees.themeColors,
   );
 
   const raw = new Map<string, { basedOn?: string; name: string; kind: 'paragraph' | 'character'; run: StyleProperties; para: StyleProperties }>();
@@ -1146,7 +1259,7 @@ function importStyles(trees: DocxTrees, policy: 'keep' | 'substitute'): { defini
       basedOn: oat(oSub(style, 'basedOn'), 'val') ?? undefined,
       name: oat(oSub(style, 'name'), 'val') ?? id,
       kind: kind === 'character' ? 'character' : 'paragraph',
-      run: runPropsFromRPr(oSub(style, 'rPr'), policy, trees.theme),
+      run: runPropsFromRPr(oSub(style, 'rPr'), policy, trees.theme, trees.themeColors),
       para: paraPropsFromPPPr(oSub(style, 'pPr')),
     });
   }
@@ -1222,9 +1335,11 @@ export function mapDocxDocument(
   const ctx: MapContext = {
     policy: opts.fontPolicy,
     theme: trees.theme,
+    themeColors: trees.themeColors,
     mediaPartToId: opts.mediaPartToId,
     report: emptyReport(),
     numberingMap: new Map(),
+    numberingStarts: new Map(),
     numberingLevels: new Map(),
     fieldDepth: 0,
     fieldInstr: [],
@@ -1261,7 +1376,11 @@ export function mapDocxDocument(
       return;
     }
     const spec = listSpec(numId, level, ctx);
-    const list: JSONContent = { type: spec.listType, attrs: { listStyleType: spec.styleType }, content: [item] };
+    const list: JSONContent = {
+      type: spec.listType,
+      attrs: { listStyleType: spec.styleType, ...(spec.start != null ? { start: spec.start } : {}) },
+      content: [item],
+    };
     if (level === 0) output.push(list);
     else listStack[level - 1]!.lastItem.content!.push(list);
     listStack[level] = { numId, list, lastItem: item };

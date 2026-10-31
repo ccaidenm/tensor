@@ -315,12 +315,19 @@ describe('docx export — images and equations', () => {
     expect(report.unsupportedImages).toBe(1);
   });
 
-  it('a floated image exports inline and is counted (#37b)', async () => {
-    const { report } = await exportParts(makeInput(doc({
+  it('a floated image exports as an anchored drawing (wrapNone, z-order, EMU offsets)', async () => {
+    const { text, report } = await exportParts(makeInput(doc({
       type: 'image',
-      attrs: { src: `media://${SHA}`, width: 10, height: 10, alt: '', float: { side: 'right', offset: 24 } },
+      attrs: { src: `media://${SHA}`, width: 120, height: 60, alt: 'floated', float: { dx: 24, dy: -12, z: 'behind' } },
     })));
-    expect(report.floatedImagesInline).toBe(1);
+    const body = text('word/document.xml');
+    expect(body).toContain('<wp:anchor');
+    expect(body).toContain('behindDoc="1"'); // z: behind
+    expect(body).toContain('<wp:wrapNone/>'); // the overlay model
+    // 24px → 228600 EMU (the anchor-relative offset)
+    expect(body).toContain('228600');
+    // floats MAP now — no reported loss
+    expect(docxReportLines(report)).toEqual([]);
   });
 
   it('equations export as native OMML', async () => {

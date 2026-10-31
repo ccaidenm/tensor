@@ -349,6 +349,27 @@ describe('docx import — styles', () => {
   });
 });
 
+describe('docx import — numbering restart fidelity', () => {
+  it('startOverride rides the rebuilt list\'s start', () => {
+    const numbering = `${W_DECL}<w:numbering xmlns:w="x">` +
+      `<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>` +
+      `<w:num w:numId="9"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride></w:num>` +
+      `</w:numbering>`;
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p><w:pPr><w:numPr><w:numId w:val="9"/><w:ilvl w:val="0"/></w:numPr></w:pPr>${runXml('five')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+      'word/numbering.xml': numbering,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const list = parsed.json.content![0]!;
+    expect(list.type).toBe('orderedList');
+    expect(list.attrs!.start).toBe(5);
+  });
+});
+
 describe('docx import — the loud postures', () => {
   it('tracked deletions drop and count; insertions keep', () => {
     const parts = zipParts({
@@ -442,6 +463,88 @@ describe('docx import — THEME fonts (the dialog that never fired)', () => {
     const substituted = mapDocxDocument(trees, { fontPolicy: 'substitute', mediaPartToId: new Map() });
     const subNormal = substituted.styleDefinitions.find((d) => d.id === 'normal')!;
     expect(subNormal.properties.fontFamily).toBe('Open Sans');
+  });
+});
+
+describe('docx import — THEME colors', () => {
+  const THEME_COLORS = `${W_DECL}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:clrScheme><a:dk1><a:sysClr w:val="windowText" w:lastClr="000000"/></a:dk1><a:lt1><a:sysClr w:val="window" w:lastClr="FFFFFF"/></a:lt1><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2></a:clrScheme></a:themeElements></a:theme>`;
+
+  it('themeColor references resolve through the clrScheme (with shade)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p><w:r><w:rPr><w:color w:val="auto" w:themeColor="accent1"/></w:rPr><w:t>themed</w:t></w:r></w:p>` +
+        `<w:p><w:r><w:rPr><w:color w:val="auto" w:themeColor="accent1" w:themeShade="80"/></w:rPr><w:t>shaded</w:t></w:r></w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+      'word/theme/theme1.xml': THEME_COLORS,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const first = parsed.json.content![0]!.content![0]!;
+    const mark = (first.marks ?? []).find((m) => m.type === 'textStyle')!;
+    expect(mark.attrs!.color).toBe('#4472C4'); // accent1 straight
+    const second = parsed.json.content![1]!.content![0]!;
+    const shaded = (second.marks ?? []).find((m) => m.type === 'textStyle')!;
+    // shade 0x80 (128/255): each channel scales — 0x44→0x22, 0x72→0x39, 0xC4→0x62
+    expect(shaded.attrs!.color).toBe('#223962');
+  });
+});
+
+describe('docx import — floats and vertAlign', () => {
+  const ANCHOR_IMG = (behind: boolean): string =>
+    `<w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" allowOverlap="1" behindDoc="${behind ? 1 : 0}" locked="0" layoutInCell="1">` +
+    `<wp:simplePos x="0" y="0"/>` +
+    `<wp:positionH relativeFrom="column"><wp:posOffset>228600</wp:posOffset></wp:positionH>` +
+    `<wp:positionV relativeFrom="paragraph"><wp:posOffset>-114300</wp:posOffset></wp:positionV>` +
+    `<wp:extent cx="1143000" cy="571500"/><wp:wrapNone/>` +
+    `<wp:docPr id="1" name="pic" descr="floating figure"/>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="rIdIMG"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>`;
+
+  it('an anchored drawing maps to Tensor\'s float model (dx/dy px, z-order)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(`<w:p><w:r>${ANCHOR_IMG(true)}</w:r></w:p>`),
+      'word/styles.xml': STYLES_XML,
+      'word/_rels/document.xml.rels': relsXml(''),
+      'word/media/image1.png': TINY_PNG,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map([['word/media/image1.png', SHA]]) });
+    const image = parsed.json.content![0]!;
+    expect(image.type).toBe('image'); // solo anchor → block image
+    expect(image.attrs!.float).toEqual({ dx: 24, dy: -12, z: 'behind' }); // EMU → px
+    expect(image.attrs!.alt).toBe('floating figure');
+    expect(parsed.report.wrapAroundFloats).toBe(0); // wrapNone maps exactly
+  });
+
+  it('text-wrap floats import as overlays and are counted', () => {
+    const wrapSquare = ANCHOR_IMG(false).replace('<wp:wrapNone/>', '<wp:wrapSquare wrapText="bothSides"/>');
+    const parts = zipParts({
+      'word/document.xml': body(`<w:p><w:r>${wrapSquare}</w:r></w:p>`),
+      'word/styles.xml': STYLES_XML,
+      'word/_rels/document.xml.rels': relsXml(''),
+      'word/media/image1.png': TINY_PNG,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map([['word/media/image1.png', SHA]]) });
+    expect(parsed.json.content![0]!.attrs!.float!.z).toBe('front');
+    expect(parsed.report.wrapAroundFloats).toBe(1);
+    expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('approximate'))).toBe(true);
+  });
+
+  it('vertAlign (sub/superscript) is dropped and counted', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p>${runXml('plain ')}<w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>sub</w:t></w:r></w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const trees = parseDocxTrees(parts);
+    const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
+    expect(parsed.report.vertAligns).toBe(1);
+    // the text survives — the dropped vertAlign leaves identical
+    // formatting, so the runs merge into one node
+    expect(parsed.json.content![0]!.content![0]!.text).toBe('plain sub');
+    expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('Sub/superscripts dropped (1)'))).toBe(true);
   });
 });
 
@@ -578,6 +681,7 @@ describe('THE ROUND-TRIP GATE (export → import → normalized equality)', () =
         ],
       },
       { type: 'image', attrs: { src: `media://${REAL_SHA}`, width: 120, height: 60, alt: 'the figure' } },
+      { type: 'image', attrs: { src: `media://${REAL_SHA}`, width: 90, height: 90, alt: 'the float', float: { dx: 24, dy: -12, z: 'front' } } },
       { type: 'equation', attrs: { latex: 'E=mc^2' } },
       { type: 'pageBreak' },
       { type: 'horizontalRule' },
