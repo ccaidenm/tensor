@@ -26,7 +26,12 @@ export function useAutosave() {
         headerFooter,
       });
 
-      if (filePath) {
+      // M-DOCX: the timed write is WPDOC-ONLY. A .docx document's file
+      // may be open in real Word (file locks) and every Save is a full
+      // export — churn to avoid. Word-backed documents rely on the
+      // recovery snapshots (above) between explicit Saves; .wpdoc
+      // documents keep the transparent timed save.
+      if (filePath && filePath.toLowerCase().endsWith('.wpdoc')) {
         await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
         await clearRecoveryCopy(filePath);
         useDocumentStore.setState({ isDirty: false });

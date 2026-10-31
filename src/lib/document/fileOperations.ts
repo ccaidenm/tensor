@@ -11,9 +11,9 @@ import { migrateLegacyHeaderFooter } from '@/lib/editor/headerFooterCommands';
 
 const FILE_FILTERS = [
   { name: 'Word Processor Document', extensions: ['wpdoc'] },
-  // M-MD: markdown rides the same Open flow (issue #38's DOCX import
-  // will extend this the same way).
   { name: 'Markdown', extensions: ['md', 'markdown'] },
+  // M-DOCX: the Word format rides the same Open flow (#38).
+  { name: 'Word Document', extensions: ['docx'] },
 ];
 
 /**
@@ -80,7 +80,10 @@ export async function saveDocumentAs(
   editor: Editor,
   options: SaveDocumentOptions,
 ): Promise<string | null> {
-  const path = await save({ filters: FILE_FILTERS, defaultPath: 'Untitled.wpdoc' });
+  // WPDOC-ONLY: the store's saveAs dispatches .docx to the Word writer
+  // — this legacy helper must never write a zip container into a
+  // .docx path.
+  const path = await save({ filters: [{ name: 'Word Processor Document', extensions: ['wpdoc'] }], defaultPath: 'Untitled.wpdoc' });
   if (!path) return null;
   await saveDocument(editor, path, options);
   return path;
@@ -94,6 +97,9 @@ export interface OpenDocumentResult {
   /** M-MD: markdown imports only — images dropped during ingestion
    *  (remote/missing/unreadable). The open path surfaces the count. */
   skippedImages?: number;
+  /** M-DOCX: the Word import's loud postures (dropped fields, tracked
+   *  changes accepted, refused images...). One notice on open. */
+  importNotices?: string[];
   pageSetup: PageSetup | null;
   /** M-STYLES: the file's doc-layer style definitions (may be empty —
    *  pre-styles files). The document store applies them to the
@@ -114,12 +120,14 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
   const path = await open({ filters: FILE_FILTERS, multiple: false });
   if (!path || Array.isArray(path)) return null;
 
-  // M-MD: extension dispatch — markdown imports through the same Open
-  // flow, with its own result shape (no page setup/styles/bands — the
-  // format has none; defaults apply).
+  // M-MD/M-DOCX: extension dispatch — markdown and Word import through
+  // the same Open flow, each with its own result shape.
   const lower = path.toLowerCase();
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
     return openMarkdownDocument(editor, path);
+  }
+  if (lower.endsWith('.docx')) {
+    return openDocxDocument(editor, path);
   }
 
   // M-IMAGES-0: v2 container — or v1 plain JSON via the PERMANENT
@@ -170,6 +178,52 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
  * for the loud notice. The dynamic import keeps marked out of the
  * startup path (the same lazy pattern the backfill uses).
  */
+/** The Save-As surface: Tensor's own format OR Word's — markdown is
+ *  deliberately absent (an export-only format; saving a document as
+ *  .md would be lossy on every save). The chosen extension decides
+ *  the writer. */
+const SAVE_AS_FILTERS = [
+  { name: 'Word Processor Document', extensions: ['wpdoc'] },
+  { name: 'Word Document', extensions: ['docx'] },
+];
+
+/** The Save-As dialog's path (the caller dispatches on the extension). */
+export async function chooseSavePath(defaultName: string): Promise<string | null> {
+  return save({ filters: SAVE_AS_FILTERS, defaultPath: defaultName });
+}
+
+/** The default Save-As name for the current document (its own
+ *  extension preserved; Untitled docs default to Tensor's format). */
+export function saveAsDefaultName(filePath: string | null): string {
+  if (!filePath) return 'Untitled.wpdoc';
+  return filePath.split(/[\\/]/).pop() ?? 'Untitled.wpdoc';
+}
+
+/**
+ * M-DOCX — the Word open path (#38a + the in-place ruling): unzip →
+ * parse → the font choice (the ImportOptionsDialog fires only for
+ * out-of-catalog families) → the inverse mapping → setContent. The
+ * doc's OWN settings travel (pageSetup/styles/bands/line numbers/core
+ * properties), and the .docx file is ADOPTED — filePath becomes the
+ * Word file, so Save writes it in place (the save dispatch owns that
+ * path; opening a Word document is opening a document).
+ */
+async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocumentResult> {
+  const { importDocxFile } = await import('@/lib/docx/importFlow');
+  const name = path.split(/[\\/]/).pop() ?? 'Untitled';
+  const result = await importDocxFile(path, name.replace(/\.docx$/i, ''));
+  editor.commands.setContent(result.json);
+  return {
+    path,
+    pageSetup: result.pageSetup,
+    styleDefinitions: result.styleDefinitions,
+    lineNumbers: result.lineNumbers,
+    coreProperties: normalizeCoreProperties({ ...result.coreProperties, title: result.title }),
+    headerFooter: result.headerFooter,
+    importNotices: result.notices,
+  };
+}
+
 async function openMarkdownDocument(editor: Editor, path: string): Promise<OpenDocumentResult> {
   const { importMarkdown } = await import('@/lib/markdown/importMarkdown');
   const { json, skippedImages } = await importMarkdown(path);

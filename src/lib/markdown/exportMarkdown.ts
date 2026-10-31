@@ -1,10 +1,11 @@
-import { message, save } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
 import { mkdir, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import type { JSONContent } from '@tiptap/core';
 import { useMediaStore } from '@/lib/media/store';
-import { useExportMarkdownDialogStore } from '@/components/dialogs/ExportMarkdownDialog';
+import { useExportConfirmDialogStore } from '@/components/dialogs/ExportConfirmDialog';
+import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 import { jsonToMarkdown } from './manager';
-import { analyzeMarkdownLossy, hasLossyContent } from './lossy';
+import { analyzeMarkdownLossy, hasLossyContent, markdownLossyLines } from './lossy';
 import { baseName, dirName, joinPath, stripExt } from './paths';
 
 /**
@@ -43,7 +44,10 @@ export async function exportMarkdownFile(
   // promise. Cancel = no save dialog, no file, no partial state.
   const report = analyzeMarkdownLossy(json);
   if (hasLossyContent(report)) {
-    const proceed = await useExportMarkdownDialogStore.getState().requestConfirm(report);
+    const proceed = await useExportConfirmDialogStore.getState().requestConfirm({
+      title: 'Export Markdown?',
+      lines: markdownLossyLines(report),
+    });
     if (!proceed) return 'cancelled';
   }
 
@@ -57,10 +61,13 @@ export async function exportMarkdownFile(
   await writeTextFile(path, finalMarkdown);
 
   if (missing > 0) {
-    await message(
-      `${missing} image${missing === 1 ? ' reference was' : ' references were'} left as placeholders — the image data is no longer in this session.`,
-      { title: 'Export Markdown', kind: 'warning' },
-    );
+    // The loud surface is the in-app report dialog (never a native popup).
+    useImportReportDialogStore.getState().show({
+      title: 'Export Markdown',
+      lines: [
+        `${missing} image${missing === 1 ? ' reference was' : ' references were'} left as placeholders — the image data is no longer in this session.`,
+      ],
+    });
   }
   return 'exported';
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { save, message } from '@tauri-apps/plugin-dialog';
+import { save } from '@tauri-apps/plugin-dialog';
 import { mkdir, readFile } from '@tauri-apps/plugin-fs';
 import type { JSONContent } from '@tiptap/core';
 import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMarkdown';
@@ -8,9 +8,10 @@ import { importMarkdown } from '@/lib/markdown/importMarkdown';
 import { useMediaStore } from '@/lib/media/store';
 import { sha256Hex } from '@/lib/media/insert';
 import {
-  ExportMarkdownDialog,
-  useExportMarkdownDialogStore,
-} from '@/components/dialogs/ExportMarkdownDialog';
+  ExportConfirmDialog,
+  useExportConfirmDialogStore,
+} from '@/components/dialogs/ExportConfirmDialog';
+import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 
 /**
  * M-MD — the file-flow suite: export (confirm gate → save dialog →
@@ -65,7 +66,7 @@ beforeEach(() => {
   files.clear();
   dialogState.savePath = null;
   useMediaStore.setState({ entries: new Map() });
-  useExportMarkdownDialogStore.setState({ pending: null });
+  useExportConfirmDialogStore.setState({ pending: null });
 });
 
 describe('markdownDefaultPath', () => {
@@ -80,7 +81,7 @@ describe('export flow', () => {
     dialogState.savePath = '/home/u/notes/clean.md';
     const outcome = await exportMarkdownFile(doc(para('hello world')), { defaultPath: 'clean.md' });
     expect(outcome).toBe('exported');
-    expect(useExportMarkdownDialogStore.getState().pending).toBeNull();
+    expect(useExportConfirmDialogStore.getState().pending).toBeNull();
     expect(mkdir).not.toHaveBeenCalled();
     expect(files.get('/home/u/notes/clean.md')).toContain('hello world');
   });
@@ -90,11 +91,12 @@ describe('export flow', () => {
       defaultPath: 'X.md',
     });
     // the gate parks the report — the save dialog has NOT opened
-    const pending = useExportMarkdownDialogStore.getState().pending;
-    expect(pending?.report.pageBreaks).toBe(1);
+    const pending = useExportConfirmDialogStore.getState().pending;
+    expect(pending?.title).toBe('Export Markdown?');
+    expect(pending?.lines.some((line) => line.includes('Page breaks (1)'))).toBe(true);
     expect(save).not.toHaveBeenCalled();
     // the dialog's Cancel settles the gate as declined
-    useExportMarkdownDialogStore.getState().settle(false);
+    useExportConfirmDialogStore.getState().settle(false);
     expect(await outcome).toBe('cancelled');
     expect(save).not.toHaveBeenCalled();
     expect([...files.keys()]).toHaveLength(0);
@@ -106,9 +108,9 @@ describe('export flow', () => {
       doc({ type: 'headerBlock', content: [para('band')] }, para('body')),
       { defaultPath: 'lossy.md' },
     );
-    const pending = useExportMarkdownDialogStore.getState().pending;
-    expect(pending?.report.headerFooterRegions).toBe(1);
-    useExportMarkdownDialogStore.getState().settle(true);
+    const pending = useExportConfirmDialogStore.getState().pending;
+    expect(pending?.lines.some((line) => line.includes('Header/footer content (1 region)'))).toBe(true);
+    useExportConfirmDialogStore.getState().settle(true);
     expect(await outcome).toBe('exported');
     expect(files.get('/home/u/notes/lossy.md')).toContain('body');
     expect(files.get('/home/u/notes/lossy.md')).not.toContain('band');
@@ -150,7 +152,9 @@ describe('export flow', () => {
     );
     const md = files.get('/dir/gone.md') as string;
     expect(md).toContain(`media://${SHA}`);
-    expect(message).toHaveBeenCalledTimes(1);
+    // the loud surface is the IN-APP report dialog, never a native popup
+    expect(useImportReportDialogStore.getState().pending?.lines.length).toBeGreaterThan(0);
+    useImportReportDialogStore.getState().dismiss();
   });
 });
 
@@ -219,15 +223,13 @@ describe('import flow', () => {
 
 describe('the export confirm dialog (in-app, M-MD)', () => {
   it('lists only the losses present and settles the gate with its buttons', async () => {
-    render(<ExportMarkdownDialog />);
+    render(<ExportConfirmDialog />);
     let answer: boolean | null = null;
-    void useExportMarkdownDialogStore
+    void useExportConfirmDialogStore
       .getState()
       .requestConfirm({
-        headerFooterRegions: 1,
-        referenceTables: 0,
-        pageBreaks: 2,
-        customFormatting: true,
+        title: 'Export Markdown?',
+        lines: ['Header/footer content (1 region)', 'Page breaks (2)', 'Custom formatting (fonts, colors, sizes, alignment, spacing, indents, custom styles)'],
       })
       .then((v) => {
         answer = v;
@@ -241,19 +243,19 @@ describe('the export confirm dialog (in-app, M-MD)', () => {
     expect(screen.getByText(/Custom formatting/)).toBeTruthy();
 
     // the destructive proceed button (the developer-mode pattern)
-    fireEvent.click(screen.getByTestId('export-markdown-accept'));
+    fireEvent.click(screen.getByTestId('export-confirm-accept'));
     await act(async () => {});
     expect(answer).toBe(true);
-    expect(useExportMarkdownDialogStore.getState().pending).toBeNull();
+    expect(useExportConfirmDialogStore.getState().pending).toBeNull();
   });
 
   it('a settled-true gate lets the export through; the dialog closes', async () => {
-    render(<ExportMarkdownDialog />);
+    render(<ExportConfirmDialog />);
     dialogState.savePath = '/dir/dialog.md';
     const outcome = exportMarkdownFile(doc(para('kept'), { type: 'pageBreak' }), {
       defaultPath: 'dialog.md',
     });
-    useExportMarkdownDialogStore.getState().settle(true);
+    useExportConfirmDialogStore.getState().settle(true);
     expect(await outcome).toBe('exported');
     expect(files.get('/dir/dialog.md')).toContain('kept');
   });

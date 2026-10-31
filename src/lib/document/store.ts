@@ -1,8 +1,14 @@
 import { create } from 'zustand';
 import type { Editor } from '@tiptap/core';
 import { message } from '@tauri-apps/plugin-dialog';
-import { saveDocument, saveDocumentAs, openDocument } from './fileOperations';
+import { saveDocument, openDocument, chooseSavePath, saveAsDefaultName } from './fileOperations';
 import { exportMarkdownFile, markdownDefaultPath } from '@/lib/markdown/exportMarkdown';
+import { docxDefaultPath, exportDocxFile, saveDocxToPath } from '@/lib/docx/exportFlow';
+import type { DocxExportInput } from '@/lib/docx/export';
+import type { JSONContent } from '@tiptap/core';
+import { toDocxCoreProperties } from './coreProperties';
+import { useMediaStore } from '@/lib/media/store';
+import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 import { clearRecoveryCopy } from './recovery';
 import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
@@ -18,6 +24,35 @@ function defaultPageSetup(): PageSetup {
     margins: config.editor.defaultMargins,
     pageGap: config.editor.defaultPageGap,
   };
+}
+
+/** THE DOCX INPUT (M-DOCX): one assembly shared by the Export command,
+ *  in-place Save, and Save-As — the resolved style registry, the
+ *  config-derived base, and the session media ride identically in all
+ *  three, so an export can never drift from what Save writes. */
+function buildDocxInput(json: JSONContent): DocxExportInput {
+  const { pageSetup, headerFooter, coreProperties } = useDocumentStore.getState();
+  return {
+    json,
+    pageSetup,
+    headerFooter,
+    coreProperties: toDocxCoreProperties(coreProperties),
+    // The RESOLVED registry (code+global+doc) — the styles the
+    // document's styleIds reference (M-STYLES cascade).
+    styleDefinitions: Object.values(useStyleRegistryStore.getState().merged),
+    baseStyle: {
+      fontFamily: useConfigStore.getState().config.editor.defaultFontFamily,
+      fontSize: useConfigStore.getState().config.editor.defaultFontSize,
+    },
+    media: useMediaStore.getState().entries,
+  };
+}
+
+/** The in-place dispatch: a .docx document saves ITSELF; everything
+ *  else saves Tensor's format. Markdown paths never reach here (the
+ *  open flow keeps them filePath-less — markdown is export-only). */
+function isWordPath(filePath: string): boolean {
+  return filePath.toLowerCase().endsWith('.docx');
 }
 
 interface DocumentStore {
@@ -53,6 +88,9 @@ interface DocumentStore {
    *  lossy confirm (ruling 2) lives inside exportMarkdownFile, so the
    *  menu and the palette share the exact same body. */
   exportMarkdown: () => Promise<void>;
+  /** M-DOCX: export the current document as a Word .docx (#37) — the
+   *  same copy-not-conversion posture and the same one-body gate. */
+  exportDocx: () => Promise<void>;
   pageCount: number;
   currentPage: number;
   setPageInfo: (pageCount: number, currentPage: number) => void;
@@ -97,31 +135,47 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       await get().saveAs();
       return;
     }
+    if (isWordPath(filePath)) {
+      // M-DOCX in-place: Save writes the Word file at its own path.
+      try {
+        const outcome = await saveDocxToPath(buildDocxInput(editor.getJSON()), filePath);
+        if (outcome === 'saved') set({ isDirty: false });
+      } catch (err) {
+        await message(err instanceof Error ? err.message : 'Failed to save Word document', {
+          title: 'Error',
+          kind: 'error',
+        });
+      }
+      return;
+    }
     await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
     await clearRecoveryCopy(filePath);
     set({ isDirty: false });
   },
 
   saveAs: async () => {
-    const {
-      editor,
-      filePath: oldPath,
-      pageSetup,
-      lineNumbers,
-      coreProperties,
-      headerFooter,
-    } = get();
+    const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } = get();
     if (!editor) return;
-    const newPath = await saveDocumentAs(editor, {
-      pageSetup,
-      lineNumbers,
-      coreProperties,
-      headerFooter,
-    });
-    if (newPath) {
-      await clearRecoveryCopy(oldPath);
-      set({ filePath: newPath, isDirty: false });
+    const path = await chooseSavePath(saveAsDefaultName(filePath));
+    if (!path) return;
+    if (isWordPath(path)) {
+      try {
+        const outcome = await saveDocxToPath(buildDocxInput(editor.getJSON()), path);
+        if (outcome === 'saved') {
+          await clearRecoveryCopy(filePath);
+          set({ filePath: path, isDirty: false });
+        }
+      } catch (err) {
+        await message(err instanceof Error ? err.message : 'Failed to save Word document', {
+          title: 'Error',
+          kind: 'error',
+        });
+      }
+      return;
     }
+    await saveDocument(editor, path, { pageSetup, lineNumbers, coreProperties, headerFooter });
+    await clearRecoveryCopy(filePath);
+    set({ filePath: path, isDirty: false });
   },
 
   exportMarkdown: async () => {
@@ -131,6 +185,21 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       await exportMarkdownFile(editor.getJSON(), { defaultPath: markdownDefaultPath(filePath) });
     } catch (err) {
       await message(err instanceof Error ? err.message : 'Failed to export Markdown', {
+        title: 'Error',
+        kind: 'error',
+      });
+    }
+  },
+
+  exportDocx: async () => {
+    const { editor, filePath } = get();
+    if (!editor) return;
+    try {
+      await exportDocxFile(buildDocxInput(editor.getJSON()), {
+        defaultPath: docxDefaultPath(filePath),
+      });
+    } catch (err) {
+      await message(err instanceof Error ? err.message : 'Failed to export Word document', {
         title: 'Error',
         kind: 'error',
       });
@@ -149,10 +218,10 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         useStyleRegistryStore.getState().applyDocLayer(result.styleDefinitions);
         set({
           filePath: result.path,
-          // M-MD: a markdown import carries real content with no file
-          // behind it — unsaved work (isDirty: true also keeps the
-          // pristine-config subscription from resetting the page setup
-          // under it). A .wpdoc open is clean by definition.
+          // M-MD: a MARKDOWN import carries real content with no file
+          // behind it — unsaved work (it also keeps the pristine-config
+          // subscription from resetting the page setup under it). A
+          // .wpdoc or .docx open is clean: the file IS the document.
           isDirty: result.path === null,
           pageSetup: result.pageSetup ?? defaultPageSetup(),
           lineNumbers: result.lineNumbers ?? null,
@@ -163,14 +232,21 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           // instances off this write (its own subscription).
           headerFooter: result.headerFooter,
         });
-        // M-MD: the LOUD posture for dropped images — one dialog naming
-        // the count, after the content has landed (never a crash,
-        // never silent loss).
+        // M-MD/M-DOCX: the LOUD posture — one in-app report dialog
+        // naming what changed, after the content has landed (never a
+        // crash, never silent loss).
+        const notices: string[] = [];
         if (result.skippedImages) {
-          await message(
+          notices.push(
             `${result.skippedImages} image${result.skippedImages === 1 ? ' was' : 's were'} not imported — remote, missing, or unreadable sources are refused rather than silently fetched.`,
-            { title: 'Markdown import', kind: 'warning' },
           );
+        }
+        if (result.importNotices?.length) notices.push(...result.importNotices);
+        if (notices.length) {
+          useImportReportDialogStore.getState().show({
+            title: result.importNotices ? 'Word import' : 'Markdown import',
+            lines: notices,
+          });
         }
       }
     } catch (err) {
