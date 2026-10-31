@@ -106,6 +106,87 @@ function refOffsetToPmPos(block: AdapterBlock, offset: number): number {
  * maps to offset 0; pos at/after a block's end clamps to its text end
  * (a selection ending at the next block's start projects onto this
  * block's last position). pos before the first block maps into it. */
+/**
+ * M-PAGEFIELD — THE PROSE RUN MAP: PM positions and block-text offsets
+ * diverge at FIELD runs. A field is ONE PM position (an inline atom)
+ * but its measured placeholder is N block-text characters (the warm
+ * total's digits — the slot the engine breaks lines at). A linear
+ * pos<->offset mapping shifts everything after a field by (N-1),
+ * which clamps selections at the field and lands carets one char into
+ * the next run — the reported "not selectable" bug. Both mapping
+ * directions for prose blocks route through this table.
+ */
+interface ProseRunSpan {
+  /** PM position of the run's first char, relative to from+1. */
+  pmStart: number;
+  /** Block-text offset of the run's first char. */
+  blockStart: number;
+  pmLen: number;
+  blockLen: number;
+  /** The atom's PM position (field runs only). */
+  fieldPmStart: number | null;
+}
+
+function proseRunMap(block: AdapterBlock): ProseRunSpan[] {
+  const spans: ProseRunSpan[] = [];
+  let pm = 0;
+  let bt = 0;
+  for (const run of block.runs) {
+    if (run.kind === 'inlineImage') {
+      // ONE PM position (the atom), ONE block char (\uFFFC) — no
+      // divergence, but the table must still account for both sides.
+      spans.push({ pmStart: pm, blockStart: bt, pmLen: 1, blockLen: 1, fieldPmStart: null });
+      pm += 1;
+      bt += 1;
+      continue;
+    }
+    const text = run.text;
+    const field = (run as { fieldKind?: string }).fieldKind != null;
+    if (field) {
+      spans.push({ pmStart: pm, blockStart: bt, pmLen: 1, blockLen: text.length, fieldPmStart: pm });
+    } else {
+      spans.push({ pmStart: pm, blockStart: bt, pmLen: text.length, blockLen: text.length, fieldPmStart: null });
+    }
+    pm += field ? 1 : text.length;
+    bt += text.length;
+  }
+  return spans;
+}
+
+/** PM-relative -> block offset for a prose block (field-aware). */
+function prosePmRelToOffset(block: AdapterBlock, rel: number): number {
+  const spans = proseRunMap(block);
+  for (let i = 0; i < spans.length; i++) {
+    const sp = spans[i]!;
+    const nextPm = i + 1 < spans.length ? spans[i + 1]!.pmStart : sp.pmStart + sp.pmLen;
+    if (rel >= sp.pmStart && rel < nextPm) {
+      // Inside (or at the start edge of) this run. A FIELD run's whole
+      // PM span maps to the placeholder START (the atom is one
+      // position — its caret/selection point is the slot's left edge).
+      if (sp.fieldPmStart != null) return sp.blockStart;
+      return sp.blockStart + Math.min(rel - sp.pmStart, sp.blockLen);
+    }
+  }
+  return block.text.length;
+}
+
+/** Block offset -> PM-relative for a prose block (field-aware). */
+function proseOffsetToPmRel(block: AdapterBlock, offset: number): number {
+  const spans = proseRunMap(block);
+  for (let i = 0; i < spans.length; i++) {
+    const sp = spans[i]!;
+    const nextBt = i + 1 < spans.length ? spans[i + 1]!.blockStart : sp.blockStart + sp.blockLen;
+    if (offset >= sp.blockStart && offset < nextBt) {
+      // Any offset inside a field's placeholder maps to the ATOM.
+      if (sp.fieldPmStart != null) return sp.fieldPmStart;
+      return sp.pmStart + Math.min(offset - sp.blockStart, sp.pmLen);
+    }
+  }
+  return spans.length
+    ? spans[spans.length - 1]!.pmStart + spans[spans.length - 1]!.pmLen
+    : 0;
+}
+
 export function pmPosToBlockOffset(
   blocks: readonly AdapterBlock[],
   pos: number
@@ -124,7 +205,9 @@ export function pmPosToBlockOffset(
       // map (the container's children are real paragraphs — the
       // caret lives INSIDE entry text, same bridge as cells).
       if (b.reference) return { block: b, offset: refPosToOffset(b, pos) };
-      return { block: b, offset: Math.min(pos - (b.from + 1), b.text.length) };
+      // M-PAGEFIELD: prose maps through the RUN TABLE (field-aware —
+      // the linear spelling shifted everything after a field).
+      return { block: b, offset: prosePmRelToOffset(b, pos - (b.from + 1)) };
     }
     if (pos <= b.from) hi = mid - 1;
     else lo = mid + 1;
@@ -138,7 +221,8 @@ export function blockOffsetToPmPos(block: AdapterBlock, offset: number): number 
   // M-REFS: through the ENTRY map (real entry text — a plain click in
   // an entry line places the caret at the true position).
   if (block.reference) return refOffsetToPmPos(block, offset);
-  return block.from + 1 + offset;
+  // M-PAGEFIELD: prose maps through the RUN TABLE (field-aware).
+  return block.from + 1 + proseOffsetToPmRel(block, offset);
 }
 
 /**
@@ -176,6 +260,44 @@ export function lineForOffset(lines: readonly LineBox[], offset: number): LineBo
   return last;
 }
 
+/**
+ * M-PAGEFIELD — THE PER-PAGE INK SHIFT. A band line's geometry is
+ * SHARED across pages (the engine echoes the same LineBoxes), so a
+ * field's slot is measured at the WARM TOTAL's digits — the widest
+ * page number, stable for every page. The DRAWN number on THIS page
+ * (line.pageIndex) is narrower slack; Word re-lays footers per page,
+ * our shared geometry cannot, so the PAINT closes the slack as ink:
+ * the number draws LEFT-anchored in its slot and every segment after
+ * it shifts left by the accumulated slack — page 3 renders "Page 3
+ * of 10" exactly as Word does, page 10 shift 0. Derives wholly from
+ * (line, block): the placeholder digits sit in the block text, the
+ * resolved number is line.pageIndex+1 ('pages' fields have no slack
+ * — the resolved total IS the slot). Consumers: lineOffsetX (hence
+ * caret, selection rects, search extents — automatically), paint,
+ * hitTest. Tabs after a field shift too (documented approximation:
+ * a right-stop would misalign by the slack; rare in bands).
+ */
+export function fieldShiftBefore(
+  line: LineBox,
+  block: AdapterBlock,
+  metrics: TextMetrics,
+  segIndex: number
+): number {
+  let shift = 0;
+  for (let i = 0; i < segIndex && i < line.segments.length; i++) {
+    const seg = line.segments[i]!;
+    const run = block.runs[seg.runIndex] as
+      | { kind?: string; fieldKind?: string; style?: TextStyle; text?: string }
+      | undefined;
+    if (!run || run.kind === 'inlineImage' || !run.fieldKind) continue;
+    if (run.fieldKind !== 'page') continue; // 'pages': resolved == slot
+    const slot = metrics.measure(block.text.slice(seg.start, seg.end), run.style!);
+    const resolved = metrics.measure(String(line.pageIndex + 1), run.style!);
+    shift += Math.max(0, slot - resolved);
+  }
+  return shift;
+}
+
 /** x (content-box px) of a text offset within its line, measured with
  * the same metrics instance that measured the layout. `objectMaxWidth`
  * (the block's BASE wrap width — contentBox − indents, the engine's
@@ -197,12 +319,18 @@ export function lineOffsetX(
   // pen-dependent; center/right stops reposition their text). The
   // objectMaxWidth parameter is legacy: the engine's placement already
   // includes an inline object's placed advance.
-  for (const seg of line.segments) {
+  for (let si = 0; si < line.segments.length; si++) {
+    const seg = line.segments[si]!;
+    // M-PAGEFIELD: ink after a field shifts by the accumulated slack
+    // (the shared-geometry/per-page-ink ruling — see fieldShiftBefore).
+    // The CARET and every rect derivation route through here, so they
+    // agree with the paint by construction.
+    const shift = fieldShiftBefore(line, block, metrics, si);
     // Boundary offsets belong to the LATER segment (the lineForOffset
     // rule) — its seeded x is the boundary's x.
-    if (offset <= seg.start) return line.rect.x + seg.x;
+    if (offset <= seg.start) return line.rect.x + seg.x - shift;
     const run = block.runs[seg.runIndex];
-    const x = line.rect.x + seg.x;
+    const x = line.rect.x + seg.x - shift;
     if (offset < seg.end) {
       // Inside this segment: add the segment-local prefix. A tab
       // segment owns exactly one live position (its start — the pen
@@ -215,7 +343,11 @@ export function lineOffsetX(
     }
   }
   // Past the last segment (the line's end): the placed pen.
-  return line.rect.x + line.rect.width;
+  return (
+    line.rect.x +
+    line.rect.width -
+    fieldShiftBefore(line, block, metrics, line.segments.length)
+  );
 }
 
 /** The block's BASE wrap width — the engine's breakLines maxWidth and

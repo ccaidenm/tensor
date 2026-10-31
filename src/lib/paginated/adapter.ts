@@ -322,6 +322,10 @@ interface CachedConversion {
   /** Projection facts this conversion was built under (sibling-dependent). */
   indentLeft: number;
   paint?: BlockPaint;
+  /** M-PAGEFIELD: the warm total the field placeholders were measured
+   *  at (the fixpoint's input — a widened total re-converts). Undefined
+   *  on field-free blocks (undefined === undefined keeps their reuse). */
+  fieldTotal?: number;
   /** M-REFS: the scan object the referenceTable entries were built
    * under (the doc-version fact — see Projection.scan). Undefined on
    * every other kind (undefined === undefined keeps their reuse test
@@ -1411,6 +1415,13 @@ function convertNode(
     // construction, so only the base needs the equality test.
     indentLeft: projection.indentLeft,
     paint: projection.paint,
+    // M-PAGEFIELD: the warm total rides ONLY on field-bearing blocks —
+    // field-free blocks convert identically at ANY total (storing the
+    // total here would break reuse whenever the shell's warm total
+    // differs from the caller's, e.g. the unit tests' undefined). The
+    // fixpoint's widened total must MISS field-bearing caches (a stale
+    // placeholder would never widen).
+    fieldTotal: runs.some((r) => (r as { fieldKind?: string }).fieldKind != null) ? fieldTotal : undefined,
   };
 }
 
@@ -1512,6 +1523,12 @@ export function pmDocToSemantic(
       cached &&
       cached.gen === cacheGeneration &&
       cached.indentLeft === projection.indentLeft &&
+      // M-PAGEFIELD: the total gates ONLY field-bearing conversions (a
+      // widened total re-converts — the fixpoint's pass 2); field-free
+      // conversions are total-independent and reuse at ANY warm total
+      // (storing the total on them would break reuse whenever the
+      // caller's total differs).
+      (cached.fieldTotal == null || cached.fieldTotal === fieldTotal) &&
       paintEqual(cached.paint, projection.paint) &&
       // M-REFS: the scan fact — a referenceTable node reuses its
       // conversion only under the SAME doc scan (a retitle elsewhere

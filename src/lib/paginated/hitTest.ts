@@ -1,4 +1,4 @@
-import { fitDownImage, type LayoutResult, type TextMetrics } from '@tensor-editor/engine';
+import { fitDownImage, type LayoutResult, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
 import type { AdapterBlock } from './adapter';
 import { alignOffset, blockWrapWidth } from './positionMap';
 
@@ -132,6 +132,11 @@ export function hitTest(
     // falls through the nearest-glyph loop and resolves to the item's
     // first position — the nearest-line rule stays symmetric with paint.
     const baseX = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+    // M-PAGEFIELD: the per-page INK SHIFT accumulates across the walk
+    // (fieldShiftBefore — the same derivation paint/lineOffsetX use).
+    // Drawn ink sits at measured - shift; the walk compensates so
+    // clicks on SHIFTED ink map to the true offsets.
+    let shift = 0;
     for (let si = 0; si < line.segments.length; si++) {
       const seg = line.segments[si]!;
       const run = block.runs[seg.runIndex];
@@ -140,7 +145,26 @@ export function hitTest(
       // prefix sums cannot model tab advances. A \t's advance is the gap
       // to the next segment's x (the placed pen jump); the tab resolves
       // by the same glyph-midpoint rule over that jump.
-      let cursor = baseX + seg.x;
+      let cursor = baseX + seg.x - shift;
+      // M-PAGEFIELD: the DRAWN number owns its width (LEFT-anchored at
+      // the slot start — the paint ruling); clicks inside it map to the
+      // field atom (ONE PM position — the inlineImage precedent). The
+      // slack past the drawn number shifts into the NEXT segment's
+      // cursor, so clicks on the shifted trailing ink stay true.
+      if ((run as { fieldKind?: string }).fieldKind && run.kind !== 'inlineImage') {
+        const fk = (run as { fieldKind?: string }).fieldKind;
+        const style = (run as { style: TextStyle }).style;
+        const slot = metrics.measure(block.text.slice(seg.start, seg.end), style);
+        const resolved =
+          fk === 'pages'
+            ? slot
+            : metrics.measure(String(pageIndex + 1), style);
+        if (x < cursor + resolved) {
+          return { blockId: line.blockId, offset: seg.start, pageIndex };
+        }
+        shift += Math.max(0, slot - resolved);
+        continue;
+      }
       if (run.kind === 'inlineImage') {
         // M-IMAGES-2 — the object token: ONE position per object (the
         // engine's unbreakable-token contract). The ENTIRE painted

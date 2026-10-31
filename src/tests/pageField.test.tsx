@@ -3,6 +3,8 @@ import { act } from '@testing-library/react';
 import { renderTensor, renderTensorInScrollContainer, settleLayout, dataEvent } from './harness';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import { paintLines } from '@/lib/paginated/paint';
+import { pmPosToBlockOffset, blockOffsetToPmPos } from '@/lib/paginated/positionMap';
+import { insertPageField } from '@/lib/editor/PageFieldNode';
 import type { LineBox, Run } from '@tensor-editor/engine';
 
 /**
@@ -105,11 +107,61 @@ describe('pageField — the adapter (M-PAGEFIELD)', () => {
   });
 });
 
+describe('pageField — the position mapping (selectability, M-PAGEFIELD)', () => {
+  it('selection maps THROUGH the field (the atom is 1 PM position; the placeholder is N chars)', async () => {
+    const { editor } = renderTensor('<div data-header-footer="footer"><p>Page</p></div>');
+    await settleLayout();
+    // the caret at the paragraph END — the field appends: 'Page' + atom.
+    editor.commands.setTextSelection(5);
+    insertPageField(editor, 'page');
+    await settleLayout();
+
+    // A WARM TOTAL of 12: the placeholder is '12' (2 chars) while the
+    // atom is ONE PM position — the divergence the mapping must fold.
+    const adapted = pmDocToSemantic(editor.state.doc, BASE, undefined, undefined, undefined, 12);
+    let atomPos = 0;
+    editor.state.doc.descendants((n, pos) => {
+      if (n.type.name === 'pageField' && atomPos === 0) atomPos = pos;
+      return true;
+    });
+    // the band paragraph rides BOTH blocks and bandBlocks (pushBand).
+    const block = adapted.blocks.find((b) =>
+      b.runs.some((r) => (r as { fieldKind?: string }).fieldKind != null)
+    )!;
+    // block text: 'Page' + '12' (6 chars) — the placeholder rides.
+    expect(block.text).toBe('Page12');
+
+    // The atom's PM position maps to the placeholder START and
+    // round-trips exactly (the old linear mapping shifted by 1).
+    const atomBo = pmPosToBlockOffset(adapted.blocks, atomPos)!;
+    expect(atomBo.offset).toBe(4); // '1' of '12'
+    expect(blockOffsetToPmPos(atomBo.block, atomBo.offset)).toBe(atomPos);
+
+    // BEFORE the field: identity (unchanged prefix).
+    const before = pmPosToBlockOffset(adapted.blocks, atomPos - 1)!;
+    expect(blockOffsetToPmPos(before.block, before.offset)).toBe(atomPos - 1);
+
+    // AFTER the field — the old bug's clamp point: the PM position
+    // past the atom round-trips exactly (a selection spanning the
+    // field reaches the paragraph end).
+    const after = atomPos + 1;
+    const afterBo = pmPosToBlockOffset(adapted.blocks, after)!;
+    expect(afterBo.offset).toBe(6); // past the placeholder — the text end
+    expect(blockOffsetToPmPos(afterBo.block, afterBo.offset)).toBe(after);
+
+    // Any offset INSIDE the placeholder folds to the atom.
+    expect(blockOffsetToPmPos(block, 5)).toBe(atomPos);
+  });
+});
+
 describe('pageField — the paint resolution (M-PAGEFIELD)', () => {
   /** A LineBox + runs shaped like a band line: [text 'Page ', field
    *  '12', text ' of ', field '12'] — the adapter's own emission
-   *  shape, hand-built to pin the PAINT contract. */
-  function bandLines(): { lines: LineBox[]; runs: Run[] } {
+   *  shape, hand-built to pin the PAINT contract. `pageIndex` is the
+   *  ECHO's page (0-based) — the shift derives the page number from
+   *  it, exactly as production does (BlockCanvas passes page.index+1
+   *  as fieldPage.number — the two are the same page). */
+  function bandLines(pageIndex: number): { lines: LineBox[]; runs: Run[] } {
     const style = { fontFamily: 'system-ui', fontSize: 16 };
     const runs: Run[] = [
       { text: 'Page ', style },
@@ -121,7 +173,7 @@ describe('pageField — the paint resolution (M-PAGEFIELD)', () => {
     const line = {
       blockId: 'b1',
       lineIndex: 0,
-      pageIndex: 4, // the FIFTH page — the page field resolves to '5'
+      pageIndex,
       rect: { x: 0, y: 0, width: 200, height: 20 },
       baseline: 16,
       rangeStart: 0,
@@ -134,11 +186,13 @@ describe('pageField — the paint resolution (M-PAGEFIELD)', () => {
     return { lines: [line], runs };
   }
 
-  function paintedTexts(pageNumber: number, total: number): string[] {
-    const calls: string[] = [];
+  function painted(pageNumber: number, total: number): Array<{ t: string; x: number }> {
+    // the ECHO sits on page `pageNumber` (0-based index pageNumber-1)
+    // — fieldPage.number and line.pageIndex+1 are the SAME page.
+    const calls: Array<{ t: string; x: number }> = [];
     const ctx = {
       measureText: (t: string) => ({ width: t.length * 6 }),
-      fillText: (t: string) => calls.push(t),
+      fillText: (t: string, x: number) => calls.push({ t, x }),
       fillRect: () => {},
       save: () => {},
       restore: () => {},
@@ -151,30 +205,48 @@ describe('pageField — the paint resolution (M-PAGEFIELD)', () => {
       drawImage: () => {},
       strokeRect: () => {},
     } as unknown as CanvasRenderingContext2D;
-    const { lines, runs } = bandLines();
-    paintLines(ctx, lines, runs, 'Page 12 of 12', 0, { measure: () => ({ width: 0 }), ascent: () => 12, descent: () => 4 } as never, {
-      align: 'left',
-      contentWidth: 600,
-      runDecor: [{}, {}, {}, {}],
-      fieldPage: { number: pageNumber, total },
-    } as never);
+    const { lines, runs } = bandLines(pageNumber - 1);
+    paintLines(
+      ctx, lines, runs, 'Page 12 of 12', 0,
+      // REAL widths (t.length × 6) — the shift math must be exercised.
+      // measure returns a NUMBER (the TextMetrics port) — an object
+      // stub would NaN every shift.
+      { measure: (t: string) => t.length * 6, ascent: () => 12, descent: () => 4 } as never,
+      {
+        align: 'left',
+        contentWidth: 600,
+        runDecor: [{}, {}, {}, {}],
+        fieldPage: { number: pageNumber, total },
+      } as never,
+    );
     return calls;
   }
 
-  it('the pages field draws the total exactly; the page field right-anchors its number in the slot', () => {
-    const drawn = paintedTexts(5, 12);
-    // 'Page ' literal
-    expect(drawn[0]).toBe('Page ');
-    // the PAGE field on page 5 resolves to '5', RIGHT-ANCHORED in the
-    // 2-digit slot — drawn at x + (measured 12w − resolved 1w)
-    expect(drawn[1]).toBe('5');
-    expect(drawn[2]).toBe(' of ');
-    // the PAGES field draws EXACTLY the measured placeholder
-    expect(drawn[3]).toBe('12');
+  it('the number draws left-anchored and the trailing ink SHIFTS to hug it (Word-exact)', () => {
+    const drawn = painted(5, 12);
+    // segment xs in the fixture: [0, 30, 42, 66].
+    expect(drawn[0]).toEqual({ t: 'Page ', x: 0 });
+    // the PAGE field on page 5 resolves to '5', drawn at its SHIFTED
+    // slot start (shift 0 — no field before it), width 6.
+    expect(drawn[1]).toEqual({ t: '5', x: 30 });
+    // ' of ' shifts left by the slack (slot 12 − resolved 6 = 6):
+    // 42 − 6 = 36 — hugging the drawn '5' (30 + 6 = 36). Word-exact.
+    expect(drawn[2]).toEqual({ t: ' of ', x: 36 });
+    // the PAGES field draws '12' shifted too (66 − 6 = 60), and the
+    // shifted ' of ' ends exactly there (36 + 24 = 60).
+    expect(drawn[3]).toEqual({ t: '12', x: 60 });
+  });
+
+  it('the widest page (== the slot) has zero shift — the natural line', () => {
+    const drawn = painted(12, 12);
+    expect(drawn.map((c) => c.t)).toEqual(['Page ', '12', ' of ', '12']);
+    expect(drawn[1]!.x).toBe(30); // no slack anywhere
+    expect(drawn[2]!.x).toBe(42);
+    expect(drawn[3]!.x).toBe(66);
   });
 
   it('every page resolves its own number off the same line', () => {
-    expect(paintedTexts(1, 12)[1]).toBe('1');
-    expect(paintedTexts(12, 12)[1]).toBe('12'); // the widest — the exact slot
+    expect(painted(1, 12)[1]!.t).toBe('1');
+    expect(painted(3, 12)[1]!.t).toBe('3');
   });
 });
