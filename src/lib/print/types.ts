@@ -22,8 +22,14 @@ export interface PrintText {
   kind: 'text';
   /** Page-relative left. */
   x: number;
-  /** Page-relative TOP of the ink box (baseline − ascent). */
+  /** Page-relative TOP of the ink box (baseline − ascent) — the DOM
+   *  view's datum (absolute positioning). */
   top: number;
+  /** Page-relative BASELINE — the PDF's datum (drawText y). Both ride
+   *  because the two consumers differ (v1 of the walk carried only
+   *  top and the PDF had to re-derive ascent per style — re-derivation
+   *  is the asymmetry-bug class this model kills). */
+  baseline: number;
   width: number;
   text: string;
   style: TextStyle;
@@ -70,6 +76,10 @@ export interface PrintImage {
   height: number;
   /** A renderable URL (the bitmap's src — object URL or data URL). */
   src: string;
+  /** The content address ('media://<sha>' minus the scheme) — the PDF
+   *  embeds from the MediaStore's BYTES (an object URL is a view-side
+   * handle; the export is a standalone file). */
+  sha: string;
   alt: string;
   /** Paint order vs text: floats 'behind' go under. */
   z: 'front' | 'behind';

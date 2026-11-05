@@ -16,6 +16,7 @@ export function WindowGroup() {
         label="Print Preview"
         icon={<Printer size={16} />}
         onClick={() => usePrintPreviewStore.getState().open()}
+        shortcutId='printPreview'
       />
     </RibbonGroup>
   );

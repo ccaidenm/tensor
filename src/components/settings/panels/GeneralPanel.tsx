@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { Moon, Type, Paintbrush, User, Mouse, Terminal } from 'lucide-react';
+import { Moon, Type, Paintbrush, User, Mouse, Terminal, FolderOpen } from 'lucide-react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useConfigStore } from '@/lib/config/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -112,6 +113,13 @@ export function GeneralPanel() {
   const pasteOnMiddleClick = useConfigStore((s) => s.config.editor.pasteOnMiddleClick);
   const setPasteOnMiddleClick = useConfigStore((s) => s.setPasteOnMiddleClick);
   const developerMode = useConfigStore((s) => s.config.developerMode);
+  // M-PRINT: the default export folder ('' = the OS dialog's default).
+  const downloadsDir = useConfigStore((s) => s.config.downloadsDir);
+  const setDownloadsDir = useConfigStore((s) => s.setDownloadsDir);
+  // M-PRINT: the always-ask trigger (Shift default / Ctrl+⌘).
+  const trigger = useConfigStore((s) => s.config.pdfAlwaysAskTrigger);
+  const setPdfAlwaysAskTrigger = useConfigStore((s) => s.setPdfAlwaysAskTrigger);
+  const triggerLabel = trigger === 'ctrl' ? 'Ctrl/' : 'Shift+';
   const setDeveloperMode = useConfigStore((s) => s.setDeveloperMode);
   // The enabling warning: turning Developer Mode ON must be ACCEPTED,
   // never incidental (devtools can inspect and mutate anything).
@@ -149,6 +157,59 @@ export function GeneralPanel() {
             checked={pasteOnMiddleClick}
             onCheckedChange={(checked: boolean) => setPasteOnMiddleClick(checked)}
           />
+        </Row>
+      </SettingsSection>
+
+
+      <SettingsSection id="downloads" title="Downloads">
+        <Row
+          icon={<FolderOpen className="h-4 w-4" />}
+          label="Default Export Folder"
+          description={
+            downloadsDir
+              ? `PDF exports save directly here (${triggerLabel}click Save as PDF to pick a location)`
+              : `PDF exports ask where to save (pick a folder to skip the dialog)`
+          }
+        >
+          <div className="flex items-center gap-2">
+            {downloadsDir && (
+              <Button variant="outline" size="sm" onClick={() => setDownloadsDir('')}>
+                Reset
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const dir = await openDialog({ directory: true, multiple: false });
+                if (typeof dir === 'string') setDownloadsDir(dir);
+              }}
+            >
+              Choose…
+            </Button>
+          </div>
+        </Row>
+        <Row
+          icon={<FolderOpen className="h-4 w-4" />}
+          label="Always-Ask Trigger"
+          description={`The modifier that makes Save as PDF prompt for a location (${triggerLabel}click)`}
+        >
+          <div className="flex items-center gap-1">
+            <Button
+              variant={trigger === 'shift' ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={() => setPdfAlwaysAskTrigger('shift')}
+            >
+              Shift
+            </Button>
+            <Button
+              variant={trigger === 'ctrl' ? 'secondary' : 'outline'}
+              size="sm"
+              onClick={() => setPdfAlwaysAskTrigger('ctrl')}
+            >
+              Ctrl / ⌘
+            </Button>
+          </div>
         </Row>
       </SettingsSection>
 

@@ -108,6 +108,13 @@ function PrintElementView({ el }: { el: PrintElement }) {
       const html = empty || invalid ? '' : renderEquation(el.latex);
       return (
         <div
+          // .tensor-equation: THE shared class stack (index.css) — the
+          // node view, the EquationLayer, AND the measurement probe all
+          // render under it, so the measured box is the painted box by
+          // construction. Without it KaTeX's own display margins and
+          // font sizing mislay the content inside the placed rect (the
+          // reported invisible-in-preview bug).
+          className="tensor-equation"
           style={{
             position: 'absolute',
             left: `${el.x}px`,

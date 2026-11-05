@@ -16,6 +16,7 @@ import { ExportConfirmDialog } from './components/dialogs/ExportConfirmDialog';
 import { ImportOptionsDialog } from './components/dialogs/ImportOptionsDialog';
 import { ImportReportDialog } from './components/dialogs/ImportReportDialog';
 import { PrintPreviewDialog } from './components/dialogs/PrintPreviewDialog';
+import { PrintContainer } from '@/lib/print/PrintContainer';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
@@ -155,7 +156,7 @@ function App() {
 
   return (
     <>
-      <main className="flex h-screen flex-col bg-background text-foreground">
+      <main data-screen-chrome className="flex h-screen flex-col bg-background text-foreground">
         <Ribbon />
         {/* data-desk-wrapper: the M-RULER portal target — the ruler bar
             mounts here as static overlay chrome (flush under the Ribbon,
@@ -203,6 +204,11 @@ function App() {
       {/* M-PRINT (#43, Mark 3): the print preview — the palette opens
           it; Mark 2's Print command joins it. */}
       <PrintPreviewDialog />
+      {/* M-PRINT (#43, Mark 2): THE PRINT CONTAINER — hidden on
+          screen, revealed by @media print (index.css) while
+          [data-screen-chrome] hides; the preview's Print button arms
+          it with the SAME walk the preview rendered. */}
+      <PrintContainer />
       {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
           one mount like its InsertTableDialog twin. */}
       <InsertReferenceTableDialog />

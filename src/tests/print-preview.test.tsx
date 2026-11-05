@@ -91,9 +91,10 @@ describe('the preview modal shell', () => {
     // the options column
     expect(utils.getByTestId('print-preview-total')).toBeTruthy();
     expect(utils.getByTestId('print-preview-range-input')).toBeTruthy();
-    // Marks 2/4 placeholders — present and honest
+    // Mark 2: Print is LIVE (the flow's suite pins it); Mark 4 (PDF)
+    // stays the disabled placeholder.
     const printBtn = utils.getByTestId('print-preview-print') as HTMLButtonElement;
-    expect(printBtn.disabled).toBe(true);
+    expect(printBtn.disabled).toBe(false);
     void editor;
   });
 });

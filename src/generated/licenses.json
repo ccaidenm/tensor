@@ -294,6 +294,18 @@
     "repository": "https://github.com/oxc-project/oxc"
   },
   {
+    "name": "@pdf-lib/standard-fonts",
+    "version": "1.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/standard-fonts"
+  },
+  {
+    "name": "@pdf-lib/upng",
+    "version": "1.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/upng"
+  },
+  {
     "name": "@radix-ui/primitive",
     "version": "1.2.0",
     "license": "MIT",
@@ -778,6 +790,12 @@
     "version": "1.0.1",
     "license": "MIT",
     "repository": "https://github.com/NaturalIntelligence/anynum"
+  },
+  {
+    "name": "argparse",
+    "version": "2.0.1",
+    "license": "Python-2.0",
+    "repository": "https://github.com/nodeca/argparse"
   },
   {
     "name": "aria-hidden",
@@ -1356,6 +1374,12 @@
     "repository": "https://github.com/npm/pacote"
   },
   {
+    "name": "pako",
+    "version": "1.0.11",
+    "license": "(MIT AND Zlib)",
+    "repository": "https://github.com/nodeca/pako"
+  },
+  {
     "name": "parse-conflict-json",
     "version": "5.0.1",
     "license": "ISC",
@@ -1372,6 +1396,12 @@
     "version": "2.0.2",
     "license": "BlueOak-1.0.0",
     "repository": "https://github.com/isaacs/path-scurry"
+  },
+  {
+    "name": "pdf-lib",
+    "version": "1.17.1",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/pdf-lib"
   },
   {
     "name": "picocolors",
@@ -1711,6 +1741,12 @@
   },
   {
     "name": "tslib",
+    "version": "1.14.1",
+    "license": "0BSD",
+    "repository": "https://github.com/Microsoft/tslib"
+  },
+  {
+    "name": "tslib",
     "version": "2.8.1",
     "license": "0BSD",
     "repository": "https://github.com/Microsoft/tslib"
@@ -1798,6 +1834,12 @@
     "version": "4.0.0",
     "license": "ISC",
     "repository": "https://github.com/isaacs/walk-up-path"
+  },
+  {
+    "name": "wawoff2",
+    "version": "2.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/fontello/wawoff2"
   },
   {
     "name": "which",

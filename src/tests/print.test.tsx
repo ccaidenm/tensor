@@ -279,3 +279,33 @@ describe('print renderer — table cells + images', () => {
   });
 });
 
+describe('PrintDocumentView — the equation wrapper (M-PRINT fix)', () => {
+  it('the equation div carries .tensor-equation (the measured box IS the painted box)', async () => {
+    const { render } = await import('@testing-library/react');
+    const { PrintDocumentView } = await import('@/lib/print/PrintDocumentView');
+    const pages: import('@/lib/print/types').PrintPage[] = [
+      {
+        index: 0,
+        width: 800,
+        height: 600,
+        elements: [
+          {
+            kind: 'equation',
+            x: 100,
+            top: 100,
+            width: 120,
+            height: 60,
+            latex: 'x^2',
+            fontSize: 16,
+            color: '#000',
+          },
+        ],
+      },
+    ];
+    const utils = render(<PrintDocumentView pages={pages} />);
+    const eq = utils.container.querySelector('.tensor-equation') as HTMLElement;
+    expect(eq).toBeTruthy();
+    // the KaTeX HTML rendered inside (the renderEquation string)
+    expect(eq.querySelector('.katex')).toBeTruthy();
+  });
+});

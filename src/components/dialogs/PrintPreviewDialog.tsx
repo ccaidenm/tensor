@@ -4,7 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useDocumentStore } from '@/lib/document/store';
+import { toPdfInfo } from '@/lib/document/coreProperties';
+import { useMediaStore } from '@/lib/media/store';
+import { exportPdf } from '@/lib/print/pdfExport';
+import { toast } from '@/components/ui/toast';
+import { save } from '@tauri-apps/plugin-dialog';
+import { exists, writeFile } from '@tauri-apps/plugin-fs';
+import { useConfigStore } from '@/lib/config/store';
 import { buildPrintDocument, parsePageRange } from '@/lib/print/buildDocument';
+import { printFromPreview } from '@/lib/print/PrintContainer';
 import { PrintDocumentView } from '@/lib/print/PrintDocumentView';
 import { create } from 'zustand';
 
@@ -102,6 +110,82 @@ export function PrintPreviewDialog() {
   const pageW = build.pages[0]?.width ?? 0;
   const paperLabel = `${pageSetup.pageSize}${pageSetup.orientation === 'landscape' ? ' (landscape)' : ''}`;
   const marginsLabel = `${pageSetup.margins.top}/${pageSetup.margins.bottom}/${pageSetup.margins.left}/${pageSetup.margins.right} pt margins`;
+
+  /** THE PDF FLOW (Mark 4): the preview's OWN walk (one build — what
+   *  previews is what exports), pdf-lib synthesis, then the destination:
+   *  Shift/Ctrl-click ALWAYS prompts; otherwise the default export
+   *  folder (Settings > General) with an exists-suffix (never a silent
+   *  overwrite); else the save dialog. The loss report rides the toast
+   *  (substituted fonts, skipped images, fallback equations — never
+   *  silent). */
+  const savePdfFromPreview = async (e: import('react').MouseEvent<HTMLButtonElement>): Promise<void> => {
+    if (!build) return;
+    const pages = visiblePages
+      ? build.pages.filter((p) => visiblePages.has(p.index))
+      : build.pages;
+    if (pages.length === 0) return;
+    // THE ALWAYS-ASK TRIGGER (the user's setting): Shift (default) or
+    // Ctrl — Ctrl also honors ⌘ (the platform's control key). Only the
+    // CONFIGURED modifier prompts; a fixed choice beats "any modifier
+    // might do something" (the other click is just a click).
+    const trigger = useConfigStore.getState().config.pdfAlwaysAskTrigger;
+    const promptAlways =
+      trigger === 'ctrl'
+        ? e.ctrlKey || e.metaKey
+        : e.shiftKey;
+    const downloadsDir = useConfigStore.getState().config.downloadsDir;
+    const doc = useDocumentStore.getState();
+    const nameBase =
+      (doc.coreProperties.title?.trim() ||
+        (doc.filePath ? doc.filePath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') : '') ||
+        'Untitled').replace(/[\\/:*?"<>|]/g, '_');
+    try {
+      const result = await exportPdf({
+        pages,
+        info: toPdfInfo(doc.coreProperties),
+        mediaBytes: (sha) => {
+          const entry = useMediaStore.getState().entries.get(sha);
+          return entry ? { bytes: entry.bytes, ext: entry.ext } : undefined;
+        },
+      });
+      let path: string | null = null;
+      if (!promptAlways && downloadsDir) {
+        const sep = downloadsDir.includes('/') ? '/' : '\\';
+        const base = downloadsDir.endsWith('/') || downloadsDir.endsWith('\\')
+          ? downloadsDir
+          : downloadsDir + sep;
+        let candidate = `${base}${nameBase}.pdf`;
+        for (let i = 2; await exists(candidate); i++) {
+          candidate = `${base}${nameBase} (${i}).pdf`;
+          if (i > 99) break;
+        }
+        path = candidate;
+      } else {
+        path = await save({
+          filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+          defaultPath: `${nameBase}.pdf`,
+        });
+      }
+      if (!path) return;
+      await writeFile(path, result.bytes);
+      const notes: string[] = [`${pages.length} page${pages.length === 1 ? '' : 's'}`];
+      if (result.substitutedFonts.length > 0) {
+        notes.push(`fonts substituted: ${result.substitutedFonts.join(', ')}`);
+      }
+      if (result.skippedImages > 0) {
+        notes.push(`${result.skippedImages} image${result.skippedImages === 1 ? '' : 's'} skipped`);
+      }
+      if (result.fallbackEquations > 0) {
+        notes.push(`${result.fallbackEquations} equation${result.fallbackEquations === 1 ? '' : 's'} as source text`);
+      }
+      toast.add({ title: 'PDF exported', description: notes.join(' — ') });
+    } catch (err) {
+      toast.add({
+        title: 'PDF export failed',
+        description: err instanceof Error ? err.message : 'The export could not be written.',
+      });
+    }
+  };
 
   const zoomPct = Math.round(scale * 100);
   const zoomIn = () => {
@@ -222,19 +306,44 @@ export function PrintPreviewDialog() {
               </div>
 
               <div className="mt-auto flex flex-col gap-2">
-                {/* MARKS 2/4: the actions land with their marks — disabled
-                    placeholders, never silent no-ops. */}
-                <Button disabled data-testid="print-preview-print">
+                {/* MARK 2: THE PRINT BUTTON — arms the print container with
+                    THIS preview's own walk (one build: what previews is
+                    what prints), window.print() opens the OS dialog
+                    (printer/copies/duplex/range are the OS's), closing
+                    on the dialog's own rhythm. The OS range and the
+                    PREVIEW range compose: the preview filter narrows
+                    what arms, the OS narrows again. */}
+                <Button
+                  data-testid="print-preview-print"
+                  disabled={!build || build.pages.length === 0}
+                  onClick={() => {
+                    if (!build) return;
+                    void printFromPreview(
+                      visiblePages
+                        ? build.pages.filter((p) => visiblePages.has(p.index))
+                        : build.pages,
+                      pageSetup,
+                    );
+                  }}
+                >
                   <Printer className="h-4 w-4" />
                   Print…
                 </Button>
-                <Button disabled data-testid="print-preview-pdf">
+                {/* MARK 4: THE PDF BUTTON — synthesizes from the preview's
+                    OWN walk (one build), writes to the default export
+                    folder (Settings > General) or prompts; Shift/Ctrl-
+                    click ALWAYS prompts (the explicit-location escape). */}
+                <Button
+                  data-testid="print-preview-pdf"
+                  disabled={!build || build.pages.length === 0}
+                  onClick={(e) => void savePdfFromPreview(e)}
+                >
                   <Save className="h-4 w-4" />
                   Save as PDF…
                 </Button>
                 <p className="text-xs text-muted-foreground">
-                  Print and PDF export arrive with their milestone slices — the preview
-                  shows exactly what they will produce.
+                  Saves to the default export folder (Settings) — Shift/Ctrl-click to
+                  pick a location. Print hands the preview to the OS dialog.
                 </p>
               </div>
             </div>

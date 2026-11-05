@@ -44,6 +44,17 @@ describe('print preview — the entry surfaces', () => {
     void editor;
   });
 
+  it('the always-ask trigger setting defaults to Shift and is rebindable', () => {
+    expect(useConfigStore.getState().config.pdfAlwaysAskTrigger).toBe('shift');
+    act(() => {
+      useConfigStore.getState().setPdfAlwaysAskTrigger('ctrl');
+    });
+    expect(useConfigStore.getState().config.pdfAlwaysAskTrigger).toBe('ctrl');
+    act(() => {
+      useConfigStore.getState().setPdfAlwaysAskTrigger('shift');
+    });
+  });
+
   it('the dialog sizes ABOVE Settings (the posture: min(90vw, 80rem))', async () => {
     const { editor } = renderTensor('<p>size posture</p>');
     await settleLayout();
