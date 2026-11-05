@@ -1,6 +1,7 @@
 import { Columns2, Printer } from 'lucide-react';
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
+import { usePrintPreviewStore } from '@/components/dialogs/PrintPreviewDialog';
 
 export function WindowGroup() {
   return (
@@ -14,8 +15,7 @@ export function WindowGroup() {
       <IconButton
         label="Print Preview"
         icon={<Printer size={16} />}
-        onClick={() => {}}
-        disabled
+        onClick={() => usePrintPreviewStore.getState().open()}
       />
     </RibbonGroup>
   );

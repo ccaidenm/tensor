@@ -138,7 +138,15 @@ export const PrintDocumentView = memo(function PrintDocumentView({
   visiblePages?: ReadonlySet<number> | null;
 }) {
   return (
-    <div data-testid="print-document" className="print-document">
+    <div
+      data-testid="print-document"
+      className="print-document"
+      // THE SHEET GAP (the user's spacing report): the pages stack in
+      // a column with a visible gutter — the modal's preview consumer
+      // styles the gap (PAGE_GAP in the dialog); the PRINT container
+      // (Mark 2) sets gap 0 (the @page breaks separate sheets there).
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--print-page-gap, 24px)' }}
+    >
       {pages.map((page) => {
         if (visiblePages && !visiblePages.has(page.index)) return null;
         return (
@@ -151,8 +159,11 @@ export const PrintDocumentView = memo(function PrintDocumentView({
               position: 'relative',
               width: `${page.width}px`,
               height: `${page.height}px`,
+              // One shadow ring per sheet — the gutter reads as pages.
+              boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
               backgroundColor: '#fff',
               overflow: 'hidden',
+              flex: 'none',
             }}
           >
             {page.elements.map((el, i) => (

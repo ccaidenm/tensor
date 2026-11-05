@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useConfigStore } from '@/lib/config/store';
+import { usePrintPreviewStore } from '@/components/dialogs/PrintPreviewDialog';
 import { usePaletteStore } from '@/lib/palette/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { getCommand } from '@/lib/commands/registry';
@@ -26,6 +27,7 @@ export function useAppShortcuts() {
       // or keymap behavior silently forks by focus context.
       if (useSettingsDialogStore.getState().isOpen) return;
       if (usePaletteStore.getState().isOpen) return;
+      if (usePrintPreviewStore.getState().isOpen) return;
 
       for (const def of SHORTCUTS) {
         if (def.context !== 'app') continue;

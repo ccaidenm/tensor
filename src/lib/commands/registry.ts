@@ -62,6 +62,7 @@ import {
   Eraser,
   FileDown,
   FileText,
+  Printer,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -84,6 +85,7 @@ import { insertImageFromPicker } from '@/lib/media/insert';
 import { setWrapMode } from '@/lib/media/wrap';
 import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
 import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
+import { usePrintPreviewStore } from '@/components/dialogs/PrintPreviewDialog';
 import { useInsertReferenceTableStore } from '@/components/dialogs/InsertReferenceTableDialog';
 import { insertReferenceTableAtSelection } from '@/lib/editor/ReferenceTableNode';
 import { indexEntryActive } from '@/lib/editor/IndexMark';
@@ -300,6 +302,18 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['export', 'markdown', 'md', 'convert', 'save as'],
     enablement: () => !!doc().editor,
     run: () => void doc().exportMarkdown(),
+  },
+  {
+    id: 'printPreview',
+    title: 'Print Preview',
+    icon: Printer,
+    group: 'actions',
+    shortcutId: 'printPreview',
+    // M-PRINT (#43, Mark 3): the preview modal — the Chromium-style
+    // print surface (Mark 2's Print command joins it).
+    keywords: ['print', 'preview', 'printer', 'pdf'],
+    enablement: () => !!doc().editor,
+    run: () => usePrintPreviewStore.getState().open(),
   },
   {
     id: 'exportDocx',

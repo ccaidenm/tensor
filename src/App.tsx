@@ -15,6 +15,7 @@ import { InsertTableDialog } from './components/dialogs/InsertTableDialog';
 import { ExportConfirmDialog } from './components/dialogs/ExportConfirmDialog';
 import { ImportOptionsDialog } from './components/dialogs/ImportOptionsDialog';
 import { ImportReportDialog } from './components/dialogs/ImportReportDialog';
+import { PrintPreviewDialog } from './components/dialogs/PrintPreviewDialog';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
@@ -199,6 +200,9 @@ function App() {
       {/* M-MD/M-DOCX: the import report (what an import dropped or
           converted) — the loud posture's in-app surface. */}
       <ImportReportDialog />
+      {/* M-PRINT (#43, Mark 3): the print preview — the palette opens
+          it; Mark 2's Print command joins it. */}
+      <PrintPreviewDialog />
       {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
           one mount like its InsertTableDialog twin. */}
       <InsertReferenceTableDialog />

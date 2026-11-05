@@ -18,6 +18,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'save', label: 'Save', keys: 'ctrl+s', context: 'app', category: 'General' },
   { id: 'openSettings', label: 'Open Settings', keys: 'ctrl+,', context: 'app', category: 'General' },
   { id: 'palette', label: 'Command Palette', keys: 'ctrl+shift+p', context: 'app', category: 'General' },
+  // Word's print-preview convention (context 'app': the preview is a
+  // document-wide surface, not a caret action).
+  { id: 'printPreview', label: 'Print Preview', keys: 'ctrl+p', context: 'app', category: 'General' },
   { id: 'undo', label: 'Undo', keys: 'ctrl+z', context: 'os', category: 'General' },
   { id: 'redo', label: 'Redo', keys: 'ctrl+y', context: 'os', category: 'General' },
   // Word's spelling shortcut, kept as the convention (context 'app':

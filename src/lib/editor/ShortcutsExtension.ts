@@ -3,6 +3,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { useConfigStore } from '@/lib/config/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { usePaletteStore } from '@/lib/palette/store';
+import { usePrintPreviewStore } from '@/components/dialogs/PrintPreviewDialog';
 import { getEffectiveKeybinding, matchesShortcut, SHORTCUTS } from '@/lib/shortcuts';
 import { EDITOR_COMMAND_MAP } from '@/lib/editor/editorCommands';
 
@@ -24,6 +25,7 @@ export const DynamicShortcutsExtension = Extension.create({
             // BOTH or keymap behavior silently forks by focus context.
             if (useSettingsDialogStore.getState().isOpen) return false;
             if (usePaletteStore.getState().isOpen) return false;
+            if (usePrintPreviewStore.getState().isOpen) return false;
 
             const { config } = useConfigStore.getState();
 
