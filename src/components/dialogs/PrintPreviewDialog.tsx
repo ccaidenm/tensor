@@ -3,11 +3,13 @@ import { FileText, Files, Hash, ListPlus, Printer, RectangleVertical, Ruler, Typ
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useDocumentStore } from '@/lib/document/store';
 import { toPdfInfo, type DocumentCoreProperties } from '@/lib/document/coreProperties';
 import { PAGE_SIZES, formatMarginsSummary } from '@/lib/document/pageSetup';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
+import { enumeratePrinters, printPdfToPrinter, type DuplexSetting, type NativePrinter } from '@/lib/print/nativePrint';
 import { useMediaStore } from '@/lib/media/store';
 import { exportPdf } from '@/lib/print/pdfExport';
 import { toast } from '@/components/ui/toast';
@@ -77,6 +79,22 @@ function safeName(raw: string): string {
   return (trimmed || 'Untitled').replace(/[\\/:*?"<>|]/g, '_');
 }
 
+/** THE SYSTEM-DIALOG FALLBACK entry in the printer picker: the OS
+ *  dialog survives as one option (never the default posture), for
+ *  the broken-printer case and driver-specific features CUPS
+ *  options don't cover. Distinct from any real printer name by
+ *  construction (a real name never contains spaces+ellipsis). */
+const SYSTEM_DIALOG_PRINTER = '__system_dialog__';
+
+/** Duplex options, spelled for CUPS; 'default' = the printer's own
+ *  configured default (send nothing). */
+const DUPLEX_OPTIONS: { value: DuplexSetting; label: string }[] = [
+  { value: 'default', label: 'Printer default' },
+  { value: 'one-sided', label: 'One-sided' },
+  { value: 'two-sided-long-edge', label: 'Two-sided (long edge)' },
+  { value: 'two-sided-short-edge', label: 'Two-sided (short edge)' },
+];
+
 export function PrintPreviewDialog() {
   const isOpen = usePrintPreviewStore((s) => s.isOpen);
   const close = usePrintPreviewStore((s) => s.close);
@@ -114,6 +132,31 @@ export function PrintPreviewDialog() {
   // THE RESOLVED DESTINATION (per-open): the filename, seeded from the
   // doc's title or file name — the modal snapshot's own state.
   const [fileNameRaw, setFileNameRaw] = useState('');
+
+  // ── THE TENSOR-NATIVE PRINTER ──────────────────────────────────
+  // Enumerated once per open (the system dialog's replacement; []
+  // outside Tauri → the picker shows only the system-dialog entry).
+  const [printers, setPrinters] = useState<NativePrinter[]>([]);
+  const [printerSel, setPrinterSel] = useState<string>('');
+  const [copies, setCopies] = useState(1);
+  const [duplex, setDuplex] = useState<DuplexSetting>('default');
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setCopies(1);
+      setDuplex('default');
+      return;
+    }
+    // OPEN: enumerate (the picker's options). The system default
+    // preselects; no printers → the system-dialog entry stands alone.
+    void (async () => {
+      const list = await enumeratePrinters();
+      setPrinters(list);
+      const fallback = list.find((p) => p.isDefault) ?? list[0];
+      setPrinterSel(fallback ? fallback.name : SYSTEM_DIALOG_PRINTER);
+    })();
+  }, [isOpen]);
 
   // Fit-width scale: the first page's width against the scroll area.
   // THE SCROLLBAR FIX: a multi-page doc's vertical scrollbar steals
@@ -244,7 +287,46 @@ export function PrintPreviewDialog() {
   };
 
   const commitPrinter = (): void => {
-    void printFromPreview(selectedPages, pageSetup);
+    // THE FALLBACK ENTRY: the OS dialog (window.print) — for the
+    // broken-printer case and driver features CUPS doesn't cover.
+    if (printerSel === SYSTEM_DIALOG_PRINTER) {
+      void printFromPreview(selectedPages, pageSetup);
+      return;
+    }
+    // THE TENSOR-NATIVE PATH: the walk → PDF → temp file → CUPS job.
+    // Landscape inherits natively (the PDF carries the page dims).
+    setIsPrinting(true);
+    const doc = useDocumentStore.getState();
+    void (async () => {
+      try {
+        const result = await exportPdf({
+          pages: selectedPages,
+          info: toPdfInfo(doc.coreProperties),
+          mediaBytes: (sha) => {
+            const entry = useMediaStore.getState().entries.get(sha);
+            return entry ? { bytes: entry.bytes, ext: entry.ext } : undefined;
+          },
+        });
+        const jobId = await printPdfToPrinter({
+          printer: printerSel,
+          bytes: result.bytes,
+          copies,
+          duplex,
+          jobBase: nameBase,
+        });
+        const notes: string[] = [`job #${jobId}`, `${selectedPages.length} page${selectedPages.length === 1 ? '' : 's'}`];
+        if (copies > 1) notes.push(`${copies} copies`);
+        toast.add({ title: 'Sent to printer', description: notes.join(' — ') });
+        usePrintPreviewStore.getState().close();
+      } catch (err) {
+        toast.add({
+          title: 'Print failed',
+          description: err instanceof Error ? err.message : 'The print job could not be submitted.',
+        });
+      } finally {
+        setIsPrinting(false);
+      }
+    })();
   };
 
   const commit = (forcePrompt: boolean): void => {
@@ -485,21 +567,94 @@ export function PrintPreviewDialog() {
                 </section>
               ) : (
                 <section
-                  className="rounded-xl border border-border bg-card p-3"
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3"
                   data-testid="print-preview-printer-body"
                 >
-                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <div className="mb-0 flex items-center gap-2 text-xs font-medium text-muted-foreground">
                     <Printer className="h-3.5 w-3.5" />
-                    System dialog
+                    Printer
                   </div>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Opens the system print dialog — printer, copies, and duplex are
-                    handled there.
-                  </p>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    Note: the system dialog may not inherit this document's
-                    orientation ({paperLabel}) — set it there if needed. A
-                    built-in printer dialog is on the roadmap.
+                  <Select
+                    value={printerSel}
+                    onValueChange={(v) => {
+                      if (v != null) setPrinterSel(v);
+                    }}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-full text-xs"
+                      data-testid="print-preview-printer-select"
+                      aria-label="Printer"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {printers.map((p) => (
+                        <SelectItem key={p.systemName} value={p.name}>
+                          {p.name}
+                          {p.isDefault ? ' (default)' : ''}
+                          {p.state && p.state !== 'ready' ? ` — ${p.state}` : ''}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={SYSTEM_DIALOG_PRINTER}>
+                        System print dialog…
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(() => {
+                    const p = printers.find((x) => x.name === printerSel);
+                    if (!p) return null;
+                    const meta = [p.description, p.location].filter(Boolean).join(' · ');
+                    return (
+                      <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="print-preview-printer-meta">
+                        {meta || 'No description'}
+                      </p>
+                    );
+                  })()}
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">Copies</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={99}
+                      aria-label="Copies"
+                      data-testid="print-preview-copies"
+                      className="ml-auto h-7 w-16 text-xs tabular-nums"
+                      value={copies}
+                      onChange={(e) => {
+                        const n = Math.max(1, Math.min(99, Math.floor(Number(e.target.value) || 1)));
+                        setCopies(n);
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">Duplex</span>
+                    <Select
+                      value={duplex}
+                      onValueChange={(v) => {
+                        if (v != null) setDuplex(v as DuplexSetting);
+                      }}
+                    >
+                      <SelectTrigger
+                        className="ml-auto h-7 w-40 text-xs"
+                        data-testid="print-preview-duplex-select"
+                        aria-label="Duplex"
+                        disabled={printerSel === SYSTEM_DIALOG_PRINTER}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DUPLEX_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    {printerSel === SYSTEM_DIALOG_PRINTER
+                      ? 'The OS print dialog handles printer/copies (note: it may not inherit orientation).'
+                      : `Prints via CUPS — page size and ${pageSetup.orientation} orientation carry over natively.`}
                   </p>
                 </section>
               )}
@@ -582,11 +737,11 @@ export function PrintPreviewDialog() {
                   <Button
                     data-testid="print-preview-commit"
                     className="w-full"
-                    disabled={build.pages.length === 0}
+                    disabled={build.pages.length === 0 || isPrinting}
                     onClick={() => commit(false)}
                   >
                     <Printer className="h-4 w-4 flex-none" />
-                    Print…
+                    {isPrinting ? 'Sending…' : printerSel === SYSTEM_DIALOG_PRINTER ? 'Print…' : 'Print'}
                   </Button>
                 )}
                 {/* THE HINTS — Kbd components, mapped to whatever the

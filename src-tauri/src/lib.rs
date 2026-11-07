@@ -1,6 +1,7 @@
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Emitter;
 
+mod print;
 mod spell;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -95,6 +96,8 @@ pub fn run() {
             package_document,
             unpackage_document,
             open_devtools,
+            print::enumerate_printers,
+            print::print_pdf,
             spell::spell_check,
             spell::spell_server_status,
             spell::spell_stop,

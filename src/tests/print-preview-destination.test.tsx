@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, render, fireEvent } from '@testing-library/react';
 import { renderTensor, settleLayout } from './harness';
 import { PrintPreviewDialog, usePrintPreviewStore } from '@/components/dialogs/PrintPreviewDialog';
@@ -172,6 +172,85 @@ describe('the fully-resolved PDF destination', () => {
       useConfigStore.getState().setPdfAlwaysAskTrigger('ctrl');
     });
     expect(utils.getByText('to modify destination', { exact: false }).textContent).toContain('Ctrl');
+    void editor;
+  });
+});
+
+/** THE TENSOR-NATIVE PRINTER PICKER — the system dialog's
+ *  replacement. The nativePrint seam is mocked (the Rust commands
+ *  are the native suite's); the CONTRACTS here: the default printer
+ *  preselects, the system-dialog fallback entry stands in, and the
+ *  commit runs the native pipeline (walk → PDF → job → close). */
+vi.mock('@/lib/print/nativePrint', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/print/nativePrint')>('@/lib/print/nativePrint');
+  return {
+    ...actual,
+    enumeratePrinters: vi.fn(async () => [
+      {
+        name: 'TestJet',
+        systemName: 'TestJet',
+        state: 'ready',
+        isDefault: true,
+        location: 'Desk 2',
+        description: 'TestJet 400',
+      },
+      {
+        name: 'Basement Laser',
+        systemName: 'Basement Laser',
+        state: 'offline',
+        isDefault: false,
+        location: '',
+        description: '',
+      },
+    ]),
+    printPdfToPrinter: vi.fn(async () => 4242),
+  };
+});
+
+describe('the Tensor-native printer destination (the OS dialog\'s replacement)', () => {
+  beforeEach(() => {
+    useConfigStore.getState().setPrintLastDestination('printer');
+  });
+
+  it('enumerates on open; the default printer preselects; the system-dialog entry rides last', async () => {
+    const { editor } = renderTensor('<p>print me</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    // enumeration resolves (async effect) → the default preselects
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const body = utils.getByTestId('print-preview-printer-body');
+    expect((body.querySelector('[data-testid="print-preview-printer-select"] button, [role=combobox]') as HTMLElement)?.textContent).toContain('TestJet');
+    void editor;
+  });
+
+  it('the commit runs the NATIVE pipeline: PDF → job → toast + close', async () => {
+    const { printPdfToPrinter } = await import('@/lib/print/nativePrint');
+    const { editor } = renderTensor('<p>native commit</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
+    expect(btn.textContent).toContain('Print');
+    expect(btn.textContent).not.toContain('…'); // native, not the OS dialog
+    act(() => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(printPdfToPrinter).toHaveBeenCalledTimes(1);
+    const call = (printPdfToPrinter as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.printer).toBe('TestJet');
+    expect(call.copies).toBe(1);
+    expect(call.duplex).toBe('default');
+    // the modal closed (the job is submitted; Word's posture)
+    expect(usePrintPreviewStore.getState().isOpen).toBe(false);
     void editor;
   });
 });
