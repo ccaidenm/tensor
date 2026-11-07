@@ -153,6 +153,13 @@ export const ConfigSchema = z.object({
    *  "modifier-click = override" idiom; Ctrl-click carries menu
    *  baggage on some platforms). */
   pdfAlwaysAskTrigger: z.enum(['shift', 'ctrl']).default('shift'),
+  /** M-PRINT: the preview modal's last DESTINATION (the segmented
+   *  control's memory) — reopening the preview lands where you were.
+   *  The custom print dialog's posture: destinations differ in
+   *  options + commit action only. */
+  print: z.object({
+    lastDestination: z.enum(['printer', 'pdf']).default('printer'),
+  }).default({ lastDestination: 'printer' }),
   /** M-META: the user's own identity — the default AUTHOR for new
    *  documents' metadata. Empty = unset: nothing is baked into files
    *  the user didn't explicitly save with their name (privacy-first;

@@ -67,6 +67,36 @@ export function formatPt(pt: number, unit: MeasurementUnit): string {
 }
 
 /**
+ * One pt value + unit → its human display ("1\"", "2.54 cm", "72 pt").
+ * Inches use the double-prime mark (Word's own display); every other
+ * unit spells its suffix.
+ */
+export function formatPtWithUnit(pt: number, unit: MeasurementUnit): string {
+  const value = formatPt(pt, unit);
+  return unit === 'inches' ? `${value}"` : `${value} ${MEASUREMENT_UNITS[unit].suffix}`;
+}
+
+/**
+ * The four margins → ONE human summary (the print dialog's Paper card):
+ *  - all equal        → `1" all sides`
+ *  - T==B and L==R    → `1" top/bottom · 1.25" left/right`
+ *  - otherwise        → `T 1" · B 1" · L 1.25" · R 1.25"`
+ * Never "72/72/72/72 pt" — the display unit is the user's
+ * config.editor.measurementUnit (one source).
+ */
+export function formatMarginsSummary(margins: Margins, unit: MeasurementUnit): string {
+  const f = (pt: number) => formatPtWithUnit(pt, unit);
+  const { top, bottom, left, right } = margins;
+  if (top === bottom && bottom === left && left === right) {
+    return `${f(top)} all sides`;
+  }
+  if (top === bottom && left === right) {
+    return `${f(top)} top/bottom · ${f(left)} left/right`;
+  }
+  return `T ${f(top)} · B ${f(bottom)} · L ${f(left)} · R ${f(right)}`;
+}
+
+/**
  * User input in the display unit → points. Returns null for
  * unparseable/non-positive input — margins are the one caller that
  * passes allowZero (a 0pt margin is legal: the content box then meets

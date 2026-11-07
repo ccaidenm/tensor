@@ -61,6 +61,9 @@ interface ConfigStore {
   setDownloadsDir: (value: string) => void;
   /** M-PRINT: the modifier-click that forces Save-as-PDF to prompt. */
   setPdfAlwaysAskTrigger: (value: 'shift' | 'ctrl') => void;
+  /** M-PRINT: the preview modal's last destination (the segmented
+   *  control's memory). */
+  setPrintLastDestination: (value: 'printer' | 'pdf') => void;
 
   loadConfig: (raw: unknown) => void;
 }
@@ -81,6 +84,14 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setPdfAlwaysAskTrigger: (value) =>
     set((state) => ({
       config: { ...state.config, pdfAlwaysAskTrigger: value },
+    })),
+
+  setPrintLastDestination: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        print: { ...state.config.print, lastDestination: value },
+      },
     })),
 
   addCustomColor: (color) =>

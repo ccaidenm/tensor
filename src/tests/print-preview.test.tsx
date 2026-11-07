@@ -93,7 +93,7 @@ describe('the preview modal shell', () => {
     expect(utils.getByTestId('print-preview-range-input')).toBeTruthy();
     // Mark 2: Print is LIVE (the flow's suite pins it); Mark 4 (PDF)
     // stays the disabled placeholder.
-    const printBtn = utils.getByTestId('print-preview-print') as HTMLButtonElement;
+    const printBtn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
     expect(printBtn.disabled).toBe(false);
     void editor;
   });

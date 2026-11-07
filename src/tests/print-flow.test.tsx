@@ -132,7 +132,7 @@ describe('the print flow (arm → print → disarm)', () => {
     act(() => {
       usePrintPreviewStore.getState().open();
     });
-    const btn = utils.getByTestId('print-preview-print') as HTMLButtonElement;
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     void editor;
   });

@@ -1,10 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Printer, Save, ZoomIn, ZoomOut } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { FileText, Files, Hash, ListPlus, Printer, RectangleVertical, Ruler, Type, UserRoundPen, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useDocumentStore } from '@/lib/document/store';
-import { toPdfInfo } from '@/lib/document/coreProperties';
+import { toPdfInfo, type DocumentCoreProperties } from '@/lib/document/coreProperties';
+import { PAGE_SIZES, formatMarginsSummary } from '@/lib/document/pageSetup';
+import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useMediaStore } from '@/lib/media/store';
 import { exportPdf } from '@/lib/print/pdfExport';
 import { toast } from '@/components/ui/toast';
@@ -17,21 +20,39 @@ import { PrintDocumentView } from '@/lib/print/PrintDocumentView';
 import { create } from 'zustand';
 
 /**
- * M-PRINT (#43, Mark 3) — THE PREVIEW MODAL: the Settings dialog's
- * shape (shadcn Dialog + Content, min(85vw, 72rem), an inner two-pane
- * flex — NOT a bespoke fixed overlay), Chromium's layout: LEFT the
- * document (the Mark-1 walk through the shared PrintDocumentView —
- * WHAT PREVIEWS IS EXACTLY WHAT PRINTS), RIGHT the options (zoom,
- * page range, paper summary, the Mark 2/4 action placeholders).
+ * M-PRINT (#43, the beast) — THE CUSTOM PRINT DIALOG: Chromium's
+ * posture (document left, options right), ONE modal, destinations as
+ * a SEGMENTED CONTROL [Printer | PDF] — never two modals, because
+ * both destinations consume the IDENTICAL walk (the one-geometry
+ * law); they differ in options + commit action only.
  *
- * OPTIONS (honest inventory): zoom (fit-width default + steps), page
- * range ("1-3, 7" — previews AND prints), the doc's OWN pageSetup
- * (never a preview-local override — one geometry source). Print/Save
- * PDF render DISABLED until Marks 2/4 land (a silent no-op button
- * would be a lie).
+ * THE TENSOR TWIST — the fully-resolved destination: the PDF commit
+ * button LABELS THE RESOLVED PATH (the default export folder + the
+ * inline filename). Zero dialog hops on the common path; the
+ * always-ask trigger (Shift by default) is the ESCAPE HATCH — the
+ * bottom hint says <Shift+Click> to modify destination, mapped to
+ * whatever the user configured.
  *
- * The build SNAPSHOTS on open (Word's print-preview posture): a heavy
- * walk per keystroke buys nothing. Close + reopen to re-preview.
+ * POWER-USER LAWS:
+ *  - Keyboard-native: Enter commits the active destination,
+ *    the configured trigger held force-prompts, Esc closes (shadcn
+ *    Dialog). The range input is focused on open.
+ *  - MEMORY: print.lastDestination — reopening lands where you were.
+ *  - METADATA: title/author edits WRITE THROUGH to coreProperties
+ *    (one source — the PDF's info IS the document's properties;
+ *    the doc is marked dirty, Word's export posture).
+ *  - The build SNAPSHOTS on open (Word posture); close + reopen
+ *    re-previews.
+ *  - The PRINTER body is v1 (the system dialog + its honest
+ *    limitation) — shaped so the custom printer dialog (Rust
+ *    enumeration, deferred) swaps in as a BODY only; the segmented
+ *    control never changes.
+ *
+ * THE VIEW (this pass): the zoom controls FLOAT bottom-right over
+ * the document (Chrome's overlay, not a settings row); the options
+ * column is ICON CARDS (destination, destination body, paper
+ * summary, pages); the commit hints are Kbd components (mapped to
+ * the configured trigger).
  */
 
 interface PrintPreviewStore {
@@ -50,11 +71,31 @@ const ZOOM_STEPS = [50, 75, 100, 125, 150, 200];
 /** The sheet gutter BETWEEN preview pages (px, pre-zoom — scales). */
 const PAGE_GAP = 24;
 
+/** A Windows/POSIX-safe file-stem from any string. */
+function safeName(raw: string): string {
+  const trimmed = raw.trim().replace(/\.(pdf)$/i, '');
+  return (trimmed || 'Untitled').replace(/[\\/:*?"<>|]/g, '_');
+}
+
 export function PrintPreviewDialog() {
   const isOpen = usePrintPreviewStore((s) => s.isOpen);
   const close = usePrintPreviewStore((s) => s.close);
   const editor = useDocumentStore((s) => s.editor);
   const pageSetup = useDocumentStore((s) => s.pageSetup);
+  const coreProperties = useDocumentStore((s) => s.coreProperties);
+  const setCoreProperties = useDocumentStore((s) => s.setCoreProperties);
+
+  // THE MEMORY: the last destination rides config; the control is
+  // its editor.
+  const destination = useConfigStore((s) => s.config.print.lastDestination);
+  const setPrintLastDestination = useConfigStore((s) => s.setPrintLastDestination);
+  const downloadsDir = useConfigStore((s) => s.config.downloadsDir);
+  // THE TRIGGER (reactive — the Kbd hints map to whatever the user
+  // configured; Shift default).
+  const triggerConf = useConfigStore((s) => s.config.pdfAlwaysAskTrigger);
+  const triggerLabel = triggerConf === 'ctrl' ? 'Ctrl' : 'Shift';
+  // HUMAN margins' display unit (the user's preference — one source).
+  const unit = useConfigStore((s) => s.config.editor.measurementUnit);
 
   // THE SNAPSHOT: build once per open (the walk + engine layout are
   // heavy; live re-preview per keystroke buys nothing).
@@ -68,7 +109,11 @@ export function PrintPreviewDialog() {
   const [rangeRaw, setRangeRaw] = useState('');
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const rangeInputRef = useRef<HTMLInputElement | null>(null);
   const [fitScale, setFitScale] = useState(1);
+  // THE RESOLVED DESTINATION (per-open): the filename, seeded from the
+  // doc's title or file name — the modal snapshot's own state.
+  const [fileNameRaw, setFileNameRaw] = useState('');
 
   // Fit-width scale: the first page's width against the scroll area.
   // THE SCROLLBAR FIX: a multi-page doc's vertical scrollbar steals
@@ -99,7 +144,18 @@ export function PrintPreviewDialog() {
     if (!isOpen) {
       setRangeRaw('');
       setZoom('fit');
+      return;
     }
+    // OPEN: seed the resolved destination's filename (title → file
+    // name → Untitled), and focus the range input (keyboard-first).
+    const doc = useDocumentStore.getState();
+    setFileNameRaw(
+      doc.coreProperties.title?.trim() ||
+        (doc.filePath ? doc.filePath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') : '') ||
+        'Untitled',
+    );
+    const raf = requestAnimationFrame(() => rangeInputRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
   }, [isOpen]);
 
   if (!isOpen || !build || !editor) return null;
@@ -109,36 +165,36 @@ export function PrintPreviewDialog() {
 
   const pageW = build.pages[0]?.width ?? 0;
   const paperLabel = `${pageSetup.pageSize}${pageSetup.orientation === 'landscape' ? ' (landscape)' : ''}`;
-  const marginsLabel = `${pageSetup.margins.top}/${pageSetup.margins.bottom}/${pageSetup.margins.left}/${pageSetup.margins.right} pt margins`;
+  // HUMAN margins (the user's ask): the display unit is the user's
+  // config.editor.measurementUnit (one source — the same unit the
+  // margins/page-size dialogs use), never raw "72/72/72/72 pt".
+  const marginsLabel = formatMarginsSummary(pageSetup.margins, unit);
+  const paperSizeLabel = PAGE_SIZES[pageSetup.pageSize]?.inches;
 
-  /** THE PDF FLOW (Mark 4): the preview's OWN walk (one build — what
-   *  previews is what exports), pdf-lib synthesis, then the destination:
-   *  Shift/Ctrl-click ALWAYS prompts; otherwise the default export
-   *  folder (Settings > General) with an exists-suffix (never a silent
-   *  overwrite); else the save dialog. The loss report rides the toast
-   *  (substituted fonts, skipped images, fallback equations — never
-   *  silent). */
-  const savePdfFromPreview = async (e: import('react').MouseEvent<HTMLButtonElement>): Promise<void> => {
-    if (!build) return;
-    const pages = visiblePages
-      ? build.pages.filter((p) => visiblePages.has(p.index))
-      : build.pages;
-    if (pages.length === 0) return;
-    // THE ALWAYS-ASK TRIGGER (the user's setting): Shift (default) or
-    // Ctrl — Ctrl also honors ⌘ (the platform's control key). Only the
-    // CONFIGURED modifier prompts; a fixed choice beats "any modifier
-    // might do something" (the other click is just a click).
+  const nameBase = safeName(fileNameRaw);
+
+  /** The configured modifier held on this event? (The always-ask
+   *  trigger — Shift default; Ctrl honors ⌘.) Shared by the click and
+   *  the Enter keyboard paths: ONE law. */
+  const triggerHeld = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const trigger = useConfigStore.getState().config.pdfAlwaysAskTrigger;
-    const promptAlways =
-      trigger === 'ctrl'
-        ? e.ctrlKey || e.metaKey
-        : e.shiftKey;
-    const downloadsDir = useConfigStore.getState().config.downloadsDir;
+    return trigger === 'ctrl' ? e.ctrlKey || e.metaKey : e.shiftKey;
+  };
+
+  const selectedPages = visiblePages
+    ? build.pages.filter((p) => visiblePages.has(p.index))
+    : build.pages;
+
+  /** THE COMMIT — the active destination's action. PDF: synthesize
+   *  from THIS preview's own walk (one build — what previews is what
+   *  exports), then the destination: the resolved folder with an
+   *  exists-suffix (never a silent overwrite), or the save prompt
+   *  (no folder configured, or the trigger escape hatch). Printer:
+   *  arm the print container with the same filtered walk. */
+  const commitPdf = async (forcePrompt: boolean): Promise<void> => {
+    const pages = selectedPages;
+    if (pages.length === 0) return;
     const doc = useDocumentStore.getState();
-    const nameBase =
-      (doc.coreProperties.title?.trim() ||
-        (doc.filePath ? doc.filePath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') : '') ||
-        'Untitled').replace(/[\\/:*?"<>|]/g, '_');
     try {
       const result = await exportPdf({
         pages,
@@ -149,7 +205,7 @@ export function PrintPreviewDialog() {
         },
       });
       let path: string | null = null;
-      if (!promptAlways && downloadsDir) {
+      if (!forcePrompt && downloadsDir) {
         const sep = downloadsDir.includes('/') ? '/' : '\\';
         const base = downloadsDir.endsWith('/') || downloadsDir.endsWith('\\')
           ? downloadsDir
@@ -168,7 +224,7 @@ export function PrintPreviewDialog() {
       }
       if (!path) return;
       await writeFile(path, result.bytes);
-      const notes: string[] = [`${pages.length} page${pages.length === 1 ? '' : 's'}`];
+      const notes: string[] = [`${pages.length} page${pages.length === 1 ? '' : 's'}`, `saved to ${path}`];
       if (result.substitutedFonts.length > 0) {
         notes.push(`fonts substituted: ${result.substitutedFonts.join(', ')}`);
       }
@@ -187,6 +243,28 @@ export function PrintPreviewDialog() {
     }
   };
 
+  const commitPrinter = (): void => {
+    void printFromPreview(selectedPages, pageSetup);
+  };
+
+  const commit = (forcePrompt: boolean): void => {
+    if (build.pages.length === 0) return;
+    if (destination === 'pdf') void commitPdf(forcePrompt);
+    else commitPrinter();
+  };
+
+  /** THE KEYBOARD LAW (scoped to this modal): Enter commits the
+   *  active destination; the configured trigger held (Shift by
+   *  default) force-prompts. Esc is the Dialog's own. */
+  const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
+    if (e.key !== 'Enter') return;
+    // A button's Enter is its own click — let it run, don't double.
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'BUTTON') return;
+    e.preventDefault();
+    commit(triggerHeld(e));
+  };
+
   const zoomPct = Math.round(scale * 100);
   const zoomIn = () => {
     const idx = ZOOM_STEPS.findIndex((z) => z > zoomPct);
@@ -195,6 +273,17 @@ export function PrintPreviewDialog() {
   const zoomOut = () => {
     const idx = ZOOM_STEPS.findIndex((z) => z >= zoomPct);
     setZoom(ZOOM_STEPS[Math.max(0, (idx === -1 ? ZOOM_STEPS.length : idx) - 1)]);
+  };
+
+  /** Metadata WRITE-THROUGH (one source): the modal's title/author
+   *  inputs edit the document's coreProperties directly (marked
+   *  dirty — Word's export posture); the PDF's info reads the same
+   *  object on commit. Never a forked copy. */
+  const writeMeta = (key: 'title' | 'author', value: string): void => {
+    const next: DocumentCoreProperties = { ...coreProperties };
+    if (value.trim()) next[key] = value;
+    else delete next[key];
+    setCoreProperties(next);
   };
 
   return (
@@ -215,136 +304,304 @@ export function PrintPreviewDialog() {
           Print preview — what previews is exactly what prints
         </DialogDescription>
 
-        <div className="-m-4 flex flex-col overflow-hidden rounded-xl" style={{ height: 'min(85vh, 50rem)' }}>
+        <div
+          className="-m-4 flex flex-col overflow-hidden rounded-xl"
+          style={{ height: 'min(85vh, 50rem)' }}
+          onKeyDown={onKeyDown}
+        >
           <div className="flex-none border-b border-border px-4 py-3 pr-10">
             <DialogTitle className="font-heading text-base font-semibold">Print Preview</DialogTitle>
           </div>
 
           <div className="flex flex-1 overflow-hidden">
-            {/* LEFT — the document */}
-            <div
-              ref={scrollRef}
-              className="flex-1 overflow-auto bg-neutral-200 p-6 dark:bg-neutral-800"
-            >
+            {/* LEFT — the document (the zoom controls FLOAT over
+                its bottom-right corner, Chrome's overlay). */}
+            <div className="relative flex-1 overflow-hidden">
               <div
-                style={{
-                  width: pageW * scale > 0 ? pageW * scale : undefined,
-                  margin: '0 auto',
-                  position: 'relative',
-                }}
+                ref={scrollRef}
+                className="absolute inset-0 overflow-auto bg-neutral-200 p-6 dark:bg-neutral-800"
               >
                 <div
                   style={{
-                    transform: `scale(${scale})`,
-                    transformOrigin: 'top left',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
+                    width: pageW * scale > 0 ? pageW * scale : undefined,
+                    margin: '0 auto',
+                    position: 'relative',
                   }}
                 >
-                  {/* The view's own column + --print-page-gap sets the
-                      sheet gutter; the Mark-2 print container overrides
-                      it to 0 (@page breaks separate sheets). */}
-                  <div style={{ ['--print-page-gap' as string]: `${PAGE_GAP}px` }}>
-                    <PrintDocumentView pages={build.pages} visiblePages={visiblePages} />
+                  <div
+                    style={{
+                      transform: `scale(${scale})`,
+                      transformOrigin: 'top left',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                    }}
+                  >
+                    {/* The view's own column + --print-page-gap sets the
+                        sheet gutter; the Mark-2 print container overrides
+                        it to 0 (@page breaks separate sheets). */}
+                    <div style={{ ['--print-page-gap' as string]: `${PAGE_GAP}px` }}>
+                      <PrintDocumentView pages={build.pages} visiblePages={visiblePages} />
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              {/* THE ZOOM OVERLAY — floating bottom-right of the
+                  document (Chrome's print preview posture), a pill
+                  that never steals layout from the sheets. */}
+              <div
+                data-testid="print-preview-zoom"
+                className="absolute bottom-4 right-4 z-10 flex items-center gap-0.5 rounded-full border border-border bg-background/95 p-1 shadow-lg backdrop-blur"
+              >
+                <Button variant="ghost" size="sm" className="h-7 rounded-full px-2" aria-label="Zoom out" onClick={zoomOut}>
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <button
+                  type="button"
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                    zoom === 'fit'
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setZoom('fit')}
+                >
+                  Fit
+                </button>
+                <span className="w-11 text-center text-xs tabular-nums text-muted-foreground">
+                  {zoomPct}%
+                </span>
+                <Button variant="ghost" size="sm" className="h-7 rounded-full px-2" aria-label="Zoom in" onClick={zoomIn}>
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
-            {/* RIGHT — the options */}
-            <div className="flex w-72 flex-none flex-col gap-4 overflow-auto border-l border-border p-4">
-              <div className="text-sm text-muted-foreground">
-                <div data-testid="print-preview-total">
-                  {build.total} page{build.total === 1 ? '' : 's'}
+            {/* RIGHT — destination + options (the icon cards) */}
+            <div className="flex w-80 flex-none flex-col gap-3 overflow-auto border-l border-border p-3">
+              {/* DESTINATION — the segmented control (memory-backed).
+                  NEVER two modals: both destinations consume the same
+                  walk; they differ in body + commit only. */}
+              <section
+                className="rounded-xl border border-border bg-card p-3"
+                data-testid="print-preview-destination-card"
+              >
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Printer className="h-3.5 w-3.5" />
+                  Destination
                 </div>
-                <div>{paperLabel}</div>
-                <div className="text-xs">{marginsLabel}</div>
-                {visiblePages && (
-                  <div className="text-xs" data-testid="print-preview-range">
-                    Previewing {visiblePages.size} of {build.total}
-                  </div>
-                )}
-              </div>
+                <div
+                  className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted p-1"
+                  data-testid="print-preview-destination"
+                  role="radiogroup"
+                  aria-label="Destination"
+                >
+                  {([['printer', Printer, 'Printer'], ['pdf', FileText, 'PDF']] as const).map(
+                    ([dest, Icon, label]) => (
+                      <button
+                        key={dest}
+                        type="button"
+                        role="radio"
+                        aria-checked={destination === dest}
+                        data-testid={`print-preview-dest-${dest}`}
+                        className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                          destination === dest
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                        onClick={() => setPrintLastDestination(dest)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </section>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium" htmlFor="print-preview-range">
+              {/* THE DESTINATION BODY */}
+              {destination === 'pdf' ? (
+                <section
+                  className="rounded-xl border border-border bg-card p-3"
+                  data-testid="print-preview-pdf-body"
+                >
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <FileText className="h-3.5 w-3.5" />
+                    PDF file
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {/* The inline filename — the commit's target. */}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        aria-label="File name"
+                        data-testid="print-preview-filename"
+                        className="h-8 font-mono text-xs"
+                        placeholder='Filename'
+                        value={fileNameRaw}
+                        onChange={(e) => setFileNameRaw(e.target.value)}
+                      />
+                      <span className="flex-none font-mono text-xs text-muted-foreground">.pdf</span>
+                    </div>
+                    {/* Metadata WRITE-THROUGH — one source: these inputs
+                        edit the document's coreProperties (marked dirty);
+                        the PDF reads them back on commit. */}
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Type className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                      <Input
+                        aria-label="Title"
+                        data-testid="print-preview-title"
+                        className="h-7 text-xs"
+                        placeholder="Title"
+                        value={coreProperties.title ?? ''}
+                        onChange={(e) => writeMeta('title', e.target.value)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <UserRoundPen className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                      <Input
+                        aria-label="Author"
+                        data-testid="print-preview-author"
+                        className="h-7 text-xs"
+                        placeholder="Author"
+                        value={coreProperties.author ?? ''}
+                        onChange={(e) => writeMeta('author', e.target.value)}
+                      />
+                    </div>
+                    {/* The FULL properties dialog (subject, keywords,
+                        comments — everything else): stacked above this
+                        one; edits land in the same coreProperties (one
+                        source). */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-full justify-start gap-1.5 px-2 text-xs text-muted-foreground"
+                      data-testid="print-preview-all-properties"
+                      onClick={() => useDocumentPropertiesStore.getState().open()}
+                    >
+                      <ListPlus className="h-3.5 w-3.5" />
+                      All document properties…
+                    </Button>
+                  </div>
+                </section>
+              ) : (
+                <section
+                  className="rounded-xl border border-border bg-card p-3"
+                  data-testid="print-preview-printer-body"
+                >
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <Printer className="h-3.5 w-3.5" />
+                    System dialog
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Opens the system print dialog — printer, copies, and duplex are
+                    handled there.
+                  </p>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    Note: the system dialog may not inherit this document's
+                    orientation ({paperLabel}) — set it there if needed. A
+                    built-in printer dialog is on the roadmap.
+                  </p>
+                </section>
+              )}
+
+              {/* THE PAPER CARD — the document's own geometry (never a
+                  preview-local override — one geometry source). */}
+              <section className="rounded-xl border border-border bg-card p-3">
+                <div className="flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Files className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                    <span className="text-muted-foreground">Pages</span>
+                    <span className="ml-auto font-medium tabular-nums" data-testid="print-preview-total">
+                      {build.total}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RectangleVertical className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                    <span className="text-muted-foreground">Size</span>
+                    <span className="ml-auto font-medium">
+                      {paperLabel}
+                      {paperSizeLabel ? <span className="text-muted-foreground"> · {paperSizeLabel}</span> : null}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Ruler className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                    <span className="text-muted-foreground">Margins</span>
+                    <span className="ml-auto font-medium tabular-nums">{marginsLabel}</span>
+                  </div>
+                  {visiblePages && (
+                    <div className="flex items-center gap-2">
+                      <Files className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+                      <span className="text-muted-foreground">Previewing</span>
+                      <span className="ml-auto font-medium tabular-nums" data-testid="print-preview-range">
+                        {visiblePages.size} of {build.total}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* THE PAGES CARD — the range filter (previews AND
+                  commits). */}
+              <section className="rounded-xl border border-border bg-card p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <Hash className="h-3.5 w-3.5" />
                   Pages
-                </label>
+                </div>
                 <Input
-                  id="print-preview-range"
+                  ref={rangeInputRef}
+                  aria-label="Page range"
                   data-testid="print-preview-range-input"
+                  className="h-8 text-xs"
                   placeholder={`All (e.g. 1-${build.total})`}
                   value={rangeRaw}
                   onChange={(e) => setRangeRaw(e.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">
-                  e.g. &ldquo;1-3, {build.total}&rdquo; — the range previews and prints.
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  e.g. &ldquo;1-3, {build.total}&rdquo; — the range previews and commits.
                 </p>
-              </div>
+              </section>
 
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Zoom</span>
-                  <span className="text-xs text-muted-foreground">{zoomPct}%</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="sm" aria-label="Zoom out" onClick={zoomOut}>
-                    <ZoomOut className="h-4 w-4" />
-                  </Button>
+              {/* THE COMMIT — ONE button, labeled with the RESOLVED
+                  outcome (the Tensor twist): never "OK" against a
+                  mystery destination. Enter commits; the configured
+                  trigger held force-prompts. */}
+              <div className="mt-auto flex flex-col gap-2 pt-2">
+                {destination === 'pdf' ? (
                   <Button
-                    variant={zoom === 'fit' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => setZoom('fit')}
+                    data-testid="print-preview-commit"
+                    className="w-full"
+                    disabled={build.pages.length === 0}
+                    onClick={(e: MouseEvent<HTMLButtonElement>) => commit(triggerHeld(e))}
                   >
-                    Fit
+                    <FileText className="h-4 w-4 flex-none" />
+                    <span className="block max-w-full truncate">
+                      Save as PDF
+                    </span>
                   </Button>
-                  <Button variant="outline" size="sm" aria-label="Zoom in" onClick={zoomIn}>
-                    <ZoomIn className="h-4 w-4" />
+                ) : (
+                  <Button
+                    data-testid="print-preview-commit"
+                    className="w-full"
+                    disabled={build.pages.length === 0}
+                    onClick={() => commit(false)}
+                  >
+                    <Printer className="h-4 w-4 flex-none" />
+                    Print…
                   </Button>
+                )}
+                {/* THE HINTS — Kbd components, mapped to whatever the
+                    user configured (the trigger) and scoped to this
+                    destination. */}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">{destination === 'pdf' && (
+                    <span className="inline-flex items-center gap-1">
+                      <KbdGroup>
+                        <Kbd>{triggerLabel}</Kbd>
+                        <Kbd>Click</Kbd>
+                      </KbdGroup>
+                      to modify destination
+                    </span>
+                  )}
                 </div>
-              </div>
-
-              <div className="mt-auto flex flex-col gap-2">
-                {/* MARK 2: THE PRINT BUTTON — arms the print container with
-                    THIS preview's own walk (one build: what previews is
-                    what prints), window.print() opens the OS dialog
-                    (printer/copies/duplex/range are the OS's), closing
-                    on the dialog's own rhythm. The OS range and the
-                    PREVIEW range compose: the preview filter narrows
-                    what arms, the OS narrows again. */}
-                <Button
-                  data-testid="print-preview-print"
-                  disabled={!build || build.pages.length === 0}
-                  onClick={() => {
-                    if (!build) return;
-                    void printFromPreview(
-                      visiblePages
-                        ? build.pages.filter((p) => visiblePages.has(p.index))
-                        : build.pages,
-                      pageSetup,
-                    );
-                  }}
-                >
-                  <Printer className="h-4 w-4" />
-                  Print…
-                </Button>
-                {/* MARK 4: THE PDF BUTTON — synthesizes from the preview's
-                    OWN walk (one build), writes to the default export
-                    folder (Settings > General) or prompts; Shift/Ctrl-
-                    click ALWAYS prompts (the explicit-location escape). */}
-                <Button
-                  data-testid="print-preview-pdf"
-                  disabled={!build || build.pages.length === 0}
-                  onClick={(e) => void savePdfFromPreview(e)}
-                >
-                  <Save className="h-4 w-4" />
-                  Save as PDF…
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Saves to the default export folder (Settings) — Shift/Ctrl-click to
-                  pick a location. Print hands the preview to the OS dialog.
-                </p>
               </div>
             </div>
           </div>
@@ -353,4 +610,3 @@ export function PrintPreviewDialog() {
     </Dialog>
   );
 }
-
