@@ -259,6 +259,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   /** M-REFS: the resolver's warm map (the two-pass fixpoint's state) —
    *  identity-stable per the resolver; null on cold start/fallback. */
   const refPagesRef = useRef<ReferencePagesMap | null>(null);
+  /** M-PAGEFIELD: the warm page TOTAL (the field placeholder's
+   *  measured width source — the max-width digit string). The
+   *  fixpoint: pass 1 measures with the warm total; the real total
+   *  resolves off pass 1's page count; a widened placeholder
+   *  re-lays-out (bounded, the M-REFS two-pass shape). */
+  const fieldTotalRef = useRef<number | null>(null);
 
   const layoutRef = useRef<LayoutState | null>(null);
   const fontsReadyRef = useRef(false);
@@ -786,6 +792,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       // own width change re-resolves on the NEXT relayout (one-pass
       // lag in the pathological oscillation case, by ruling).
       const refPagesIn = refPagesRef.current;
+      const fieldTotalIn = fieldTotalRef.current ?? undefined;
       const pass1 = pmDocToSemantic(editor.state.doc, baseStyle, {
         definitions: registryNow.merged,
         epoch: registryNow.epoch,
@@ -793,7 +800,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         // M-HEADER-FOOTER-2: per-call band options (L4) — the engine
         // owns the band geometry from here.
         differentFirstPage: hfSettings?.differentFirstPage ?? false,
-      }, refPagesIn ?? undefined);
+      }, refPagesIn ?? undefined, fieldTotalIn);
       const result1 = engineRef.current!.layout(
         // M-HEADER-FOOTER-2: the View ▸ Show Headers & Footers toggle is
         // DISPLAY-ONLY but rides the LAYOUT (the captions precedent is
@@ -806,16 +813,24 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         toLayoutOptions(pageSetupNow),
       );
       const refPagesOut = resolveReferencePages(pass1.blocks, result1.lines, refPagesIn);
+      // M-PAGEFIELD: the total resolves off pass 1's page count — the
+      // fixpoint re-converts + re-lays-out when the placeholder's
+      // digit width must GROW (1 → 2 digits). Identity-stable when
+      // unchanged (the same number → pass 2 skipped, caches warm).
+      const totalNow = result1.pages.length;
       let adapted = pass1;
       let result = result1;
-      if (refPagesOut && refPagesOut !== refPagesIn) {
-        refPagesRef.current = refPagesOut;
+      const refPagesMoved = refPagesOut && refPagesOut !== refPagesIn;
+      const fieldWidened = fieldTotalIn !== totalNow;
+      if (refPagesMoved || fieldWidened) {
+        if (refPagesMoved) refPagesRef.current = refPagesOut;
+        if (fieldWidened) fieldTotalRef.current = totalNow;
         adapted = pmDocToSemantic(editor.state.doc, baseStyle, {
           definitions: registryNow.merged,
           epoch: registryNow.epoch,
         }, {
           differentFirstPage: hfSettings?.differentFirstPage ?? false,
-        }, refPagesOut);
+        }, refPagesMoved ? refPagesOut : refPagesIn ?? undefined, totalNow);
         result = engineRef.current!.layout(
           useConfigStore.getState().config.editor.showHeadersFooters === false
             ? { ...adapted.doc, bands: undefined }
@@ -2145,6 +2160,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                         bitmapEpoch={bitmapEpoch}
                         referenceBorder={refBorders.has(group.blockId)}
                         referenceEntries={blocks.find((b) => b.id === group.blockId)?.reference?.entries}
+                        pageNumber={page.index + 1}
+                        pageTotal={result.pages.length}
                       />
                     );
                   })}

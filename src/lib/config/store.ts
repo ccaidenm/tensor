@@ -56,6 +56,18 @@ interface ConfigStore {
   /** Accessibility: grammar flags as a double line in addition to
    *  color (the color-blind aid). */
   setGrammarDoubleLine: (value: boolean) => void;
+  /** M-PRINT: the default folder for PDF/file exports ('' = the OS
+   *  save dialog's own default). */
+  setDownloadsDir: (value: string) => void;
+  /** M-PRINT: the modifier-click that forces Save-as-PDF to prompt. */
+  setPdfAlwaysAskTrigger: (value: 'shift' | 'ctrl') => void;
+  /** M-PRINT: the preview modal's last destination (the segmented
+   *  control's memory). */
+  setPrintLastDestination: (value: 'printer' | 'pdf') => void;
+  /** M-PRINT: the last-used duplex setting (the picker's seed). */
+  setPrintLastDuplex: (
+    value: 'one-sided' | 'two-sided-long-edge' | 'two-sided-short-edge',
+  ) => void;
 
   loadConfig: (raw: unknown) => void;
 }
@@ -66,6 +78,32 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setTheme: (theme) =>
     set((state) => ({
       config: { ...state.config, theme },
+    })),
+
+  setDownloadsDir: (value) =>
+    set((state) => ({
+      config: { ...state.config, downloadsDir: value },
+    })),
+
+  setPdfAlwaysAskTrigger: (value) =>
+    set((state) => ({
+      config: { ...state.config, pdfAlwaysAskTrigger: value },
+    })),
+
+  setPrintLastDestination: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        print: { ...state.config.print, lastDestination: value },
+      },
+    })),
+
+  setPrintLastDuplex: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        print: { ...state.config.print, lastDuplex: value },
+      },
     })),
 
   addCustomColor: (color) =>

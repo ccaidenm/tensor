@@ -51,6 +51,16 @@ export interface TextRun {
   kind?: 'text'
   text: string
   style: TextStyle
+  /**
+   * M-PAGEFIELD: the SHELL's per-page field marker — the run's text is
+   * the MEASURED placeholder (the warm total's max-width digits), and
+   * the shell's painter substitutes the per-page resolution at draw
+   * time. The engine treats the run as plain text and never reads this
+   * field (not read → not cache-relevant, the Phase 3 ruling's shape;
+   * hashBlock's text-run mapping deliberately drops it, while the
+   * placeholder TEXT rides — a total-width change re-breaks the line).
+   */
+  fieldKind?: 'page' | 'pages'
 }
 
 /**

@@ -81,6 +81,18 @@ export function buildPiece(node: PMNode, offset: number): Piece | null {
       text += t;
       return false;
     }
+    // M-PAGEFIELD: the page-number FIELD is a DIGIT token in the
+    // language stream — without it the surrounding sentence fragments
+    // (' of ' alone reads as a lowercase sentence start and Language-
+    // Tool flags a capitalization that isn't one). Digits are
+    // caseless and never spell-checked words; each token char maps to
+    // the ATOM's own position (the highlight covers the field chip).
+    if (child.type.name === 'pageField') {
+      const token = (child.attrs as { kind?: string }).kind === 'pages' ? '12' : '1';
+      for (let i = 0; i < token.length; i++) posMap.push(offset + 1 + pos);
+      text += token;
+      return false;
+    }
     if (child.isTextblock && text.length > 0) {
       text += '\n';
       posMap.push(offset + 1 + pos);

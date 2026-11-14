@@ -143,6 +143,28 @@ export const ConfigSchema = z.object({
    *  and mutate anything, and a careless edit can break the running
    *  app. The toggle is the single gate; the menu reads it live. */
   developerMode: z.boolean().default(false),
+  /** M-PRINT (#39): the default folder for PDF exports (and future
+   *  file exports) — '' = the OS's default save location (the save
+   *  dialog's own default). A path = exports write there directly
+   *  unless the button is Shift/Ctrl-clicked (which always prompts). */
+  downloadsDir: z.string().default(''),
+  /** M-PRINT: the modifier that forces Save-as-PDF to PROMPT (the
+   *  always-ask escape hatch). Shift is the default (the classic
+   *  "modifier-click = override" idiom; Ctrl-click carries menu
+   *  baggage on some platforms). */
+  pdfAlwaysAskTrigger: z.enum(['shift', 'ctrl']).default('shift'),
+  /** M-PRINT: the preview modal's last DESTINATION (the segmented
+   *  control's memory) — reopening the preview lands where you were.
+   *  The custom print dialog's posture: destinations differ in
+   *  options + commit action only. */
+  print: z.object({
+    lastDestination: z.enum(['printer', 'pdf']).default('printer'),
+    /** The last-used duplex setting — the picker's seed (no
+     *  "printer default" option: a concrete choice, remembered). */
+    lastDuplex: z
+      .enum(['one-sided', 'two-sided-long-edge', 'two-sided-short-edge'])
+      .default('one-sided'),
+  }).default({ lastDestination: 'printer', lastDuplex: 'one-sided' }),
   /** M-META: the user's own identity — the default AUTHOR for new
    *  documents' metadata. Empty = unset: nothing is baked into files
    *  the user didn't explicitly save with their name (privacy-first;

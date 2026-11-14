@@ -180,6 +180,12 @@
     "repository": "https://github.com/lizenz-tooling/checker"
   },
   {
+    "name": "@nodable/entities",
+    "version": "3.1.0",
+    "license": "MIT",
+    "repository": "https://github.com/nodable/val-parsers"
+  },
+  {
     "name": "@npmcli/agent",
     "version": "4.0.2",
     "license": "ISC",
@@ -286,6 +292,18 @@
     "version": "0.155.0",
     "license": "MIT",
     "repository": "https://github.com/oxc-project/oxc"
+  },
+  {
+    "name": "@pdf-lib/standard-fonts",
+    "version": "1.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/standard-fonts"
+  },
+  {
+    "name": "@pdf-lib/upng",
+    "version": "1.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/upng"
   },
   {
     "name": "@radix-ui/primitive",
@@ -684,6 +702,12 @@
     "repository": "https://github.com/ueberdosis/tiptap"
   },
   {
+    "name": "@tiptap/markdown",
+    "version": "3.31.4",
+    "license": "MIT",
+    "repository": "https://github.com/ueberdosis/tiptap"
+  },
+  {
     "name": "@tiptap/pm",
     "version": "3.31.4",
     "license": "MIT",
@@ -716,6 +740,12 @@
   {
     "name": "@types/node",
     "version": "22.20.5",
+    "license": "MIT",
+    "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped"
+  },
+  {
+    "name": "@types/node",
+    "version": "26.6.6",
     "license": "MIT",
     "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped"
   },
@@ -754,6 +784,18 @@
     "version": "7.1.4",
     "license": "MIT",
     "repository": "https://github.com/TooTallNate/proxy-agents"
+  },
+  {
+    "name": "anynum",
+    "version": "1.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/anynum"
+  },
+  {
+    "name": "argparse",
+    "version": "2.0.1",
+    "license": "Python-2.0",
+    "repository": "https://github.com/nodeca/argparse"
   },
   {
     "name": "aria-hidden",
@@ -882,6 +924,12 @@
     "repository": "https://github.com/thekashey/detect-node"
   },
   {
+    "name": "docx",
+    "version": "9.15.0",
+    "license": "MIT",
+    "repository": "https://github.com/dolanmiu/docx"
+  },
+  {
     "name": "enhanced-resolve",
     "version": "5.26.0",
     "license": "MIT",
@@ -912,10 +960,28 @@
     "repository": "https://github.com/planttheidea/fast-equals"
   },
   {
+    "name": "fast-xml-builder",
+    "version": "1.3.1",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/fast-xml-builder"
+  },
+  {
+    "name": "fast-xml-parser",
+    "version": "5.11.2",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/fast-xml-parser"
+  },
+  {
     "name": "fdir",
     "version": "6.5.0",
     "license": "MIT",
     "repository": "https://github.com/thecodrr/fdir"
+  },
+  {
+    "name": "fflate",
+    "version": "0.8.3",
+    "license": "MIT",
+    "repository": "https://github.com/101arrowz/fflate"
   },
   {
     "name": "fs-minipass",
@@ -1000,6 +1066,12 @@
     "version": "10.7.5",
     "license": "MIT",
     "repository": "https://github.com/beaugunderson/ip-address"
+  },
+  {
+    "name": "is-unsafe",
+    "version": "2.0.2",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/is-unsafe"
   },
   {
     "name": "isexe",
@@ -1093,7 +1165,7 @@
   },
   {
     "name": "lucide-react",
-    "version": "1.63.0",
+    "version": "1.66.0",
     "license": "ISC",
     "repository": "https://github.com/lucide-icons/lucide"
   },
@@ -1108,6 +1180,12 @@
     "version": "15.0.6",
     "license": "ISC",
     "repository": "https://github.com/npm/make-fetch-happen"
+  },
+  {
+    "name": "marked",
+    "version": "17.0.6",
+    "license": "MIT",
+    "repository": "https://github.com/markedjs/marked"
   },
   {
     "name": "mathlive",
@@ -1296,16 +1374,34 @@
     "repository": "https://github.com/npm/pacote"
   },
   {
+    "name": "pako",
+    "version": "1.0.11",
+    "license": "(MIT AND Zlib)",
+    "repository": "https://github.com/nodeca/pako"
+  },
+  {
     "name": "parse-conflict-json",
     "version": "5.0.1",
     "license": "ISC",
     "repository": "https://github.com/npm/parse-conflict-json"
   },
   {
+    "name": "path-expression-matcher",
+    "version": "1.6.2",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/path-expression-matcher"
+  },
+  {
     "name": "path-scurry",
     "version": "2.0.2",
     "license": "BlueOak-1.0.0",
     "repository": "https://github.com/isaacs/path-scurry"
+  },
+  {
+    "name": "pdf-lib",
+    "version": "1.17.1",
+    "license": "MIT",
+    "repository": "https://github.com/Hopding/pdf-lib"
   },
   {
     "name": "picocolors",
@@ -1602,6 +1698,12 @@
     "repository": "https://github.com/npm/ssri"
   },
   {
+    "name": "strnum",
+    "version": "2.5.1",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/strnum"
+  },
+  {
     "name": "tailwindcss",
     "version": "4.3.3",
     "license": "MIT",
@@ -1639,6 +1741,12 @@
   },
   {
     "name": "tslib",
+    "version": "1.14.1",
+    "license": "0BSD",
+    "repository": "https://github.com/Microsoft/tslib"
+  },
+  {
+    "name": "tslib",
     "version": "2.8.1",
     "license": "0BSD",
     "repository": "https://github.com/Microsoft/tslib"
@@ -1664,6 +1772,12 @@
   {
     "name": "undici-types",
     "version": "6.21.0",
+    "license": "MIT",
+    "repository": "https://github.com/nodejs/undici"
+  },
+  {
+    "name": "undici-types",
+    "version": "8.9.0",
     "license": "MIT",
     "repository": "https://github.com/nodejs/undici"
   },
@@ -1722,6 +1836,12 @@
     "repository": "https://github.com/isaacs/walk-up-path"
   },
   {
+    "name": "wawoff2",
+    "version": "2.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/fontello/wawoff2"
+  },
+  {
     "name": "which",
     "version": "6.0.1",
     "license": "ISC",
@@ -1738,6 +1858,12 @@
     "version": "7.0.1",
     "license": "ISC",
     "repository": "https://github.com/npm/write-file-atomic"
+  },
+  {
+    "name": "xml-naming",
+    "version": "0.3.0",
+    "license": "MIT",
+    "repository": "https://github.com/NaturalIntelligence/xml-naming"
   },
   {
     "name": "yallist",

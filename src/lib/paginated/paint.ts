@@ -1,7 +1,8 @@
 import type { LayoutResult, LineBox, Run, TextMetrics, TextStyle } from '@tensor-editor/engine';
 import type { BlockPaint, RunDecor, TextAlign } from './adapter';
 import { applyVariantCaps, fontString } from './metrics';
-import { alignOffset } from './positionMap';
+import { bulletMarkerText, orderedMarkerText } from '@/lib/print/markers';
+import { alignOffset, fieldShiftBefore } from './positionMap';
 import { fitDownImage } from '@tensor-editor/engine';
 import { FAILED_HATCH, FAILED_TINT, PENDING_TINT } from '@/lib/media/bitmapCache';
 
@@ -118,6 +119,15 @@ export interface PaintExtras {
    * run text — the round-8 stretch revert).
    */
   referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
+    /**
+     * M-PAGEFIELD — the per-page field resolution: THIS page's 1-based
+     * number + the document's total. A segment whose run carries
+     * fieldKind draws the resolved text instead of the measured
+     * placeholder (the pages field draws EXACTLY the placeholder —
+     * total == measured; the page field right-anchors in the slot, the
+     * units column staying put across pages). Absent = no fields.
+     */
+    fieldPage?: { number: number; total: number };
   /** The marker's font — resolved by the caller from the block's first
    *  run, falling back to the document default for empty items
    *  ("style from the block's runs"). */
@@ -152,61 +162,6 @@ function npcSubstitute(s: string): string {
   return s.replace(/\u00A0/g, '·').replace(/\t/g, '→');
 }
 
-/** Ordered-number spelling per CSS list-style-type (the extensions'
- * value set — the M6.1 receipt). */
-function orderedMarkerText(index: number, styleType: string): string {
-  switch (styleType) {
-    case 'lower-alpha':
-      return `${toAlpha(index).toLowerCase()}.`;
-    case 'upper-alpha':
-      return `${toAlpha(index)}.`;
-    case 'lower-roman':
-      return `${toRoman(index).toLowerCase()}.`;
-    case 'upper-roman':
-      return `${toRoman(index)}.`;
-    default:
-      return `${index}.`;
-  }
-}
-
-/** Bullet-glyph spelling per CSS list-style-type. */
-function bulletMarkerText(styleType: string): string {
-  switch (styleType) {
-    case 'circle':
-      return '○';
-    case 'square':
-      return '▪';
-    default:
-      return '•';
-  }
-}
-
-function toAlpha(n: number): string {
-  // 1-based spreadsheet spelling: 27 → AA.
-  let s = '';
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s || 'A';
-}
-
-function toRoman(n: number): string {
-  const table: Array<[number, string]> = [
-    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
-    [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
-    [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
-  ];
-  let s = '';
-  for (const [value, glyph] of table) {
-    while (n >= value) {
-      s += glyph;
-      n -= value;
-    }
-  }
-  return s || 'I';
-}
 
 export function paintLines(
   ctx: CanvasRenderingContext2D,
@@ -343,7 +298,8 @@ export function paintLines(
     // run's own style — painted by the ordinary segment path below.
     // The old painted-leader ink (muted gray, unselectable) is GONE.
 
-    for (const segment of line.segments) {
+    for (let si = 0; si < line.segments.length; si++) {
+      const segment = line.segments[si]!;
       const run = runs[segment.runIndex];
       if (!run) continue;
       // M-RULER Phase 4: each segment's x is the ENGINE's placed pen,
@@ -351,6 +307,23 @@ export function paintLines(
       // model tab advances (a \t's jump is pen-dependent; center/right
       // stops reposition their text).
       const x = baseX + segment.x;
+      // M-PAGEFIELD — THE PER-PAGE RESOLUTION + INK SHIFT: the field's
+      // segment text is the MEASURED placeholder (the warm total's
+      // digits — the slot, stable across pages because the engine
+      // ECHOES one line geometry); the drawn text is THIS page's
+      // resolution, LEFT-anchored in the slot, and every following
+      // segment shifts left by the accumulated slack (fieldShiftBefore
+      // — the same derivation the caret/selection/hit consume, so the
+      // ink and the mapping agree by construction). Word re-lays
+      // footers per page; the shared geometry cannot, so the slack
+      // closes as ink: page 3 renders "Page 3 of 10" exactly.
+      const shift = fieldShiftBefore(line, { runs, text } as never, metrics, si);
+      const fieldResolved =
+        run.kind !== 'inlineImage' && run.fieldKind && extras.fieldPage
+          ? run.fieldKind === 'pages'
+            ? String(extras.fieldPage.total)
+            : String(extras.fieldPage.number)
+          : null;
       // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): the U+FFFC token paints
       // as the image itself, BASELINE-SEATED (bottom at the baseline;
       // the engine grew the line's ascent for it — the shell fills the
@@ -368,19 +341,19 @@ export function paintLines(
         const sha = run.src.startsWith('media://') ? run.src.slice('media://'.length) : null;
         const bitmap = sha != null ? extras.resolveBitmap?.(sha) : undefined;
         if (bitmap) {
-          ctx.drawImage(bitmap, x, baselineY - dims.height, dims.width, dims.height);
+          ctx.drawImage(bitmap, x - shift, baselineY - dims.height, dims.width, dims.height);
         } else if (sha != null && (extras.bitmapFailed?.(sha) ?? false)) {
           // TERMINAL failure (M-IMAGES-2.2): darker tint + cross-hatch.
           // save/restore keeps the hatch's stroke state off the text.
           ctx.save();
           ctx.fillStyle = FAILED_TINT;
-          ctx.fillRect(x, baselineY - dims.height, dims.width, dims.height);
+          ctx.fillRect(x - shift, baselineY - dims.height, dims.width, dims.height);
           ctx.strokeStyle = FAILED_HATCH;
           ctx.beginPath();
-          ctx.moveTo(x, baselineY - dims.height);
-          ctx.lineTo(x + dims.width, baselineY);
-          ctx.moveTo(x + dims.width, baselineY - dims.height);
-          ctx.lineTo(x, baselineY);
+          ctx.moveTo(x - shift, baselineY - dims.height);
+          ctx.lineTo(x - shift + dims.width, baselineY);
+          ctx.moveTo(x - shift + dims.width, baselineY - dims.height);
+          ctx.lineTo(x - shift, baselineY);
           ctx.stroke();
           ctx.restore();
         } else {
@@ -388,7 +361,7 @@ export function paintLines(
           // unresolved) — identical geometry to the future bitmap.
           const prevFill = ctx.fillStyle;
           ctx.fillStyle = PENDING_TINT;
-          ctx.fillRect(x, baselineY - dims.height, dims.width, dims.height);
+          ctx.fillRect(x - shift, baselineY - dims.height, dims.width, dims.height);
           ctx.fillStyle = prevFill;
         }
         continue;
@@ -402,12 +375,22 @@ export function paintLines(
       if (isTab && !npc) continue;
       const paintText = npc ? npcSubstitute(segmentText) : segmentText;
       const width = metrics.measure(isTab ? npcSubstitute(segmentText) : segmentText, run.style);
+      let drawX = x - shift;
+      let paintWidth = width;
+      let drawn = fieldResolved ?? paintText;
+      if (fieldResolved != null) {
+        // The number draws at the SHIFTED slot start (drawX above),
+        // its width the RESOLVED digits. The shift rule holds for
+        // everything after the FIRST field — later fields included:
+        // '3 of 10' shifts the '10' flush against the ' of '.
+        paintWidth = metrics.measure(fieldResolved, run.style);
+      }
 
       if (decor.highlight) {
         const ascent = metrics.ascent(run.style);
         const descent = metrics.descent(run.style);
         ctx.fillStyle = decor.highlight;
-        ctx.fillRect(x, baselineY - ascent, width, ascent + descent);
+        ctx.fillRect(drawX, baselineY - ascent, paintWidth, ascent + descent);
       }
 
       // M-HEADER-FOOTER-3: muted band ink DESATURATES the run's own
@@ -421,7 +404,7 @@ export function paintLines(
       // singleton used to MEASURE this run — painted advances can
       // never diverge from measured widths (the one-ruler rule).
       applyVariantCaps(ctx, run.style);
-      ctx.fillText(paintText, x, baselineY);
+      ctx.fillText(drawn, drawX, baselineY);
 
       // TODO(typographic polish): proper underline/strike metrics per
       // font (nskipping ink gaps, weight-scaled thickness) — the
@@ -436,10 +419,10 @@ export function paintLines(
         const thickness = Math.max(1, Math.round(run.style.fontSize / 16));
         ctx.fillStyle = decorationColor;
         if (decor.underline) {
-          ctx.fillRect(x, baselineY + 0.08 * run.style.fontSize, width, thickness);
+          ctx.fillRect(drawX, baselineY + 0.08 * run.style.fontSize, paintWidth, thickness);
         }
         if (decor.strike) {
-          ctx.fillRect(x, baselineY - 0.3 * run.style.fontSize, width, thickness);
+          ctx.fillRect(drawX, baselineY - 0.3 * run.style.fontSize, paintWidth, thickness);
         }
       }
     }

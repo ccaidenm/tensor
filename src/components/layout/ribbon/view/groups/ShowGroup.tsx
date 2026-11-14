@@ -2,6 +2,8 @@ import { Ruler, PanelTop, Droplet, Superscript, SquareDashed, MessageSquareText 
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useConfigStore } from '@/lib/config/store';
+// M-PRINT (#43): View > Print Preview — the preview modal's menu entry
+// (the palette command + Ctrl+P are its siblings; one registry body).
 
 export function ShowGroup() {
   // M-IMAGES-1: the Captions DISPLAY toggle (the NPC precedent) —

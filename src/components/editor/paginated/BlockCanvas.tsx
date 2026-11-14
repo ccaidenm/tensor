@@ -77,6 +77,14 @@ interface BlockCanvasProps {
    * ⇒ the conversion changed ⇒ new lines anyway).
    */
   referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
+  /**
+   * M-PAGEFIELD: the per-page field resolution — THIS page's 1-based
+   * number and the document's total. Field runs draw the resolution
+   * instead of the measured placeholder. Both props are stable per
+   * canvas (the group is per page; the total rides the relayout).
+   */
+  pageNumber: number;
+  pageTotal: number;
 }
 
 /**
@@ -94,7 +102,7 @@ interface BlockCanvasProps {
  * their pixels. Falls back to full repaint on canvas resize, first-line
  * edits, or style changes (the fallback cost = the old behavior).
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -187,7 +195,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         const damageTop = lines[damageFrom].rect.y - first.rect.y;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, damageTop, width, height - damageTop);
-        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
         // Receipt: px² actually rasterized (cleared + repainted region).
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
       } else {
@@ -196,7 +204,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
         // Receipt: full canvas.
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
       }
@@ -213,7 +221,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: width, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
       } catch (retryErr) {
         console.error('[BlockCanvas] repaint retry failed — full repaint armed for next render', retryErr);
         prevLinesRef.current = null;
@@ -228,7 +236,10 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     prevBoxRef.current = boxKey;
   // showCaptions + wrapWidth + bitmapEpoch ride the repaint KEY —
   // each flips the paint when it changes (the arrival repaint).
-  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries]);
+  // M-PAGEFIELD: pageNumber/pageTotal ride too — a virtualized canvas
+  // can be REUSED across pages (the per-page group's identity is the
+  // block, not the page), and a total change re-measures the fields.
+  }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal]);
 
   return (
     <canvas

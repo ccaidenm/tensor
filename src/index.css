@@ -548,3 +548,18 @@ body {
   color: inherit;
   text-decoration: none;
 }
+
+
+/* M-PRINT (#43, Mark 2) — THE PRINT MEDIA SPLIT. On paper: the screen
+ * chrome (ribbon, status bar, sidebars, dialogs, the preview itself)
+ * hides; only the print container (PrintContainer.tsx) shows. On
+ * screen the container is display:none (its own inline law) — the
+ * two rules are a pair, both must name the same markers. */
+@media print {
+  [data-screen-chrome] {
+    display: none !important;
+  }
+  [data-testid="print-container"] {
+    display: block !important;
+  }
+}

@@ -139,6 +139,32 @@ describe('DocumentPropertiesDialog', () => {
   });
 });
 
+describe('DocumentPropertiesDialog keywords field background (the user\'s ask)', () => {
+  it('matches the Input fields: transparent + dark input tint, NEVER bg-muted', () => {
+    openDialog();
+    const pending = document.querySelector('input[aria-label="Keywords"]') as HTMLInputElement;
+    expect(pending).toBeTruthy();
+    const box = pending.parentElement!;
+    expect(box.className).toContain('bg-transparent');
+    expect(box.className).toContain('dark:bg-input/30');
+    expect(box.className).not.toContain('bg-muted');
+  });
+});
+
+describe('formatMarginsSummary (the print dialog\'s human Paper card)', () => {
+  it('uniform → "all sides"; paired → top/bottom · left/right; mixed → per side', async () => {
+    const { formatMarginsSummary } = await import('@/lib/document/pageSetup');
+    const u = { top: 72, bottom: 72, left: 72, right: 72 };
+    expect(formatMarginsSummary(u, 'inches')).toBe('1" all sides');
+    const p = { top: 72, bottom: 72, left: 90, right: 90 };
+    expect(formatMarginsSummary(p, 'inches')).toBe('1" top/bottom · 1.25" left/right');
+    const m = { top: 72, bottom: 36, left: 90, right: 54 };
+    expect(formatMarginsSummary(m, 'inches')).toBe('T 1" · B 0.5" · L 1.25" · R 0.75"');
+    // cm speaks its suffix (never the inch mark)
+    expect(formatMarginsSummary(u, 'centimeters')).toBe('2.54 cm all sides');
+  });
+});
+
 describe('DocumentPropertiesDialog keywords tag box', () => {
   beforeEach(() => {
     useDocumentStore.setState({ coreProperties: {}, isDirty: false, revision: 0, filePath: null });

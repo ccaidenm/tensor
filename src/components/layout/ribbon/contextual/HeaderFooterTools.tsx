@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUpToLine, PanelTop, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, Hash, Numbers, PanelTop, X } from 'lucide-react';
 import { useEditorState } from '@tiptap/react';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '@/components/layout/IconButton';
@@ -9,6 +9,7 @@ import {
   focusBand,
   setDifferentFirstPage,
 } from '@/lib/editor/headerFooterCommands';
+import { insertPageField } from '@/lib/editor/PageFieldNode';
 
 /**
  * M-HEADER-FOOTER-2 — the Header & Footer contextual tab's groups
@@ -74,6 +75,22 @@ export function HeaderFooterTools() {
           label="Go to Footer"
           icon={<ArrowDownToLine size={16} />}
           onClick={() => goTo('footer')}
+        />
+      </RibbonGroup>
+      {/* M-PAGEFIELD: the page-number fields — enabled while the
+          selection sits in a band (the caret is the insertion point). */}
+      <RibbonGroup>
+        <IconButton
+          label="Insert Page Number"
+          icon={<Hash size={16} />}
+          disabled={!inBand?.inBand}
+          onClick={() => editor && insertPageField(editor, 'page')}
+        />
+        <IconButton
+          label="Insert Total Pages"
+          icon={<Numbers size={16} />}
+          disabled={!inBand?.inBand}
+          onClick={() => editor && insertPageField(editor, 'pages')}
         />
       </RibbonGroup>
       <RibbonGroup>

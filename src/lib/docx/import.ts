@@ -480,7 +480,7 @@ type FieldKind = 'toc' | 'page' | 'hyperlink' | 'other' | null;
 function fieldKind(instr: string): FieldKind {
   const keyword = instr.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
   if (keyword === 'TOC') return 'toc';
-  if (['PAGE', 'NUMPAGES', 'SECTIONPAGES', 'DATE', 'TIME', 'SAVEDATE', 'PRINTDATE', 'CREATEDATE'].includes(keyword)) return 'page';
+  if (keyword === 'PAGE' || keyword === 'NUMPAGES') return 'page';
   if (keyword === 'HYPERLINK') return 'hyperlink';
   return 'other';
 }
@@ -643,13 +643,22 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
           if (kind === 'toc' && !ctx.tocCapture) {
             ctx.tocCapture = { depth: parseTocDepth(instr), entries: [] };
             ctx.report.tocFields += 1;
-          } else {
+          } else if (kind !== 'page') {
+            // PAGE/NUMPAGES import as live fields — never counted as
+            // dropped content.
             countField(ctx, kind, instr);
           }
         } else if (type === 'end') {
           const popped = ctx.fieldInstr.pop() ?? '';
           ctx.fieldDepth = Math.max(0, ctx.fieldDepth - 1);
           if (fieldKind(popped) === 'toc') ctx.tocEnd = true;
+          else if (fieldKind(popped) === 'page' && !ctx.tocCapture) {
+            // M-PAGEFIELD: the field IMPORTS as the live node — the
+            // cached digits between separate/end stay suppressed.
+            const keyword = popped.trim().split(/\s+/)[0]?.toUpperCase() ?? 'PAGE';
+            pieces.push({ type: 'pageField', attrs: { kind: keyword === 'NUMPAGES' ? 'pages' : 'page' } });
+            hasContent = true;
+          }
         }
         break;
       }
@@ -847,8 +856,13 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
           });
           break;
         }
+        if (kind === 'page') {
+          // M-PAGEFIELD: the field IMPORTS as the live node.
+          const keyword = instr.trim().split(/\s+/)[0]?.toUpperCase() ?? 'PAGE';
+          content.push({ type: 'pageField', attrs: { kind: keyword === 'NUMPAGES' ? 'pages' : 'page' } });
+          break;
+        }
         countField(ctx, kind, instr);
-        if (kind === 'page') break; // cached digits suppressed
         for (const run of oKids(kid, 'r')) {
           const format = runFormatFromRPr(oSub(run, 'rPr'), ctx);
           content.push(...mapRunChildren(run, format, ctx, rels).pieces);

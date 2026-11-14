@@ -109,7 +109,7 @@ function KeywordsField({ chips, pending, onPendingChange, onCommit, onRemove }: 
     <div className="flex items-start gap-2 text-sm">
       <span className="mt-1.5 w-20 flex-none text-muted-foreground">Keywords</span>
       <div
-        className="flex min-h-8 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-muted px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50"
+        className="flex min-h-8 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent px-2 py-1 transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50 dark:bg-input/30"
         onClick={(e) => { if (e.target === e.currentTarget) inputRef.current?.focus(); }}
       >
         {chips.map((chip, i) => (
