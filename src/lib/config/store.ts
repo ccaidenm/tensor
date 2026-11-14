@@ -64,6 +64,10 @@ interface ConfigStore {
   /** M-PRINT: the preview modal's last destination (the segmented
    *  control's memory). */
   setPrintLastDestination: (value: 'printer' | 'pdf') => void;
+  /** M-PRINT: the last-used duplex setting (the picker's seed). */
+  setPrintLastDuplex: (
+    value: 'one-sided' | 'two-sided-long-edge' | 'two-sided-short-edge',
+  ) => void;
 
   loadConfig: (raw: unknown) => void;
 }
@@ -91,6 +95,14 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         print: { ...state.config.print, lastDestination: value },
+      },
+    })),
+
+  setPrintLastDuplex: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        print: { ...state.config.print, lastDuplex: value },
       },
     })),
 

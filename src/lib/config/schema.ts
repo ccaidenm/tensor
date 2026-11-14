@@ -159,7 +159,12 @@ export const ConfigSchema = z.object({
    *  options + commit action only. */
   print: z.object({
     lastDestination: z.enum(['printer', 'pdf']).default('printer'),
-  }).default({ lastDestination: 'printer' }),
+    /** The last-used duplex setting — the picker's seed (no
+     *  "printer default" option: a concrete choice, remembered). */
+    lastDuplex: z
+      .enum(['one-sided', 'two-sided-long-edge', 'two-sided-short-edge'])
+      .default('one-sided'),
+  }).default({ lastDestination: 'printer', lastDuplex: 'one-sided' }),
   /** M-META: the user's own identity — the default AUTHOR for new
    *  documents' metadata. Empty = unset: nothing is baked into files
    *  the user didn't explicitly save with their name (privacy-first;

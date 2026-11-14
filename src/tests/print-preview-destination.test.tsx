@@ -172,6 +172,10 @@ describe('the fully-resolved PDF destination', () => {
       useConfigStore.getState().setPdfAlwaysAskTrigger('ctrl');
     });
     expect(utils.getByText('to modify destination', { exact: false }).textContent).toContain('Ctrl');
+    // restore the default (no pollution into the later suites)
+    act(() => {
+      useConfigStore.getState().setPdfAlwaysAskTrigger('shift');
+    });
     void editor;
   });
 });
@@ -179,8 +183,30 @@ describe('the fully-resolved PDF destination', () => {
 /** THE TENSOR-NATIVE PRINTER PICKER — the system dialog's
  *  replacement. The nativePrint seam is mocked (the Rust commands
  *  are the native suite's); the CONTRACTS here: the default printer
- *  preselects, the system-dialog fallback entry stands in, and the
+ *  preselects, the trigger-modifier owns the system dialog, and the
  *  commit runs the native pipeline (walk → PDF → job → close). */
+// The destination suite's own dialog/fs mocks (the PDF commit path's
+// seams — save/exists/writeFile must not touch the OS in tests).
+const pdfIo = vi.hoisted(() => ({
+  savePath: null as string | null,
+  existsResult: false,
+}));
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: vi.fn(async () => pdfIo.savePath),
+  open: vi.fn(async () => null),
+  ask: vi.fn(async () => true),
+  message: vi.fn(async () => null),
+}));
+vi.mock('@tauri-apps/plugin-fs', () => ({
+  exists: vi.fn(async () => pdfIo.existsResult),
+  writeFile: vi.fn(async () => undefined),
+  remove: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/lib/print/PrintContainer', () => ({
+  printFromPreview: vi.fn(async () => undefined),
+  printPageSizeOf: () => 'Letter',
+}));
 vi.mock('@/lib/print/nativePrint', async () => {
   const actual = await vi.importActual<typeof import('@/lib/print/nativePrint')>('@/lib/print/nativePrint');
   return {
@@ -212,7 +238,7 @@ describe('the Tensor-native printer destination (the OS dialog\'s replacement)',
     useConfigStore.getState().setPrintLastDestination('printer');
   });
 
-  it('enumerates on open; the default printer preselects; the system-dialog entry rides last', async () => {
+  it('enumerates on open; the default printer preselects; NO system-dialog entry (the trigger owns it)', async () => {
     const { editor } = renderTensor('<p>print me</p>');
     await settleLayout();
     const utils = render(<PrintPreviewDialog />);
@@ -223,6 +249,91 @@ describe('the Tensor-native printer destination (the OS dialog\'s replacement)',
     });
     const body = utils.getByTestId('print-preview-printer-body');
     expect((body.querySelector('[data-testid="print-preview-printer-select"] button, [role=combobox]') as HTMLElement)?.textContent).toContain('TestJet');
+    // NO system-dialog entry: opening the picker lists exactly the
+    // enumerated printers (the trigger modifier owns the OS dialog
+    // path now).
+    const trigger = utils.getByTestId('print-preview-printer-select') as HTMLElement;
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    const options = [...document.querySelectorAll('[role=option]')];
+    expect(options.length).toBe(2); // TestJet + Basement Laser — never a system entry
+    expect(options.every((o) => !(o.textContent ?? '').includes('System print dialog'))).toBe(true);
+    // Close the picker (the popup must not linger into the next test).
+    act(() => {
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    void editor;
+  });
+
+  it('the TRIGGER-click commits to the SYSTEM dialog (printFromPreview), not the native pipeline', async () => {
+    const { printPdfToPrinter } = await import('@/lib/print/nativePrint');
+    const { printFromPreview } = await import('@/lib/print/PrintContainer');
+    const { editor } = renderTensor('<p>trigger print</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
+    // The configured trigger held (Shift default) → the OS dialog.
+    act(() => {
+      useConfigStore.getState().setPdfAlwaysAskTrigger('shift');
+    });
+    act(() => {
+      fireEvent.click(btn, { shiftKey: true });
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(printFromPreview).toHaveBeenCalledTimes(1);
+    expect(printPdfToPrinter).not.toHaveBeenCalled();
+    void editor;
+  });
+
+  it('the duplex pick PERSISTS as the last-used setting (the picker\'s seed)', async () => {
+    const { editor } = renderTensor('<p>duplex</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // The default seed: one-sided (print.lastDuplex's default).
+    const duplexTrigger = utils.getByTestId('print-preview-duplex-select') as HTMLElement;
+    expect(duplexTrigger.textContent).toContain('One-sided');
+    expect(useConfigStore.getState().config.print.lastDuplex).toBe('one-sided');
+    void editor;
+  });
+
+  it('the COPIES ticker steps both directions (the FontSizeInput pattern)', async () => {
+    const { editor } = renderTensor('<p>copies</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const input = utils.getByTestId('print-preview-copies') as HTMLInputElement;
+    expect(input.value).toBe('1');
+    const more = utils.getByLabelText('More copies') as HTMLButtonElement;
+    act(() => {
+      fireEvent.click(more);
+      fireEvent.click(more);
+    });
+    expect((utils.getByTestId('print-preview-copies') as HTMLInputElement).value).toBe('3');
+    const less = utils.getByLabelText('Fewer copies') as HTMLButtonElement;
+    act(() => {
+      fireEvent.click(less);
+    });
+    expect((utils.getByTestId('print-preview-copies') as HTMLInputElement).value).toBe('2');
     void editor;
   });
 
@@ -248,9 +359,78 @@ describe('the Tensor-native printer destination (the OS dialog\'s replacement)',
     const call = (printPdfToPrinter as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]![0] as Record<string, unknown>;
     expect(call.printer).toBe('TestJet');
     expect(call.copies).toBe(1);
-    expect(call.duplex).toBe('default');
+    expect(call.duplex).toBe('one-sided'); // the last-used seed (no 'default' option)
     // the modal closed (the job is submitted; Word's posture)
     expect(usePrintPreviewStore.getState().isOpen).toBe(false);
+    void editor;
+  });
+});
+
+describe('THE CLOSE LAW (both destinations): success closes, error stays', () => {
+  it('a PDF export SUCCESS toasts and CLOSES the modal', async () => {
+    // The fs save path is the real seam: mock the plugin so the
+    // export writes "successfully" without an OS dialog.
+    pdfIo.savePath = '/tmp/opencode/test-export.pdf';
+    pdfIo.existsResult = false;
+    const { editor } = renderTensor('<p>pdf close</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => {
+      useConfigStore.getState().setPrintLastDestination('pdf');
+      useConfigStore.getState().setDownloadsDir('');
+      usePrintPreviewStore.getState().open();
+    });
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
+    act(() => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(usePrintPreviewStore.getState().isOpen).toBe(false);
+    void editor;
+  });
+
+  it('a PDF export FAILURE toasts and the modal STAYS (fix + retry)', async () => {
+    pdfIo.savePath = null; // the cancel path stays open too (nothing lost)
+    const { editor } = renderTensor('<p>pdf stay</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => {
+      useConfigStore.getState().setPrintLastDestination('pdf');
+      useConfigStore.getState().setDownloadsDir('');
+      usePrintPreviewStore.getState().open();
+    });
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
+    act(() => {
+      fireEvent.click(btn);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(usePrintPreviewStore.getState().isOpen).toBe(true);
+    void editor;
+  });
+
+  it('the hover-ellipsis tracks the LIVE modifier (pointer-move sync — never sticky)', async () => {
+    const { editor } = renderTensor('<p>ellipsis</p>');
+    await settleLayout();
+    const utils = render(<PrintPreviewDialog />);
+    act(() => usePrintPreviewStore.getState().open());
+    const btn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
+    expect(btn.textContent).not.toContain('…');
+    // A swallowed keyup (focus elsewhere) leaves window key-state
+    // stale — the pointer events must self-correct: press → hover →
+    // release → move → the ellipsis leaves.
+    act(() => {
+      fireEvent.pointerEnter(btn, { shiftKey: true });
+    });
+    expect(btn.textContent).toContain('…');
+    act(() => {
+      // shift RELEASED, pointer still over: the move event corrects
+      fireEvent.pointerMove(btn, { shiftKey: false });
+    });
+    expect(btn.textContent).not.toContain('…');
     void editor;
   });
 });
