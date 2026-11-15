@@ -63,6 +63,7 @@ import {
   FileDown,
   FileText,
   Printer,
+  Proportions,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -500,6 +501,16 @@ export const COMMANDS: CommandAction[] = [
     group: 'navigate',
     keywords: ['properties', 'metadata', 'title', 'author', 'subject', 'keywords', 'comments', 'document', 'info'],
     run: () => useDocumentPropertiesStore.getState().open(),
+  },
+  // #58 — the ONE page-setup surface (paper/orientation/margins with
+  // an Apply-to scope), palette-reachable like its sibling dialogs.
+  {
+    id: 'pageSetup',
+    title: 'Page Setup',
+    icon: Proportions,
+    group: 'navigate',
+    keywords: ['page', 'setup', 'paper', 'size', 'orientation', 'margins', 'section', 'landscape', 'portrait'],
+    run: () => useDocumentPropertiesStore.getState().openPageSetup(),
   },
   {
     id: 'documentStatistics',
@@ -969,6 +980,13 @@ export const COMMANDS: CommandAction[] = [
     group: 'format',
     shortcutId: 'insertPageBreak',
     keywords: ['page', 'break', 'insert', 'new page'],
+  }),
+  editorCommand('insertSectionBreak', {
+    title: 'Insert Section Break',
+    icon: SeparatorHorizontal,
+    group: 'format',
+    shortcutId: 'insertSectionBreak',
+    keywords: ['section', 'break', 'insert', 'new section'],
   }),
   editorCommand('insertLink', {
     title: 'Insert Hyperlink',

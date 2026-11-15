@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
+import { applyPageSetup } from '@/lib/editor/sections';
 import {
   MEASUREMENT_UNITS,
   PAGE_SIZES,
@@ -39,7 +40,6 @@ export function CustomPageSizeDialog() {
   const isOpen = useDocumentPropertiesStore((s) => s.customSizeIsOpen);
   const closeCustomSize = useDocumentPropertiesStore((s) => s.closeCustomSize);
   const pageSetup = useDocumentStore((s) => s.pageSetup);
-  const setPageSetup = useDocumentStore((s) => s.setPageSetup);
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   const setMeasurementUnit = useConfigStore((s) => s.setMeasurementUnit);
 
@@ -76,10 +76,16 @@ export function CustomPageSizeDialog() {
       hPt >= MIN_PT && hPt <= MAX_PT
     ) {
       const preset = findMatchingPreset(wPt, hPt);
+      // #58 — DOCUMENT-WIDE (the ribbon quick controls' scope): the
+      // size merges into every section + the store in one commit.
       if (preset) {
-        setPageSetup({ ...pageSetup, pageSize: preset });
+        applyPageSetup('document', { ...pageSetup, pageSize: preset }, { pageSize: preset });
       } else {
-        setPageSetup({ ...pageSetup, pageSize: 'custom', customWidth: wPt, customHeight: hPt });
+        applyPageSetup(
+          'document',
+          { ...pageSetup, pageSize: 'custom', customWidth: wPt, customHeight: hPt },
+          { pageSize: 'custom', customWidth: wPt, customHeight: hPt },
+        );
       }
     }
     closeCustomSize();

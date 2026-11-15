@@ -5,7 +5,7 @@ import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
-import { MarginsDialog } from './components/dialogs/MarginsDialog';
+import { PageSetupDialog } from './components/dialogs/PageSetupDialog';
 import { DocumentStatisticsDialog } from './components/dialogs/DocumentStatisticsDialog';
 import { CustomPageSizeDialog } from './components/dialogs/CustomPageSizeDialog';
 import { StyleDialog } from './components/dialogs/StyleDialog';
@@ -216,7 +216,10 @@ function App() {
       <Toaster />
       <DocumentStatisticsDialog />
       <CustomPageSizeDialog />
-      <MarginsDialog />
+      {/* #58 — the ONE Page Setup dialog (paper/orientation/margins
+          with an Apply-to scope: whole document / this section / this
+          point forward). */}
+      <PageSetupDialog />
       {/* Spell check: the provider-choice consent surface + the
           personal dictionary manager (both store-driven, one mount). */}
       <SpellSetupDialog />

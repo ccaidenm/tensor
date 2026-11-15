@@ -23,20 +23,28 @@ export function HeaderFooterTools() {
   const inBand = useEditorState({
     editor,
     selector: ({ editor: e }) => {
-      if (!e) return { inBand: false, first: false };
+      if (!e) return { inBand: false, first: false, sectionId: null };
       const { $from } = e.state.selection;
       let inBand = false;
       let variant: 'default' | 'first' = 'default';
+      let sectionId: string | null = null;
       for (let d = $from.depth; d > 0; d--) {
         const name = $from.node(d).type.name;
         if (name === 'headerBlock' || name === 'footerBlock') {
           inBand = true;
           variant = $from.node(d).attrs.variant === 'first' ? 'first' : 'default';
+          // #58 — the WORKING section: a tagged container's tag rides
+          // with the selection (Go to Header/Footer stays in it).
+          const tag = $from.node(d).attrs.sectionId;
+          sectionId = typeof tag === 'string' && tag ? tag : null;
         }
       }
-      return { inBand, first: inBand && variant === 'first' };
+      return { inBand, first: inBand && variant === 'first', sectionId };
     },
   });
+  // The selector's shape (inBand/first) is consumed below under the
+  // hook's historical name — the alias keeps the JSX untouched.
+  const sectionId = inBand?.sectionId ?? null;
 
   const differentFirstPage = settings?.differentFirstPage ?? false;
 
@@ -45,13 +53,22 @@ export function HeaderFooterTools() {
     const first = differentFirstPage;
     // Under differentFirstPage, focus the FIRST-page region when
     // possible (falling back to whatever exists) — Word's flow.
+    // #58: the WORKING section's containers come first (a tagged
+    // override the selection sits in — jumping to the doc default
+    // would yank the user out of their section).
+    const workingSection = sectionId ?? undefined;
     const target =
+      (workingSection
+        ? findBandContainer(editor, which, first ? 'first' : 'default', workingSection) ??
+          findBandContainer(editor, which, first ? 'default' : 'first', workingSection)
+        : null) ??
       (findBandContainer(editor, which, first ? 'first' : 'default') ??
         findBandContainer(editor, which, first ? 'default' : 'first')) ??
       null;
     if (target) {
       const variant = target.node.attrs.variant === 'first' ? 'first' : 'default';
-      focusBand(editor, which, variant);
+      const tag = typeof target.node.attrs.sectionId === 'string' ? target.node.attrs.sectionId : null;
+      focusBand(editor, which, variant, tag ?? undefined);
     }
   };
 

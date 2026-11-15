@@ -24,7 +24,7 @@ beforeEach(() => {
   useDocumentStore.setState({
     pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
   });
-  useDocumentPropertiesStore.setState({ marginsIsOpen: false, customSizeIsOpen: false });
+  useDocumentPropertiesStore.setState({ pageSetupIsOpen: false, customSizeIsOpen: false });
   useConfigStore.setState((state) => ({
     config: {
       ...state.config,
@@ -121,14 +121,14 @@ describe('View > Paginated / Pageless toggle', () => {
 });
 
 describe('Layout tab page-geometry controls in pageless mode', () => {
-  it('pageless: Paper Size / Orientation / Margins disabled; Page Background stays live', async () => {
+  it('pageless: Page Setup / Orientation / Paper Size disabled; Page Background stays live', async () => {
     harness('<p>hello world</p>');
     await settle();
 
     // Paginated: everything live.
-    expect(button('Margins')!.disabled).toBe(false);
-    expect(button('Orientation')!.disabled).toBe(false);
-    expect(button('Paper Size')).not.toBeNull();
+    expect(button('Page Setup')!.disabled).toBe(false);
+    expect(button('Orientation (whole document)')!.disabled).toBe(false);
+    expect(button('Paper Size (whole document)')).not.toBeNull();
 
     act(() => {
       fireEvent.click(button('Paginated / Pageless')!);
@@ -136,9 +136,9 @@ describe('Layout tab page-geometry controls in pageless mode', () => {
     await settle();
 
     // Pageless: the page-geometry controls are disabled, NOT removed.
-    expect(button('Margins')!.disabled).toBe(true);
-    expect(button('Orientation')!.disabled).toBe(true);
-    expect(button('Paper Size')!.disabled).toBe(true);
+    expect(button('Page Setup')!.disabled).toBe(true);
+    expect(button('Orientation (whole document)')!.disabled).toBe(true);
+    expect(button('Paper Size (whole document)')!.disabled).toBe(true);
     expect(button('Page Background')!.disabled).toBe(false);
     expect(button('Page Background options')!.disabled).toBe(false);
 
@@ -147,12 +147,12 @@ describe('Layout tab page-geometry controls in pageless mode', () => {
       fireEvent.click(button('Paginated / Pageless')!);
     });
     await settle();
-    expect(button('Margins')!.disabled).toBe(false);
-    expect(button('Orientation')!.disabled).toBe(false);
-    expect(button('Paper Size')!.disabled).toBe(false);
+    expect(button('Page Setup')!.disabled).toBe(false);
+    expect(button('Orientation (whole document)')!.disabled).toBe(false);
+    expect(button('Paper Size (whole document)')!.disabled).toBe(false);
   });
 
-  it('pageless: a disabled Margins button opens nothing (the guard holds)', async () => {
+  it('pageless: a disabled Page Setup button opens nothing (the guard holds)', async () => {
     harness('<p>hello world</p>');
     await settle();
     act(() => {
@@ -163,8 +163,8 @@ describe('Layout tab page-geometry controls in pageless mode', () => {
     // jsdom happily "clicks" disabled buttons via .click(), but React
     // never fires the handler — pin that the dialog stays closed even
     // under a forced dispatch.
-    button('Margins')!.click();
-    expect(useDocumentPropertiesStore.getState().marginsIsOpen).toBe(false);
+    button('Page Setup')!.click();
+    expect(useDocumentPropertiesStore.getState().pageSetupIsOpen).toBe(false);
   });
 });
 

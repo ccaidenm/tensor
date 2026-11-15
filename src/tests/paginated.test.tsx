@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, fireEvent } from '@testing-library/react';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
-import { MarginsDialog } from '@/components/dialogs/MarginsDialog';
+import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
 import { renderTensor, renderTensorInScrollContainer, GEOMETRY, settleLayout } from './harness';
 import { DEFAULT_MARGINS, MARGIN_PRESETS, PAGE_GAP, toLayoutOptions, type Margins } from '@/lib/document/pageSetup';
 import { DocumentFileSchema } from '@/lib/document/schema';
@@ -25,7 +25,7 @@ beforeEach(() => {
   useDocumentStore.setState({
     pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
   });
-  useDocumentPropertiesStore.setState({ marginsIsOpen: false });
+  useDocumentPropertiesStore.setState({ pageSetupIsOpen: false });
 });
 
 afterEach(() => {
@@ -280,7 +280,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
   it('l. margins Apply reflows without remount; pageCount follows the content box', async () => {
     const utils = renderTensor(threePageDoc);
     // The dialog rides alongside the editor exactly as App mounts it.
-    render(<MarginsDialog />);
+    render(<PageSetupDialog />);
     await settle();
 
     const stackBefore = document.querySelector('[data-testid="paginated-stack"]');
@@ -288,7 +288,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
     expect(pageSheets()).toHaveLength(3); // 864px content → 54 lines/page
 
     act(() => {
-      useDocumentPropertiesStore.getState().openMargins();
+      useDocumentPropertiesStore.getState().openPageSetup();
     });
     const presetBtn = [...document.querySelectorAll('button')].find((b) =>
       b.textContent!.startsWith('Narrow')
@@ -314,14 +314,14 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
     expect(document.querySelector('[data-page-index="0"]')).toBe(sheetBefore);
 
     act(() => {
-      useDocumentPropertiesStore.getState().closeMargins();
+      useDocumentPropertiesStore.getState().closePageSetup();
     });
     utils.unmount();
   });
 
   it('m. A4 (paper size) + Narrow (dialog Apply) — one reflow each, no remount; schema round-trip carries both', async () => {
     const utils = renderTensor(threePageDoc);
-    render(<MarginsDialog />);
+    render(<PageSetupDialog />);
     await settle();
 
     const sheetBefore = document.querySelector('[data-page-index="0"]') as HTMLElement;
@@ -335,7 +335,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
 
     // Margins go through the commit-gated dialog.
     act(() => {
-      useDocumentPropertiesStore.getState().openMargins();
+      useDocumentPropertiesStore.getState().openPageSetup();
     });
     const presetBtn = [...document.querySelectorAll('button')].find((b) =>
       b.textContent!.startsWith('Narrow')
@@ -369,7 +369,7 @@ describe('margins (M5.13 presets, M6 Apply dialog)', () => {
     expect(rtSetup.margins).toEqual(MARGIN_PRESETS.Narrow.margins);
 
     act(() => {
-      useDocumentPropertiesStore.getState().closeMargins();
+      useDocumentPropertiesStore.getState().closePageSetup();
     });
     utils.unmount();
   });

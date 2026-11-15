@@ -39,6 +39,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
 
   { id: 'insertLink', label: 'Hyperlink', keys: 'ctrl+k', context: 'editor', category: 'Insert' },
   { id: 'insertPageBreak', label: 'Page Break', keys: 'ctrl+enter', context: 'editor', category: 'Insert' },
+  // #58 — no default key (the page break owns ctrl+enter; the ribbon
+  // and the palette carry the section break until a key is chosen).
+  { id: 'insertSectionBreak', label: 'Section Break', keys: '', context: 'editor', category: 'Insert' },
   // Word's equation shortcut convention (Alt+=).
   { id: 'insertEquation', label: 'Equation', keys: 'alt+=', context: 'editor', category: 'Insert' },
 
