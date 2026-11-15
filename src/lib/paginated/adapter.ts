@@ -8,10 +8,12 @@ import type {
   ParagraphBlock,
   ReferenceTableBlock,
   Run,
+  SectionBoundary,
   SemanticDoc,
   TableBlock,
   TextStyle,
 } from '@tensor-editor/engine';
+import { toLayoutOptions, type PageSetup } from '@/lib/document/pageSetup';
 import type { TextAlign } from './positionMap';
 import type { StyleDefinition, StyleRegistrySnapshot } from '@/lib/styles/types';
 import { headingStyleId } from '@/lib/styles/types';
@@ -82,6 +84,15 @@ export type { TextAlign } from './positionMap';
  * does not support yet degrades gracefully — a real adapter/engine bug
  * is a different exception and must crash loudly in dev.
  */
+/** #58 — the defensive page-setup fallback (a caller that skips the
+ *  pageSetup arg; the real callers pass the store's per-call read). */
+const FALLBACK_PAGE_SETUP: PageSetup = {
+  pageSize: 'Letter',
+  orientation: 'portrait',
+  margins: { top: 72, bottom: 72, left: 72, right: 72 },
+  pageGap: 32,
+};
+
 export class UnsupportedDocError extends Error {
   constructor(message: string) {
     super(message);
@@ -250,6 +261,30 @@ export interface AdapterResult {
   bandBlocks: AdapterBlock[];
   /** M-HEADER-FOOTER-2 — block ids that belong to bands (the set form). */
   bandBlockIds: Set<string>;
+  /**
+   * #58 SECTIONS — the resolved section-boundary table for the engine
+   * (LayoutOptions.sections). ABSENT when the doc carries no
+   * sectionBreak nodes (the additive law: the engine then runs ONE
+   * section of the layout opts — today's shape exactly). Each
+   * boundary is a SECTION START: afterBlock −1 carries section 0's
+   * geometry (the FIRST break's attrs — Word's preceding-section
+   * spelling resolved forward), each following boundary the NEXT
+   * break's attrs, and the implicit final section rides the layout
+   * opts (the doc defaults — the engine appends it).
+   */
+  sections?: SectionBoundary[];
+  /**
+   * #58 — the NPC sidecar (formatting marks): every break atom with
+   * the block following it. VIEW-ONLY ink (the PaginatedView paints
+   * the badges when formatting marks are shown); the print/PDF walks
+   * never read it — markers never print.
+   */
+  breakFacts: {
+    kind: 'pageBreak' | 'sectionBreak';
+    type: 'nextPage' | 'continuous';
+    pos: number;
+    afterBlockId: string | null;
+  }[];
 }
 
 /**
@@ -1452,6 +1487,15 @@ export function pmDocToSemantic(
    * when the real total widens. Absent on cold start.
    */
   fieldTotal?: number,
+  /**
+   * #58 SECTIONS — the document's page setup (read PER CALL, L4): the
+   * FINAL section's props (the store law — the sectionBreak nodes
+   * carry sections 0..n−1; the content after the last break rides the
+   * store). The adapter resolves the COMPLETE boundary table with it;
+   * absent → the Letter/Normal fallback (defensive — real callers
+   * pass the store's pageSetup).
+   */
+  pageSetup?: PageSetup,
 ): AdapterResult {
   // THE REGISTRY EPOCH (M-STYLES STEP 3): the shell-side mirror of the
   // engine's baseStyleHash. A baseStyle change OR any definition edit
@@ -1480,6 +1524,43 @@ export function pmDocToSemantic(
   const dropped = new Set<string>();
   let pendingBreakBefore = false;
 
+  // #58 — the sectionBreak nodes in doc order (the walk collects;
+  // the resolution below turns them into the engine's table).
+  const sectionBreaksCollected: {
+    afterBlock: number;
+    setup: PageSetup | null;
+    type: 'nextPage' | 'continuous';
+  }[] = [];
+
+  // #58 — the NPC sidecar: every pageBreak/sectionBreak atom with the
+  // block following it (the view paints formatting-mark badges just
+  // above that block's first line — view-only ink, never printed: the
+  // print walk reads the engine's layout, not this sidecar).
+  const breakFacts: {
+    kind: 'pageBreak' | 'sectionBreak';
+    type: 'nextPage' | 'continuous';
+    pos: number;
+    afterBlockId: string | null;
+  }[] = [];
+  let pendingBreakFact: { kind: 'pageBreak' | 'sectionBreak'; type: 'nextPage' | 'continuous' } | null = null;
+
+  // #58 — the PRE-SCAN: a band container may carry a sectionId whose
+  // break node sits LATER in doc order (band containers at the doc
+  // start precede every break), so the tag→section-index map must be
+  // known before the walk reaches either. One cheap top-level pass
+  // (breaks are top-level atoms). Stale tags (a break deleted without
+  // the merge-on-delete law's cleanup) resolve to the doc default —
+  // content preserved, never dropped.
+  const sectionIdToIndex = new Map<string, number>();
+  pm.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const tag = node.attrs?.sectionId;
+      if (typeof tag === 'string' && tag && !sectionIdToIndex.has(tag)) {
+        sectionIdToIndex.set(tag, sectionIdToIndex.size);
+      }
+    }
+  });
+
   // M-HEADER-FOOTER-2 — the band routing: children of headerBlock/
   // footerBlock land in the engine's BandSet (never in flow order)
   // while their AdapterBlocks ride BOTH `blocks` (the shared sidecar —
@@ -1490,18 +1571,27 @@ export function pmDocToSemantic(
     firstHeader: Block[];
     firstFooter: Block[];
   } = { header: [], footer: [], firstHeader: [], firstFooter: [] };
+  // #58 — the per-section band buckets (tagged containers): section
+  // index → its override regions, merged in doc order.
+  const perSectionBands = new Map<
+    number,
+    { header: Block[]; footer: Block[]; firstHeader: Block[]; firstFooter: Block[] }
+  >();
   const bandBlocks: AdapterBlock[] = [];
   const bandBlockIds = new Set<string>();
   let sawBandNode = false;
 
-  /** Commit one band child: semantic → its region, adapter → both lists. */
+  /** Commit one band child: semantic → its region (the doc default by
+   *  default; #58 tagged overrides push into their section's bucket),
+   *  adapter → both lists. */
   const pushBand = (
     conv: CachedConversion,
     node: PMNode,
     pos: number,
     region: 'header' | 'footer' | 'firstHeader' | 'firstFooter',
+    semanticList: Block[] = bandSemantic[region],
   ): void => {
-    bandSemantic[region].push(conv.semantic);
+    semanticList.push(conv.semantic);
     const adapter = { ...conv.adapter, from: pos, to: pos + node.nodeSize };
     blocks.push(adapter);
     bandBlocks.push(adapter);
@@ -1566,6 +1656,12 @@ export function pmDocToSemantic(
     const block = pendingBreakBefore
       ? { ...conv.semantic, flow: { breakBefore: 'page' as const } }
       : conv.semantic;
+    // #58 — a pending pageBreak NPC attaches to THIS block (the block
+    // it forces — the marker paints just above its first line).
+    if (pendingBreakFact) {
+      breakFacts.push({ ...pendingBreakFact, pos, afterBlockId: block.id });
+      pendingBreakFact = null;
+    }
     pendingBreakBefore = false;
     semantic.push(block);
     blocks.push({ ...conv.adapter, from: pos, to: pos + node.nodeSize });
@@ -1671,20 +1767,58 @@ export function pmDocToSemantic(
       sawBandNode = true;
       const variant: HeaderFooterVariant = node.attrs?.variant === 'first' ? 'first' : 'default';
       const region = regionOf(name, variant)!;
-      node.forEach((child: PMNode, rel: number) => {
-        const childName = child.type.name;
-        if (childName !== 'paragraph' && childName !== 'heading') {
-          throw new UnsupportedDocError(
-            `[adapter] unsupported band child '${childName}' inside ${name} at offset ${offset}: band content is paragraph/heading only`,
+      // #58 — the SECTION TAG: a container tagged with a known
+      // sectionId feeds THAT section's override; untagged (or stale —
+      // the break is gone) containers are the DOC DEFAULT every
+      // non-overriding section inherits (the tagged-containers
+      // decision). Two containers with the same key merge in doc order.
+      const tag = node.attrs?.sectionId;
+      const sectionIndex =
+        typeof tag === 'string' && tag && sectionIdToIndex.has(tag)
+          ? sectionIdToIndex.get(tag)!
+          : null;
+      const pushTo = (region2: 'header' | 'footer' | 'firstHeader' | 'firstFooter'): void => {
+        node.forEach((child: PMNode, rel: number) => {
+          const childName = child.type.name;
+          if (childName !== 'paragraph' && childName !== 'heading') {
+            throw new UnsupportedDocError(
+              `[adapter] unsupported band child '${childName}' inside ${name} at offset ${offset}: band content is paragraph/heading only`,
+            );
+          }
+          pushBand(
+            projected(child, { kind: childName, indentLeft: 0 }, offset + 1 + rel),
+            child,
+            offset + 1 + rel,
+            region2,
           );
-        }
-        pushBand(
-          projected(child, { kind: childName, indentLeft: 0 }, offset + 1 + rel),
-          child,
-          offset + 1 + rel,
-          region,
-        );
-      });
+        });
+      };
+      if (sectionIndex === null) {
+        pushTo(region);
+      } else {
+        const bucket = perSectionBands.get(sectionIndex) ?? {
+          header: [],
+          footer: [],
+          firstHeader: [],
+          firstFooter: [],
+        };
+        perSectionBands.set(sectionIndex, bucket);
+        node.forEach((child: PMNode, rel: number) => {
+          const childName = child.type.name;
+          if (childName !== 'paragraph' && childName !== 'heading') {
+            throw new UnsupportedDocError(
+              `[adapter] unsupported band child '${childName}' inside ${name} at offset ${offset}: band content is paragraph/heading only`,
+            );
+          }
+          pushBand(
+            projected(child, { kind: childName, indentLeft: 0 }, offset + 1 + rel),
+            child,
+            offset + 1 + rel,
+            region,
+            bucket[region],
+          );
+        });
+      }
       return;
     }
 
@@ -1693,6 +1827,34 @@ export function pmDocToSemantic(
       // (nothing follows) has no block to force — the engine derives
       // pages from placed lines, so it is simply skipped.
       pendingBreakBefore = true;
+      // #58 — the NPC sidecar (the marker paints just above the
+      // following block's first line).
+      pendingBreakFact = { kind: 'pageBreak' as const, type: 'nextPage' as const };
+      return;
+    }
+
+    if (name === 'sectionBreak') {
+      // #58 SECTIONS — the node is NOT part of the IR (the pageBreak
+      // law): it is collected as a section boundary. `afterBlock` = the
+      // last projected block's index (−1 when the break opens the doc);
+      // the RESOLUTION below turns the collected breaks into the
+      // engine's section-start table. The engine's boundary law does
+      // the forced close — no pendingBreakBefore here.
+      sectionBreaksCollected.push({
+        afterBlock: semantic.length - 1,
+        setup: (node.attrs?.setup ?? null) as PageSetup | null,
+        type: node.attrs?.type === 'continuous' ? 'continuous' : 'nextPage',
+      });
+      // #58 — the NPC sidecar: the break's kind, type, and the block
+      // FOLLOWING it (the view paints the marker just above that
+      // block's first line — at a page top for nextPage, mid-flow for
+      // continuous). The position rides for the pageless surface.
+      breakFacts.push({
+        kind: 'sectionBreak',
+        type: node.attrs?.type === 'continuous' ? 'continuous' : 'nextPage',
+        pos: offset,
+        afterBlockId: semantic[semantic.length - 1]?.id ?? null,
+      });
       return;
     }
 
@@ -1845,8 +2007,78 @@ export function pmDocToSemantic(
         ...(bandSemantic.firstHeader.length ? { firstHeader: bandSemantic.firstHeader } : {}),
         ...(bandSemantic.firstFooter.length ? { firstFooter: bandSemantic.firstFooter } : {}),
         ...(bandOptions?.differentFirstPage ? { differentFirstPage: true } : {}),
+        // #58 — the per-section overrides (only sections that carry
+        // tagged containers; every other section inherits).
+        ...(perSectionBands.size
+          ? {
+              perSection: Array.from(perSectionBands.entries()).map(([section, b]) => ({
+                section,
+                ...(b.header.length ? { header: b.header } : {}),
+                ...(b.footer.length ? { footer: b.footer } : {}),
+                ...(b.firstHeader.length ? { firstHeader: b.firstHeader } : {}),
+                ...(b.firstFooter.length ? { firstFooter: b.firstFooter } : {}),
+              })),
+            }
+          : {}),
       }
     : undefined;
 
-  return { doc: { blocks: semantic, baseStyle, bands }, blocks, bandBlocks, bandBlockIds };
+  // #58 — THE SECTION RESOLUTION: the collected breaks (each carrying
+  // the PRECEDING section's props — Word's sectPr spelling) become the
+  // engine's section-START table. Section 0 begins at the doc start
+  // with break 0's geometry; boundary k (k ≥ 1) sits after break k−1
+  // and carries break k's geometry; the FINAL section (after the last
+  // break) rides the layout opts — the engine appends the doc
+  // defaults itself (the store-level pageSetup IS the final section's,
+  // the store law). ABSENT when no breaks: the additive law.
+  let sections: SectionBoundary[] | undefined;
+  if (sectionBreaksCollected.length > 0) {
+    // A break without props (hand-crafted/legacy): continuity — the
+    // PREVIOUS section's geometry, else the doc defaults. The Section
+    // dialog is the fix-it surface.
+    const geometryOf = (setup: PageSetup | null, prev: PageSetup | null): SectionBoundary['geometry'] => {
+      const effective: PageSetup = setup ?? prev ?? (pageSetup ?? FALLBACK_PAGE_SETUP);
+      const lo = toLayoutOptions(effective);
+      return { page: lo.page, margins: lo.margins };
+    };
+    // THE COMPLETE TABLE (n breaks → n+1 sections): section 0 at the
+    // doc start (break 0's props), section k after break k−1 (break
+    // k's props), and the FINAL section after the LAST break riding
+    // the doc's pageSetup (the store law). The engine consumes it
+    // verbatim — no implicit append (it could not know the last
+    // break's position).
+    let prevSetup: PageSetup | null = sectionBreaksCollected[0]!.setup;
+    sections = [
+      {
+        afterBlock: -1,
+        geometry: geometryOf(sectionBreaksCollected[0]!.setup, null),
+      },
+      ...sectionBreaksCollected.slice(1).map((brk, j) => {
+        const geometry = geometryOf(brk.setup, prevSetup);
+        prevSetup = brk.setup ?? prevSetup;
+        return {
+          afterBlock: sectionBreaksCollected[j]!.afterBlock,
+          geometry,
+          // The crossed boundary's type = the break AT it (break j's
+          // node sits where section j+1 starts — its 'type' attr).
+          type: sectionBreaksCollected[j]!.type,
+        };
+      }),
+      {
+        afterBlock: sectionBreaksCollected[sectionBreaksCollected.length - 1]!.afterBlock,
+        geometry: geometryOf(pageSetup ?? null, prevSetup),
+        // The final boundary = the LAST break's position — its type.
+        type: sectionBreaksCollected[sectionBreaksCollected.length - 1]!.type,
+      },
+    ]
+  }
+
+  return {
+    doc: { blocks: semantic, baseStyle, bands },
+    blocks,
+    bandBlocks,
+    bandBlockIds,
+    breakFacts,
+    ...(sections ? { sections } : {}),
+  };
 }

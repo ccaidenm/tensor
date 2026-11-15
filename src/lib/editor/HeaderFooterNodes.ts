@@ -50,6 +50,20 @@ function createHeaderFooterNode({ name, tag, legacyTag }: HeaderFooterNodeOption
             'data-variant': attrs.variant === 'first' ? 'first' : 'default',
           }),
         },
+        // #58 SECTIONS — the section OVERRIDE tag: a container tagged
+        // with a sectionBreak's sectionId feeds THAT section's bands
+        // (Word's "this section's own header"); UNTAGGED containers are
+        // the doc default every non-overriding section inherits ("link
+        // to previous" by construction). The adapter resolves the tag
+        // to a section index; a stale tag (the break deleted) resolves
+        // to the doc default — content preserved. The merge-on-delete
+        // law drops tagged containers WITH their break (one undo step).
+        sectionId: {
+          default: null,
+          parseHTML: (el: HTMLElement) => el.getAttribute('data-section-id'),
+          renderHTML: (attrs: Record<string, unknown>) =>
+            attrs.sectionId ? { 'data-section-id': attrs.sectionId } : {},
+        },
       };
     },
 

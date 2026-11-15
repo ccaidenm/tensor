@@ -1,4 +1,5 @@
 import { fitDownImage, type LayoutResult, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
+import { pageIndexAtY, pageTops } from './pageStack';
 import type { AdapterBlock } from './adapter';
 import { alignOffset, blockWrapWidth } from './positionMap';
 
@@ -37,18 +38,23 @@ export function hitTest(
   localX: number,
   localY: number
 ): HitResult | null {
-  const page0 = result.pages[0];
-  if (!page0) return null;
-  const pageH = page0.size.height;
-  const stride = pageH + pageGap;
-  const cb = page0.contentBox;
-
-  let pageIndex = Math.floor(localY / stride);
-  // Gap ownership: the second half of a gap belongs to the next sheet.
-  if (localY - pageIndex * stride > pageH + pageGap / 2 && pageIndex < result.pages.length - 1) {
-    pageIndex += 1;
+  if (result.pages.length === 0) return null;
+  // #58 — per-page geometry: invert the CUMULATIVE tops table (pages
+  // may differ per section), then read the hit page's own contentBox.
+  const tops = pageTops(result.pages, pageGap);
+  let pageIndex = pageIndexAtY(tops, result.pages.length, localY);
+  {
+    const sec = result.pages[pageIndex]!;
+    const pageH = sec.size.height;
+    const pageEnd = tops[pageIndex]! + pageH;
+    // Gap ownership: the second half of a gap belongs to the next sheet.
+    if (localY > pageEnd + pageGap / 2 && pageIndex < result.pages.length - 1) {
+      pageIndex += 1;
+    }
   }
   pageIndex = Math.min(Math.max(pageIndex, 0), result.pages.length - 1);
+  const cb = result.pages[pageIndex]!.contentBox;
+  const pageTop = tops[pageIndex]!;
 
   const pageLines = result.lines.filter((l) => l.pageIndex === pageIndex);
   if (pageLines.length === 0) return null;
@@ -59,7 +65,7 @@ export function hitTest(
   // first/last flow clamps would misplace every margin click).
   const flowLines = pageLines.filter((l) => !l.band);
 
-  const y = localY - pageIndex * stride - cb.y;
+  const y = localY - pageTop - cb.y;
   // Declared BEFORE the band rule: the hoisted glyphWalk closes over
   // it, and the band rule calls glyphWalk — a TDZ violation here was
   // the every-band-click crash (caught by the M-3 caret test).

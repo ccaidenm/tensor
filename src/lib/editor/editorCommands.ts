@@ -17,6 +17,9 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   underline: (editor) => editor.commands.toggleUnderline(),
   strike: (editor) => editor.commands.toggleStrike(),
   insertPageBreak: (editor) => editor.commands.insertPageBreak(),
+  // #58 SECTIONS: the split-dance insert (the break seeds the store's
+  // pageSetup — nothing changes visually until the dialog edits props).
+  insertSectionBreak: (editor) => editor.commands.insertSectionBreak(),
   // M-EQ: inserts an empty display equation and NodeSelections it —
   // the selection opens the editor bubble (useEquationEditor).
   insertEquation: (editor) => editor.commands.insertEquation(),
