@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, PaintBucket } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -97,6 +98,9 @@ interface Draft {
    *  break-owned section's setup carries its own; unset inherits the
    *  doc default (the store's — the two-level band model). */
   pageColor: string;
+  /** M-FLOW — the DOCUMENT-LEVEL widow/orphan default (absent = ON,
+   * the engine's default; per-paragraph flow overrides). */
+  widowControl: boolean;
 }
 
 function snapshot(setup: PageSetup, unit: MeasurementUnit, docColor = ''): Draft {
@@ -112,6 +116,7 @@ function snapshot(setup: PageSetup, unit: MeasurementUnit, docColor = ''): Draft
       right: formatPt(setup.margins.right, unit),
     },
     pageColor: setup.pageColor ?? docColor,
+    widowControl: setup.widowControl ?? true,
   };
 }
 
@@ -144,6 +149,8 @@ function draftToSetup(draft: Draft, base: PageSetup, unit: MeasurementUnit): Pag
     orientation: draft.orientation,
     margins,
     pageColor: draft.pageColor,
+    // M-FLOW — the doc-level widow/orphan default rides every Apply.
+    widowControl: draft.widowControl,
     ...custom,
   };
 }
@@ -244,6 +251,7 @@ export function PageSetupDialog() {
       orientation: full.orientation,
       margins: full.margins,
       pageColor: full.pageColor,
+      widowControl: full.widowControl,
       ...(full.pageSize === 'custom'
         ? { customWidth: full.customWidth, customHeight: full.customHeight }
         : { customWidth: undefined, customHeight: undefined }),
@@ -488,6 +496,21 @@ export function PageSetupDialog() {
                   </Button>
                 ))}
               </div>
+            </div>
+
+            {/* M-FLOW — the document-level widow/orphan default (Word's
+                layout option; off = natural splits everywhere a
+                paragraph doesn't carry its own override). */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Widow/orphan control</span>
+              <Switch
+                size="sm"
+                data-testid="page-setup-widow-control"
+                checked={draft.widowControl}
+                onCheckedChange={(checked: boolean) =>
+                  setDraft((d) => (d ? { ...d, widowControl: checked } : d))
+                }
+              />
             </div>
 
             {/* Margins — the CUSTOM row first (one ticker per edge,

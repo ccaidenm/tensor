@@ -180,3 +180,32 @@ describe('M-FLOW: the StyleDialog Pagination section (the style tier)', () => {
     expect(useStyleRegistryStore.getState().merged['heading-1']!.properties.keepNext).toBe(true);
   });
 });
+
+describe('M-FLOW: the Page Setup widow/orphan switch (the document default)', () => {
+  it('toggling off + Apply writes the store default; toLayoutOptions feeds the engine', async () => {
+    renderTensorInScrollContainer('<p>x</p>');
+    await settleLayout();
+    act(() => {
+      useDocumentStore.getState().setPageSetup({
+        pageSize: 'Letter',
+        margins: DEFAULT_MARGINS,
+        pageGap: PAGE_GAP,
+      });
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    render(<PageSetupDialog />);
+    const widowSwitch = document.querySelector('[data-testid="page-setup-widow-control"]') as HTMLElement;
+    expect(widowSwitch.getAttribute('aria-checked')).toBe('true'); // absent = ON (the engine default)
+    act(() => {
+      fireEvent.click(widowSwitch);
+    });
+    const apply = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!;
+    act(() => {
+      fireEvent.click(apply);
+    });
+    // ONE commit: the store's document default is off, and the layout
+    // options the engine receives follow.
+    expect(useDocumentStore.getState().pageSetup.widowControl).toBe(false);
+    expect(toLayoutOptions(useDocumentStore.getState().pageSetup).preventWidowsAndOrphans).toBe(false);
+  });
+});
