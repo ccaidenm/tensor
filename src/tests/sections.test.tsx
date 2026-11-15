@@ -6,7 +6,7 @@ import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import { toLayoutOptions, DEFAULT_MARGINS, MARGIN_PRESETS, PAGE_GAP, type PageSetup } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
-import { deleteSectionBreakNear, enableRegion } from '@/lib/editor/headerFooterCommands';
+import { deleteSectionBreakNear, enableRegion, relinkBand } from '@/lib/editor/headerFooterCommands';
 import { applyPageSetup } from '@/lib/editor/sections';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
@@ -1072,5 +1072,174 @@ describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
     });
     expect(setupOf().margins).toEqual(DEFAULT_MARGINS);
     expect(setupOf().pageColor ?? '').toBe('');
+  });
+});
+
+describe('Phase 10 — per-section header/footer unlink + relink', () => {
+  /** Insert a break and retag it with a KNOWN sectionId. */
+  function insertBreakTagged(
+    editor: NonNullable<ReturnType<typeof useDocumentStore.getState>['editor']>,
+    sectionId: string,
+  ): void {
+    act(() => {
+      editor.commands.insertSectionBreak();
+    });
+    const found = findBreak(editor);
+    expect(found).toBeTruthy();
+    act(() => {
+      editor.view.dispatch(
+        editor.state.tr.setNodeMarkup(found!.pos, undefined, {
+          ...found!.node.attrs,
+          sectionId,
+        }),
+      );
+    });
+  }
+
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('double-clicking an INHERITING section strip creates its own header (seeded from the inherited copy)', async () => {
+    const longText = '<p>' + 'word '.repeat(300) + '</p>';
+    const { editor } = renderTensor(
+      '<header-block><p>DOC HEADER</p></header-block>' + longText + '<div data-section-break></div>' + longText,
+    );
+    await settleLayout();
+    // The doc default header exists → every section inherits → the
+    // strips are LIVE (no slots).
+    expect(document.querySelector('[data-testid="hf-slot-header"]')).toBeNull();
+    // Double-click the header strip on a SECTION 1 page: the stack
+    // rect mocked to origin; page 1's top = pageHeight + gap.
+    const stack = document.querySelector('[data-testid="paginated-stack"]') as HTMLElement;
+    stack.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: 816, bottom: 5000, width: 816, height: 5000, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const page1Top = GEOMETRY.pageHeight + PAGE_GAP;
+    fireEvent.doubleClick(stack, { clientX: 300, clientY: page1Top + 40 });
+    // The override exists, tagged, seeded with the inherited COPY.
+    let found: { tag: string | null; text: string } | null = null;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'headerBlock' && node.attrs.sectionId) {
+        found = { tag: node.attrs.sectionId, text: node.textContent };
+        return false;
+      }
+      return true;
+    });
+    expect(found).not.toBeNull();
+    expect(found!.text).toBe('DOC HEADER');
+    // The doc default untouched (one container, untagged, still there).
+    let defaultCount = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'headerBlock' && !node.attrs.sectionId) defaultCount += 1;
+      return true;
+    });
+    expect(defaultCount).toBe(1);
+  });
+
+  it('double-clicking an OVERRIDING section strip word-selects normally (no duplicate)', async () => {
+    const longText = '<p>' + 'word '.repeat(300) + '</p>';
+    const { editor } = renderTensor(
+      '<header-block><p>DOC HEADER</p></header-block>' + longText + '<div data-section-break></div>' + longText,
+    );
+    // Give the break a sectionId + a tagged override (section 1's own).
+    const found = findBreak(editor);
+    act(() => {
+      editor.view.dispatch(
+        editor.state.tr.setNodeMarkup(found!.pos, undefined, { ...found!.node.attrs, sectionId: 'sec-x' }),
+      );
+    });
+    act(() => {
+      editor.commands.insertContentAt(0, {
+        type: 'headerBlock',
+        attrs: { variant: 'default', sectionId: 'sec-x' },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'OWN' }] }],
+      });
+    });
+    await settleLayout();
+    const stack = document.querySelector('[data-testid="paginated-stack"]') as HTMLElement;
+    stack.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, right: 816, bottom: 5000, width: 816, height: 5000, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const page1Top = GEOMETRY.pageHeight + PAGE_GAP;
+    const before = (() => {
+      let n = 0;
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'headerBlock' && node.attrs.sectionId === 'sec-x') n += 1;
+        return true;
+      });
+      return n;
+    })();
+    fireEvent.doubleClick(stack, { clientX: 300, clientY: page1Top + 40 });
+    const after = (() => {
+      let n = 0;
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'headerBlock' && node.attrs.sectionId === 'sec-x') n += 1;
+        return true;
+      });
+      return n;
+    })();
+    expect(after).toBe(before); // no duplicate — normal editing
+  });
+
+  it('Link to Previous re-links: the tagged override is deleted, the section inherits again', async () => {
+    const { editor } = renderTensor(threeSections);
+    insertBreakTagged(editor, 'sec-a');
+    // A tagged override for section 1.
+    act(() => {
+      editor.commands.insertContentAt(0, {
+        type: 'headerBlock',
+        attrs: { variant: 'default', sectionId: 'sec-a' },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'OWN' }] }],
+      });
+    });
+    const countTagged = () => {
+      let n = 0;
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'headerBlock' && node.attrs.sectionId === 'sec-a') n += 1;
+        return true;
+      });
+      return n;
+    };
+    expect(countTagged()).toBe(1);
+    // The grouping gap: PM merges sub-500ms-apart transactions into
+    // ONE history item — the setup trs + the relink would merge and
+    // one undo would revert everything at once (the real user's
+    // actions are seconds apart).
+    await new Promise((r) => setTimeout(r, 850));
+    // The caret INSIDE the tagged container → the Link to Previous
+    // button appears → click → the override is deleted (one undo step).
+    const container = (() => {
+      let pos: number | null = null;
+      editor.state.doc.descendants((node, p) => {
+        if (pos !== null) return false;
+        if (node.type.name === 'headerBlock' && node.attrs.sectionId === 'sec-a') {
+          pos = p;
+          return false;
+        }
+        return true;
+      });
+      return pos!;
+    })();
+    act(() => {
+      editor.commands.setTextSelection(container + 2); // inside its paragraph
+    });
+    // The Link to Previous toggle (the contextual tab) wraps THIS
+    // command — driven directly (the tab's mount is ribbon state).
+    let relinked = false;
+    act(() => {
+      relinked = relinkBand(editor, 'header', 'default', 'sec-a');
+    });
+    expect(relinked).toBe(true);
+    expect(countTagged()).toBe(0);
+    // ONE undo restores the override.
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(countTagged()).toBe(1);
   });
 });

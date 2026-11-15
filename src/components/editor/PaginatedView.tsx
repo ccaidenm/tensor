@@ -68,6 +68,8 @@ import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
 import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
 import { pageIndexAtY, pageTops, stackSize } from '@/lib/paginated/pageStack';
+import { enableRegion, findBandContainer, type BandWhich } from '@/lib/editor/headerFooterCommands';
+import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import { PageSheet } from './paginated/PageSheet';
 import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
@@ -1107,6 +1109,46 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     applyRightClickSelection(editor, pmPosAt(e));
   }
 
+  /** #58 — the UNLINK flow (Word's edit-unlinks): double-clicking a
+   *  LIVE band strip of an INHERITING section creates that section's
+   *  own header/footer — seeded with a copy of the inherited content —
+   *  instead of word-selecting into the doc default (whose edits would
+   *  restyle every section). An OVERRIDING section's strip dblclicks
+   *  normally (word-select in its own content). Uniform docs: normal
+   *  word-select everywhere (there is nothing to unlink). */
+  function handleBandDoubleClick(e: React.MouseEvent) {
+    if (!editor || adapterError || !layout) return;
+    const stack = stackRef.current;
+    if (!stack) return;
+    const z = useConfigStore.getState().config.editor.zoomLevel / 100;
+    const sr = stack.getBoundingClientRect();
+    const localY = (e.clientY - sr.top) / z;
+    const tops = pageTops(layout.result.pages, pageSetup.pageGap);
+    const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
+    const page = layout.result.pages[pageIndex]!;
+    const inPageY = localY - tops[pageIndex]!;
+    const which: BandWhich | null =
+      inPageY < page.contentBox.y
+        ? 'header'
+        : inPageY > page.contentBox.y + page.contentBox.height
+          ? 'footer'
+          : null;
+    if (!which) return; // the body — normal word-select
+    // A sectioned document only (a uniform doc has nothing to unlink).
+    if (sectionIds.length === 0) return;
+    const variant =
+      pageIndex === 0 && (useDocumentStore.getState().headerFooter?.differentFirstPage ?? false)
+        ? 'first'
+        : 'default';
+    const sectionId = sectionIdOfPage(page.sectionIndex);
+    // An OVERRIDING section's band is live content — normal editing.
+    if (findBandContainer(editor, which, variant, sectionId)) return;
+    // The section INHERITS — unlink: create its own band (the seed =
+    // a copy of the inherited content) and focus it.
+    e.preventDefault();
+    enableRegion(editor, which, variant, sectionId);
+  }
+
   function handleMouseDown(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
     // Middle button: paste-on-middle-click (settings > General >
@@ -1961,8 +2003,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       sectionIds.push(typeof tag === 'string' && tag ? tag : null);
     }
   });
-  const sectionIdOfPage = (sectionIndex: number): string | null =>
-    sectionIds[sectionIndex] ?? null;
+  const sectionIdOfPage = (sectionIndex: number): string | null => {
+    // The FINAL section has no break node — its band-override identity
+    // is the reserved id (the store law's spelling). SECTIONED docs
+    // only: a uniform doc's pages stay untagged (they ARE the doc
+    // default).
+    if (sectionIds.length === 0) return null;
+    return sectionIds[sectionIndex] ?? (sectionIndex === sectionIds.length ? FINAL_SECTION_ID : null);
+  };
   // #58 — the per-section PAGE BACKGROUND: each break's setup carries
   // its section's color; UNSET inherits the doc default (the store's
   // pageColor — the two-level band model). View-only ink (the print
@@ -2115,6 +2163,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         onMouseDown={handleMouseDown}
         onMouseUp={swallowMiddleClick}
         onAuxClick={swallowMiddleClick}
+        onDoubleClick={handleBandDoubleClick}
       >
         <div
           ref={stackRef}

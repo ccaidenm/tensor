@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { NodeSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { useDocumentStore } from '@/lib/document/store';
 import {
   cloneHeaderFooterSettings,
@@ -232,6 +232,58 @@ export function deleteSectionBreakNear(editor: Editor | null, dir: 'back' | 'fwd
   editor.view.dispatch(tr);
   editor.view.focus();
   return true;
+}
+
+/**
+ * #58 — RE-LINK (Word's "Link to Previous" re-engaged): delete a
+ * section's band override (the tagged container); the section inherits
+ * the doc default again. The section's custom content is lost — Word's
+ * own behavior on relink. One transaction = one undo step (Ctrl+Z
+ * restores the override).
+ */
+export function relinkBand(
+  editor: Editor | null,
+  which: BandWhich,
+  variant: BandVariant,
+  sectionId: string,
+): boolean {
+  if (!editor) return false;
+  const container = findBandContainer(editor, which, variant, sectionId);
+  if (!container) return false;
+  // ONE transaction: the delete + the landing selection (a split would
+  // make the first undo swallow a selection-only item — the same
+  // one-action-one-item law as the page-setup co-undo).
+  const tr = editor.state.tr;
+  tr.delete(container.pos, container.pos + container.node.nodeSize);
+  // The section inherits again — land the user in the doc default's
+  // band (mapped through the delete inside THIS tr).
+  const fallback = findBandContainerInDoc(tr.doc, which, variant);
+  if (fallback) {
+    tr.setSelection(TextSelection.create(tr.doc, fallback.pos + fallback.node.nodeSize - 2));
+  }
+  editor.view.dispatch(tr);
+  editor.view.focus();
+  return true;
+}
+
+/** findBandContainer over an ARBITRARY document (the in-transaction
+ *  post-delete doc). */
+function findBandContainerInDoc(
+  doc: PMNode,
+  which: BandWhich,
+  variant: BandVariant,
+): BandContainer | null {
+  const name = which === 'header' ? 'headerBlock' : 'footerBlock';
+  let found: BandContainer | null = null;
+  doc.forEach((node: PMNode, offset: number) => {
+    if (found) return;
+    if (node.type.name !== name) return;
+    if (variant === 'first' ? node.attrs.variant !== 'first' : node.attrs.variant === 'first') return;
+    const tag = typeof node.attrs.sectionId === 'string' ? node.attrs.sectionId : null;
+    if (tag !== null) return; // the doc DEFAULT only (untagged)
+    found = { node, pos: offset };
+  });
+  return found;
 }
 
 /** Focus the first BODY block (leaving the bands). */

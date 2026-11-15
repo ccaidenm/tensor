@@ -61,8 +61,11 @@ export function HeaderFooterSlots({
       const v = node.attrs.variant === 'first' ? 'first' : 'default';
       if (v !== variant) return;
       const tag = typeof node.attrs.sectionId === 'string' ? node.attrs.sectionId : null;
-      // The RESOLUTION: this section's override OR the doc default.
-      if (sectionId ? tag === sectionId : tag === null) found = true;
+      // The RESOLUTION: this section's own override, OR the doc
+      // default (an untagged container paints for EVERY inheriting
+      // section — including id-carrying ones without an override, the
+      // final section's reserved id included).
+      if (tag === sectionId || tag === null) found = true;
     });
     return found;
   };

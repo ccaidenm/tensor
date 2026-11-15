@@ -1,10 +1,11 @@
-import { ArrowDownToLine, ArrowUpToLine, Hash, Numbers, PanelTop, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, Hash, Link2, Link2Off, Numbers, PanelTop, X } from 'lucide-react';
 import { useEditorState } from '@tiptap/react';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '@/components/layout/IconButton';
 import { useDocumentStore } from '@/lib/document/store';
 import {
   blurToBody,
+  relinkBand,
   findBandContainer,
   focusBand,
   setDifferentFirstPage,
@@ -23,23 +24,25 @@ export function HeaderFooterTools() {
   const inBand = useEditorState({
     editor,
     selector: ({ editor: e }) => {
-      if (!e) return { inBand: false, first: false, sectionId: null };
+      if (!e) return { inBand: false, first: false, sectionId: null, which: null };
       const { $from } = e.state.selection;
       let inBand = false;
       let variant: 'default' | 'first' = 'default';
       let sectionId: string | null = null;
+      let which: 'header' | 'footer' | null = null;
       for (let d = $from.depth; d > 0; d--) {
         const name = $from.node(d).type.name;
         if (name === 'headerBlock' || name === 'footerBlock') {
           inBand = true;
           variant = $from.node(d).attrs.variant === 'first' ? 'first' : 'default';
+          which = name === 'headerBlock' ? 'header' : 'footer';
           // #58 — the WORKING section: a tagged container's tag rides
           // with the selection (Go to Header/Footer stays in it).
           const tag = $from.node(d).attrs.sectionId;
           sectionId = typeof tag === 'string' && tag ? tag : null;
         }
       }
-      return { inBand, first: inBand && variant === 'first', sectionId };
+      return { inBand, first: inBand && variant === 'first', sectionId, which };
     },
   });
   // The selector's shape (inBand/first) is consumed below under the
@@ -83,6 +86,30 @@ export function HeaderFooterTools() {
         />
       </RibbonGroup>
       <RibbonGroup>
+        {/* #58 — the per-section LINK law (Word's "Link to Previous"):
+            the caret's in a section's own override → the section is
+            UNLINKED; re-linking deletes the override and the section
+            inherits the doc default again (its custom content is lost,
+            Word's own relink behavior — one undo step restores it). */}
+        {inBand?.inBand && inBand.sectionId != null && inBand.which && editor && (
+          <IconButton
+            label="Link to Previous (inherit the document's header/footer)"
+            icon={<Link2 size={16} />}
+            active={false}
+            onClick={() =>
+              relinkBand(editor, inBand.which!, inBand.first ? 'first' : 'default', inBand.sectionId!)
+            }
+          />
+        )}
+        {inBand?.inBand && inBand.sectionId == null && inBand.which && (
+          <IconButton
+            label="This is the document's header/footer (every inheriting section) — double-click a section's strip to give it its own"
+            icon={<Link2Off size={16} />}
+            active
+            disabled
+            onClick={() => {}}
+          />
+        )}
         <IconButton
           label="Go to Header"
           icon={<ArrowUpToLine size={16} />}

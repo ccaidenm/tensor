@@ -33,6 +33,7 @@ import { Math as DocxMath, latexToMath } from 'docx/math';
 import type { DocxCoreProperties } from '@/lib/document/coreProperties';
 import { PAGE_SIZES, type PageSetup } from '@/lib/document/pageSetup';
 import type { HeaderFooterSettings } from '@/lib/document/headerFooter';
+import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
 import { LEGACY_HEADING_FALLBACK } from '@/lib/styles/builtins';
 import { transformText } from '@/lib/styles/resolve';
@@ -877,10 +878,12 @@ function splitSections(nodes: JSONContent[]): {
     chunks[chunks.length - 1]!.children.push(node);
   }
   // The tagged buckets resolve AFTER the full pass (the container →
-  // break order is arbitrary): break ordinal ↔ sectionId.
+  // break order is arbitrary): break ordinal ↔ sectionId. The FINAL
+  // chunk's bands = the reserved final-section tag (it has no break).
   breakTags.forEach((tag, ordinal) => {
     chunks[ordinal]!.bands = (tag && bandIndex.get(tag)) || EMPTY_BANDS();
   });
+  chunks[chunks.length - 1]!.bands = bandIndex.get(FINAL_SECTION_ID) ?? EMPTY_BANDS();
   return { chunks, docDefault, anyBands };
 }
 

@@ -20,7 +20,7 @@ import { headingStyleId } from '@/lib/styles/types';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { lookupStyle } from '@/lib/styles/registry';
 import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
-import { regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
+import { FINAL_SECTION_ID, regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
 // M-REFS: the collection scan — the referenceTable node's entries are
 // real paragraphs the GENERATOR maintains (the container model); the
 // adapter joins them to their navigation targets through the same
@@ -1772,11 +1772,15 @@ export function pmDocToSemantic(
       // the break is gone) containers are the DOC DEFAULT every
       // non-overriding section inherits (the tagged-containers
       // decision). Two containers with the same key merge in doc order.
+      // The FINAL section's reserved id maps to the last index (it has
+      // no break node of its own).
       const tag = node.attrs?.sectionId;
       const sectionIndex =
-        typeof tag === 'string' && tag && sectionIdToIndex.has(tag)
-          ? sectionIdToIndex.get(tag)!
-          : null;
+        tag === FINAL_SECTION_ID
+          ? sectionBreaksCollected.length
+          : typeof tag === 'string' && tag && sectionIdToIndex.has(tag)
+            ? sectionIdToIndex.get(tag)!
+            : null;
       const pushTo = (region2: 'header' | 'footer' | 'firstHeader' | 'firstFooter'): void => {
         node.forEach((child: PMNode, rel: number) => {
           const childName = child.type.name;
