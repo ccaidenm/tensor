@@ -12,9 +12,15 @@ import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
 import { fireEvent, render } from '@testing-library/react';
 
-/** The dialog rides alongside the editor exactly as App mounts it. */
+let mountedDialog: ReturnType<typeof render> | null = null;
+
+/** The dialog rides alongside the editor exactly as App mounts it.
+ *  Self-cleaning: a previous test's dialog (still bound to the shared
+ *  properties store) would otherwise double-apply on the shared Done
+ *  click — the stale one unmounts first. */
 function renderSectionDialog(): void {
-  render(<PageSetupDialog />);
+  mountedDialog?.unmount();
+  mountedDialog = render(<PageSetupDialog />);
 }
 
 const threeSections =
@@ -866,5 +872,133 @@ describe('Phase 7 — per-section page background', () => {
     // the swatch's onChange is not reachable — assert the default.
     expect(useDocumentStore.getState().pageSetup.pageColor ?? '').toBe('');
     void editor;
+  });
+});
+
+describe('Phase 8 — the page-setup co-undo', () => {
+  /** The sectionBreak positions (doc order). */
+  function breakPositions(editor: NonNullable<ReturnType<typeof useDocumentStore.getState>['editor']>): number[] {
+    const positions: number[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'sectionBreak') positions.push(pos);
+      return true;
+    });
+    return positions;
+  }
+
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('a document-scope Done reverts BOTH the break merges and the store in ONE Ctrl+Z', async () => {
+    const { editor } = renderTensor(threeSections);
+    // The history GROUPS sub-800ms-apart transactions into ONE item —
+    // the test's Done would merge into the setContent item and one
+    // undo would revert BOTH (the real user's open→edit gap is
+    // seconds). The sleep keeps the page-setup write its own item.
+    await new Promise((r) => setTimeout(r, 850));
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    const presetBtn = [...document.querySelectorAll('button')].find((b) => b.textContent!.startsWith('Narrow'))!;
+    act(() => {
+      fireEvent.click(presetBtn);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    // The write landed: every break merged + the store carries Narrow.
+    const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
+    expect(setupOf(breakPositions(editor)[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+    // ONE Ctrl+Z reverts the PM part AND the store part.
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(setupOf(breakPositions(editor)[0]!)).toBeNull();
+    expect(setupOf(breakPositions(editor)[1]!)).toBeNull();
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
+    // Ctrl+Y re-applies both.
+    act(() => {
+      editor.commands.redo();
+    });
+    expect(setupOf(breakPositions(editor)[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+  });
+
+  it('typing buries the entry: Ctrl+Z undoes the typing FIRST, then the page-setup action', async () => {
+    const { editor } = renderTensor(threeSections);
+    // The grouping gap (see the document-scope test).
+    await new Promise((r) => setTimeout(r, 850));
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    const presetBtn = [...document.querySelectorAll('button')].find((b) => b.textContent!.startsWith('Narrow'))!;
+    act(() => {
+      fireEvent.click(presetBtn);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    // Typing AFTER the write — its OWN history item (another gap, or
+    // it would merge into the Done item).
+    await new Promise((r) => setTimeout(r, 850));
+    act(() => {
+      editor.commands.setTextSelection(1);
+      editor.commands.insertContent('X');
+    });
+    expect(editor.state.doc.textContent.startsWith('X')).toBe(true);
+    // Ctrl+Z #1: the typing (the page-setup write is buried).
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(editor.state.doc.textContent.startsWith('X')).toBe(false);
+    const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
+    expect(setupOf(breakPositions(editor)[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+    // Ctrl+Z #2: the page-setup action (breaks + store together).
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(setupOf(breakPositions(editor)[0]!)).toBeNull();
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
+  });
+
+  it('a store-only write (the final section) undoes on its own', async () => {
+    const { editor } = renderTensor(threeSections);
+    const [brk0] = breakPositions(editor);
+    act(() => {
+      editor.commands.setTextSelection(editor.state.doc.content.size - 1); // the final section
+    });
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    // The scope: 'Specific section' — the chips auto-select the FINAL
+    // (the store's props holder — a store-only write).
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
+    });
+    const presetBtn = [...document.querySelectorAll('button')].find((b) => b.textContent!.startsWith('Narrow'))!;
+    act(() => {
+      fireEvent.click(presetBtn);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
+    // ONE Ctrl+Z restores the store (no PM part — the doc is untouched).
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
+    void brk0;
   });
 });

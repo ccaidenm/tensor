@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/core';
 import type { PageGeometry, TabStop } from '@tensor-editor/engine';
 import { pageTops } from '@/lib/paginated/pageStack';
 import { applyPageSetup } from '@/lib/editor/sections';
+import type { PageSetup } from '@/lib/document/pageSetup';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -1318,23 +1319,30 @@ export function VerticalRuler({
     startClientY: number;
     startEdgePx: number;
     draftPx: number;
+    /** #58 — the setup BEFORE the drag (ONE undo entry per drag: the
+     *  frames write without history/push; the end commit re-applies
+     *  the final margins as the ONE item + pushes this). */
+    startSetup: PageSetup;
   }
   const dragRef = useRef<VMarginDrag | null>(null);
   const [drag, setDrag] = useState<VMarginDrag | null>(null);
   const pendingWriteRef = useRef<number | null>(null);
 
-  function commitMargin(d: VMarginDrag, px: number) {
+  function commitMargin(d: VMarginDrag, px: number, opts?: {
+    pushUndo?: boolean;
+    addToHistory?: boolean;
+    undoPrev?: PageSetup;
+  }) {
     const ps = useDocumentStore.getState().pageSetup;
     const margins = { ...ps.margins };
     // The drag page's own height (mixed sections — the dragged page's
     // frame defines the bottom edge); the write is DOCUMENT-WIDE (the
-    // ribbon quick controls' law): every section + the store, no
-    // history (the store side isn't undoable; drag frames stay out).
+    // ribbon quick controls' law).
     const dragPageH = pages[d.page]?.size.height ?? firstPageH;
     if (d.side === 'top') margins.top = pxToPt(px);
     else margins.bottom = pxToPt(dragPageH - px);
     if (margins.top === ps.margins.top && margins.bottom === ps.margins.bottom) return;
-    applyPageSetup('document', { ...ps, margins }, { margins });
+    applyPageSetup('document', { ...ps, margins }, { margins }, opts);
   }
 
   function startDrag(side: 'top' | 'bottom', page: number) {
@@ -1354,6 +1362,7 @@ export function VerticalRuler({
         startClientY: e.clientY,
         startEdgePx,
         draftPx: startEdgePx,
+        startSetup: useDocumentStore.getState().pageSetup,
       };
       dragRef.current = d;
       setDrag(d);
@@ -1384,10 +1393,12 @@ export function VerticalRuler({
       if (typeof requestAnimationFrame === 'function') {
         pendingWriteRef.current = requestAnimationFrame(() => {
           pendingWriteRef.current = null;
-          commitMargin(next, next.draftPx);
+          // The LIVE preview: no history item, no undo push (the drag's
+          // end commit is the ONE entry).
+          commitMargin(next, next.draftPx, { pushUndo: false, addToHistory: false });
         });
       } else {
-        commitMargin(next, next.draftPx);
+        commitMargin(next, next.draftPx, { pushUndo: false, addToHistory: false });
       }
     }
   }
@@ -1401,7 +1412,15 @@ export function VerticalRuler({
       const d = dragRef.current;
       dragRef.current = null;
       setDrag(null);
-      if (d && commit) commitMargin(d, d.draftPx);
+      if (d && commit) {
+        // ONE history item + ONE undo entry per drag (the pre-drag
+        // setup rides as the entry's previous value).
+        commitMargin(d, d.draftPx, {
+          pushUndo: true,
+          addToHistory: true,
+          undoPrev: d.startSetup,
+        });
+      }
     };
   }
 

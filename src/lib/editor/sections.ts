@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { useDocumentStore } from '@/lib/document/store';
+import { pushPageSetupUndo } from '@/lib/editor/pageSetupHistory';
 import type { PageSetup } from '@/lib/document/pageSetup';
 
 /**
@@ -177,16 +178,47 @@ export function applyPageSetup(
   scope: PageSetupScope,
   full: PageSetup,
   partial: Partial<PageSetup>,
-  options?: { sectionSet?: number[]; startType?: 'nextPage' | 'continuous' },
+  options?: {
+    sectionSet?: number[];
+    startType?: 'nextPage' | 'continuous';
+    /** #58 — the store write joins the co-undo (default true): the
+     *  RULER's per-frame writes pass false and commit once at drag
+     *  end (undoPrev carries the pre-drag setup). */
+    pushUndo?: boolean;
+    /** The undo entry's PREVIOUS setup (the drag's start state), when
+     *  it differs from the store's current value. */
+    undoPrev?: PageSetup;
+    /** The PM tr's history join (default true; the ruler's frames
+     *  pass false — the drag's end commit is the ONE item). */
+    addToHistory?: boolean;
+  },
 ): void {
   const store = useDocumentStore.getState();
   const editor = store.editor;
+  const pushUndo = options?.pushUndo ?? true;
+  const addToHistory = options?.addToHistory ?? true;
+  // The PRE-write document (the co-undo's docBefore snapshot — captured
+  // BEFORE any dispatch; the writeStore's docAfter reads the post-tr
+  // state, which view.dispatch applies synchronously).
+  const docBefore = editor?.state.doc ?? null;
+  /** The store write + its co-undo push (AFTER the PM tr dispatches —
+   *  the snapshot carries the post-write document; the pageSetupHistory
+   *  module's law: one Ctrl+Z reverts the PM part and the store part
+   *  together, never half). */
+  const writeStore = (next: PageSetup): void => {
+    if (pushUndo) {
+      pushPageSetupUndo(options?.undoPrev ?? store.pageSetup, editor?.state.doc ?? null, docBefore);
+    }
+    store.setPageSetup(next);
+  };
   if (scope === 'document') {
     if (editor) {
       const tr = editor.state.tr;
-      // No history: the store side isn't undoable — a half-restore
-      // would desync the two sources (and drag frames stay out).
-      tr.setMeta('addToHistory', false);
+      // The break merges JOIN history by default (one commit = one
+      // history item); the co-undo's store restore fires with it
+      // (the doc-snapshot correlation). The ruler's frames pass
+      // addToHistory false — the drag's end commit is the ONE item.
+      if (!addToHistory) tr.setMeta('addToHistory', false);
       for (const pos of breakPositions(editor)) {
         const node = editor.state.doc.nodeAt(pos);
         if (!node) continue;
@@ -195,14 +227,14 @@ export function applyPageSetup(
       }
       editor.view.dispatch(tr);
     }
-    store.setPageSetup({ ...store.pageSetup, ...partial });
+    writeStore({ ...store.pageSetup, ...partial });
     return;
   }
   if (scope === 'sections') {
     const set = options?.sectionSet ?? [];
     if (!editor) {
       // No breaks: every chosen section IS the store's (collapse).
-      store.setPageSetup({ ...store.pageSetup, ...full });
+      writeStore({ ...store.pageSetup, ...full });
       return;
     }
     const positions = breakPositions(editor);
@@ -218,12 +250,12 @@ export function applyPageSetup(
       }
     }
     if (tr.docChanged) editor.view.dispatch(tr);
-    if (touchedStore) store.setPageSetup({ ...store.pageSetup, ...full });
+    if (touchedStore) writeStore({ ...store.pageSetup, ...full });
     return;
   }
   if (scope === 'forward') {
     if (!editor) {
-      store.setPageSetup({ ...store.pageSetup, ...full });
+      writeStore({ ...store.pageSetup, ...full });
       return;
     }
     // The caret's section's EFFECTIVE setup seeds the new break (the
@@ -245,7 +277,7 @@ export function applyPageSetup(
         );
       }
     } else {
-      store.setPageSetup({ ...store.pageSetup, ...full });
+      writeStore({ ...store.pageSetup, ...full });
     }
     return;
   }
@@ -276,7 +308,7 @@ export function applyPageSetup(
       }
     }
     if (tr.docChanged) editor.view.dispatch(tr);
-    if (touchedStore) store.setPageSetup({ ...store.pageSetup, ...full });
+    if (touchedStore) writeStore({ ...store.pageSetup, ...full });
     return;
   }
   const facts = sectionAtCaret(editor, store.pageSetup);
@@ -292,7 +324,7 @@ export function applyPageSetup(
       return;
     }
   }
-  store.setPageSetup({ ...store.pageSetup, ...full });
+  writeStore({ ...store.pageSetup, ...full });
 }
 
 /** The start-type write INSIDE an existing transaction (the multi-

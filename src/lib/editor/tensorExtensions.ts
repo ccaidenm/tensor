@@ -49,6 +49,7 @@ import { IndexMark } from '@/lib/editor/IndexMark';
 import { RefLeaderMark } from '@/lib/editor/RefLeaderMark';
 import { ReferenceScanExtension } from '@/lib/references/store';
 import { ReferenceGeneratorExtension } from '@/lib/references/generator';
+import { PageSetupHistoryExtension } from '@/lib/editor/pageSetupHistoryExtension';
 
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
@@ -131,6 +132,10 @@ export function tensorExtensions(): Extensions {
     RefLeaderMark,
     ReferenceScanExtension,
     ReferenceGeneratorExtension,
+    // #58 — LAST: overrides StarterKit's undo/redo commands with the
+    // page-setup co-restore (the store's pageSetup is outside PM —
+    // the raw history would half-undo a page-setup action).
+    PageSetupHistoryExtension,
     // Stable block ids (engine edit-survival contract) + the
     // paginated-mode scroll guard (L3).
     BlockIdExtension,
