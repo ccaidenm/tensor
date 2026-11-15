@@ -738,6 +738,50 @@ describe('THE ROUND-TRIP GATE (export → import → normalized equality)', () =
     expect(imported.coreProperties.title).toBe('Gate');
   });
 
+  it('multi-section documents round-trip (breaks + per-section bands)', async () => {
+    // Three sections: A4 for section 0 (custom header), Narrow margins
+    // for section 1 (NO own header — inherits), the final on Letter
+    // with the doc-default header. Section 0's header DIFFERS from the
+    // doc default → a tagged container; section 1's would equal the
+    // default (it has none) → inherits, no container.
+    const source = doc(
+      { type: 'headerBlock', attrs: { variant: 'default', sectionId: 'sec-0' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 's0 header' }] }] },
+      { type: 'headerBlock', attrs: { variant: 'default' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'doc default' }] }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'one' }] },
+      { type: 'sectionBreak', attrs: { setup: { pageSize: 'A4', margins: DEFAULT_MARGINS, pageGap: 32 }, sectionId: 'sec-0' } },
+      { type: 'paragraph', content: [{ type: 'text', text: 'two' }] },
+      { type: 'sectionBreak', attrs: { setup: { pageSize: 'Letter', margins: { top: 36, bottom: 36, left: 36, right: 36 }, pageGap: 32 } } },
+      { type: 'paragraph', content: [{ type: 'text', text: 'three' }] },
+    );
+    const imported = await roundTrip(source);
+    const content = imported.json.content ?? [];
+
+    // TWO break nodes survive (three sections); the store pageSetup =
+    // the FINAL section's (Letter/Normal).
+    const breaks = content.filter((n) => n.type === 'sectionBreak');
+    expect(breaks).toHaveLength(2);
+    expect(imported.pageSetup.pageSize).toBe('Letter');
+    expect(imported.pageSetup.margins).toEqual(DEFAULT_MARGINS);
+    // Break 0 carries section 0's props (A4) — the PRECEDING spelling.
+    expect((breaks[0]!.attrs as { setup?: { pageSize?: string } }).setup?.pageSize).toBe('A4');
+    // Break 1 carries section 1's props (the Narrow margins).
+    expect((breaks[1]!.attrs as { setup?: { margins?: { top?: number } } }).setup?.margins?.top).toBe(36);
+
+    // The band containers: the doc default (untagged) + section 0's
+    // tagged override (its content differs from the default). Section
+    // 1 has no own header → no container (it inherits).
+    const headers = content.filter((n) => n.type === 'headerBlock');
+    expect(headers).toHaveLength(2);
+    const tagged = headers.find((h) => (h.attrs as { sectionId?: string }).sectionId);
+    expect(tagged).toBeTruthy();
+    expect(tagged!.content![0]!.content![0]!.text).toBe('s0 header');
+    const untagged = headers.find((h) => !(h.attrs as { sectionId?: string }).sectionId);
+    expect(untagged!.content![0]!.content![0]!.text).toBe('doc default');
+
+    // No loss lines: the breaks are no longer collapsed.
+    expect(docxImportNoticeLines(imported.report)).toEqual([]);
+  });
+
   it('custom styles and char styles round-trip through the Word spelling', async () => {
     const defs = [
       ...BUILTIN_DEFINITIONS,

@@ -1,5 +1,6 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { fitDownImage, type LayoutResult, type LineBox, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
+import { pageTops } from './pageStack';
 import type { AdapterBlock } from './adapter';
 
 // THE PRINCIPLE: all selection state changes go through PM
@@ -378,7 +379,8 @@ export function inlineObjectRect(
   const page0 = result.pages[0];
   const line = lineForOffset(result.lines.filter((l) => l.blockId === block.id), offset);
   if (!page0 || !line) return null;
-  const cb = page0.contentBox;
+  // #58 — the line's OWN page carries the contentBox (mixed sections).
+  const cb = result.pages[line.pageIndex]!.contentBox;
   const wrap = blockWrapWidth(cb.width, block);
   const seg = line.segments.find((s) => offset >= s.start && offset < s.end);
   const run = seg ? block.runs[seg.runIndex] : undefined;
@@ -482,10 +484,12 @@ export function textRangeLineRects(
   const spans = matchSpans(blocks, result, from, to, bandPage, surface, bandBlockIds);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  const cb = page0.contentBox;
-  const stride = page0.size.height + pageGap;
+  // #58 — per-page geometry: the cumulative tops table replaces the
+  // uniform stride; each span's rect reads ITS page's contentBox.
+  const tops = pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
+    const cb = result.pages[line.pageIndex]!.contentBox;
     const first = idx === 0;
     const last = idx === spans.length - 1;
     // Partial first/last lines ride the same alignOffset the caret and
@@ -510,7 +514,7 @@ export function textRangeLineRects(
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,
-      top: stride * line.pageIndex + cb.y + line.rect.y,
+      top: tops[line.pageIndex]! + cb.y + line.rect.y,
       width: cx2 - cx1,
       height: line.rect.height,
     };
@@ -540,10 +544,12 @@ export function textRangeTextExtents(
   const spans = matchSpans(blocks, result, from, to, bandPage);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  const cb = page0.contentBox;
-  const stride = page0.size.height + pageGap;
+  // #58 — per-page geometry: the cumulative tops table replaces the
+  // uniform stride; each span's rect reads ITS page's contentBox.
+  const tops = pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
+    const cb = result.pages[line.pageIndex]!.contentBox;
     // M-HEADER-FOOTER-3 — the ECHO rule (search highlights): a band
     // line is ALWAYS a first/last (partial x); see the underline
     // builder for the full rationale.
@@ -583,7 +589,7 @@ export function textRangeTextExtents(
         descent = metrics.descent(style);
       }
     }
-    const top = stride * line.pageIndex + cb.y + line.rect.y + line.baseline - ascent;
+    const top = tops[line.pageIndex]! + cb.y + line.rect.y + line.baseline - ascent;
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,
@@ -623,10 +629,12 @@ export function textRangeUnderlineRects(
   const spans = matchSpans(blocks, result, from, to);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  const cb = page0.contentBox;
-  const stride = page0.size.height + pageGap;
+  // #58 — per-page geometry: the cumulative tops table replaces the
+  // uniform stride; each span's rect reads ITS page's contentBox.
+  const tops = pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
+    const cb = result.pages[line.pageIndex]!.contentBox;
     // M-HEADER-FOOTER-3 — the ECHO rule: a band line is ALWAYS a
     // first/last (partial x). Spell/search paint on EVERY echo (the
     // text renders on every page), and the plain first/middle/last
@@ -660,7 +668,7 @@ export function textRangeUnderlineRects(
     }
     const thickness = Math.max(SPELL_LINE_MIN_THICKNESS, Math.round(fontSize / 12));
     const top =
-      stride * line.pageIndex + cb.y + line.rect.y + line.baseline + SPELL_LINE_OFFSET * fontSize;
+      tops[line.pageIndex]! + cb.y + line.rect.y + line.baseline + SPELL_LINE_OFFSET * fontSize;
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,
@@ -729,13 +737,16 @@ export function caretGeometry(
   const line = lineForOffset(lines, bo.offset);
   const page0 = result.pages[0];
   if (!line || !page0) return null;
+  // #58 — the caret line's OWN page carries the contentBox (mixed
+  // sections; a uniform doc is the degenerate same-page case).
+  const caretCb = result.pages[line.pageIndex]!.contentBox;
   return {
     pageIndex: line.pageIndex,
     x:
-      lineOffsetX(line, bo.block, bo.offset, metrics, blockWrapWidth(page0.contentBox.width, bo.block)) +
+      lineOffsetX(line, bo.block, bo.offset, metrics, blockWrapWidth(caretCb.width, bo.block)) +
       // Indent-narrowed box (rect.x IS indentLeft): the caret x of a
       // centered/right-aligned indented block stays in its column.
-      alignOffset(bo.block.align, line.rect.width, page0.contentBox.width - line.rect.x),
+      alignOffset(bo.block.align, line.rect.width, caretCb.width - line.rect.x),
     // THE CARET IS THE TEXT BAND, NOT THE LINE BOX (GDocs): top stays
     // at the box top (text, under the M6 ruling) but the bottom stops
     // at the text's descent — a 2.0-spaced line never stretches the
@@ -755,17 +766,19 @@ export interface CaretStackRect {
 /** Caret/caret-like rect in stack-local px: page stack offset +
  * content box + the caret's text-band geometry (top at the LineBox
  * top, height = text band). Shared by the caret painter and the
- * caret-follow scroll — one source of this arithmetic. */
+ * caret-follow scroll — one source of this arithmetic. #58: pages may
+ * differ in size, so the caller passes the CUMULATIVE page top
+ * (pageStack.pageTops) and the caret page's own contentBox origin —
+ * the uniform-stride formula is gone. */
 export function caretStackRect(
   caret: CaretGeometry,
   contentX: number,
   contentY: number,
-  pageHeight: number,
-  pageGap: number
+  pageTop: number
 ): CaretStackRect {
   return {
     left: contentX + caret.x,
-    top: caret.pageIndex * (pageHeight + pageGap) + contentY + caret.y,
+    top: pageTop + contentY + caret.y,
     height: caret.height,
   };
 }

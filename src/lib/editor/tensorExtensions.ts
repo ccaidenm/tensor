@@ -24,6 +24,7 @@ import { BlockIdExtension } from '@/lib/editor/BlockIdExtension';
 import { CharStyleMark, StyleCommandsExtension } from '@/lib/styles/styleExtensions';
 import { ScrollGuardExtension } from '@/lib/paginated/ScrollGuardExtension';
 import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
+import { SectionBreakNode } from '@/lib/pagination/SectionBreakNode';
 // M-HEADER-FOOTER-2: the doc-level header/footer containers — content
 // rides the ONE PM doc (L3); the adapter routes them into doc.bands.
 import { FooterBlock, HeaderBlock } from '@/lib/editor/HeaderFooterNodes';
@@ -48,6 +49,7 @@ import { IndexMark } from '@/lib/editor/IndexMark';
 import { RefLeaderMark } from '@/lib/editor/RefLeaderMark';
 import { ReferenceScanExtension } from '@/lib/references/store';
 import { ReferenceGeneratorExtension } from '@/lib/references/generator';
+import { PageSetupHistoryExtension } from '@/lib/editor/pageSetupHistoryExtension';
 
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
@@ -98,6 +100,10 @@ export function tensorExtensions(): Extensions {
     // atom renders its marker, and the adapter translates it into the
     // engine's forced-break spelling (flow.breakBefore: 'page').
     PageBreakNode,
+    // #58 SECTIONS: the sectionBreak atom — the adapter translates it
+    // into the engine's per-section geometry boundaries (the node is
+    // NOT part of the IR; the pageBreak law).
+    SectionBreakNode,
         // M-MD: the markdown-mapped image/equation nodes (same schema, same
     // names — the markdown handlers ride along, inert in production).
     MarkdownImageNode,
@@ -126,6 +132,10 @@ export function tensorExtensions(): Extensions {
     RefLeaderMark,
     ReferenceScanExtension,
     ReferenceGeneratorExtension,
+    // #58 — LAST: overrides StarterKit's undo/redo commands with the
+    // page-setup co-restore (the store's pageSetup is outside PM —
+    // the raw history would half-undo a page-setup action).
+    PageSetupHistoryExtension,
     // Stable block ids (engine edit-survival contract) + the
     // paginated-mode scroll guard (L3).
     BlockIdExtension,

@@ -33,6 +33,9 @@ export interface MarkdownLossyReport {
   referenceTables: number;
   /** pageBreak atoms — Markdown has no page concept. */
   pageBreaks: number;
+  /** #58 — sectionBreak atoms (and their per-section page setups).
+   *  Markdown has no section concept; the break + its props are lost. */
+  sectionBreaks: number;
   /** Any dropped formatting at all (marks, style ids, alignment,
    *  spacing, indents, tab stops, image sizing, table decoration). */
   customFormatting: boolean;
@@ -61,6 +64,7 @@ export function analyzeMarkdownLossy(doc: JSONContent): MarkdownLossyReport {
     headerFooterRegions: 0,
     referenceTables: 0,
     pageBreaks: 0,
+    sectionBreaks: 0,
     customFormatting: false,
   };
   walk(doc, report);
@@ -73,6 +77,7 @@ export function hasLossyContent(report: MarkdownLossyReport): boolean {
     report.headerFooterRegions > 0 ||
     report.referenceTables > 0 ||
     report.pageBreaks > 0 ||
+    report.sectionBreaks > 0 ||
     report.customFormatting
   );
 }
@@ -93,6 +98,9 @@ export function markdownLossyLines(report: MarkdownLossyReport): string[] {
   }
   if (report.pageBreaks > 0) {
     lines.push(`Page breaks (${report.pageBreaks})`);
+  }
+  if (report.sectionBreaks > 0) {
+    lines.push(`Section breaks (${report.sectionBreaks})`);
   }
   if (report.customFormatting) {
     lines.push(
@@ -134,6 +142,9 @@ function walk(node: JSONContent, report: MarkdownLossyReport): void {
       return; // entries are derived projection — counted with the container
     case 'pageBreak':
       report.pageBreaks += 1;
+      return;
+    case 'sectionBreak':
+      report.sectionBreaks += 1;
       return;
   }
   checkFormatting(node, report);

@@ -34,6 +34,11 @@ export const ConfigSchema = z.object({
      *  untouched and saves round-trip regardless). Default: bands
      *  visible, matching Word/GDocs. Pages mode only. */
     showHeadersFooters: z.boolean().default(true),
+    /** #58 — the BREAK MARKS toggle (distinct from the character-level
+     *  NPCs): the page/section-break badges in the paginated view —
+     *  STRUCTURAL ink (a section boundary is meaningful, unlike a
+     *  pilcrow), so this defaults ON. View-only; never printed. */
+    showBreakMarks: z.boolean().default(true),
     /** M-RULER: the ruler bars — per-axis display toggles (the command
      *  palette's show/hide surface). Pages mode only (pageless has no
      *  page geometry to rule). Defaults: visible, matching Word/GDocs. */
@@ -58,6 +63,11 @@ export const ConfigSchema = z.object({
     colorDisplayFormat: 'hex',
     customColors: [],
     showNonPrintingChars: false,
+    /** #58 — the BREAK MARKS toggle (distinct from the character-level
+     *  NPCs): the page/section-break badges in the paginated view —
+     *  STRUCTURAL ink (a section boundary is meaningful, unlike a
+     *  pilcrow), so this defaults ON. View-only; never printed. */
+    showBreakMarks: true,
     showCaptions: true,
     showHeadersFooters: true,
     showHorizontalRuler: true,

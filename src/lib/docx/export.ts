@@ -12,6 +12,7 @@ import {
   PageBreak,
   PageOrientation,
   Packer,
+  SectionType,
   Paragraph,
   SimpleField,
   ShadingType,
@@ -32,6 +33,7 @@ import { Math as DocxMath, latexToMath } from 'docx/math';
 import type { DocxCoreProperties } from '@/lib/document/coreProperties';
 import { PAGE_SIZES, type PageSetup } from '@/lib/document/pageSetup';
 import type { HeaderFooterSettings } from '@/lib/document/headerFooter';
+import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
 import { LEGACY_HEADING_FALLBACK } from '@/lib/styles/builtins';
 import { transformText } from '@/lib/styles/resolve';
@@ -804,19 +806,85 @@ interface Bands {
   footerFirst: JSONContent[];
 }
 
-function collectBands(nodes: JSONContent[]): Bands {
-  const bands: Bands = { headerDefault: [], headerFirst: [], footerDefault: [], footerFirst: [] };
+// ─── #58 SECTIONS — the multi-section split ──────────────────────────────
+
+interface SectionChunk {
+  /** The section's OWN page setup (break attrs; null = the final
+   *  section — the store's pageSetup governs it). */
+  setup: PageSetup | null;
+  /** #58 — how the FOLLOWING section starts (the break's `type` —
+   *  the boundary AT this break). Rides the FOLLOWING chunk's
+   *  sectPr in Word's spelling. */
+  startType: 'nextPage' | 'continuous';
+  /** The section's TAGGED band containers (its overrides). */
+  bands: Bands;
+  /** The body content between this section's start and its break. */
+  children: JSONContent[];
+}
+
+const EMPTY_BANDS = (): Bands => ({ headerDefault: [], headerFirst: [], footerDefault: [], footerFirst: [] });
+
+/** Split the PM JSON at the sectionBreak atoms: each break ENDS a
+ *  section (its attrs.setup = that section's page setup — Word's
+ *  spelling); the content after the LAST break is the FINAL section
+ *  (the store's). Band containers route OUT of the chunks: untagged →
+ *  the doc default; tagged → their section's overrides — resolved in
+ *  a SECOND pass (containers may precede their break in doc order). */
+function splitSections(nodes: JSONContent[]): {
+  chunks: SectionChunk[];
+  docDefault: Bands;
+  anyBands: boolean;
+} {
+  const chunks: SectionChunk[] = [{ setup: null, startType: 'nextPage', bands: EMPTY_BANDS(), children: [] }];
+  const docDefault: Bands = EMPTY_BANDS();
+  const bandIndex = new Map<string, Bands>(); // sectionId → tagged bands
+  const breakTags: (string | null)[] = [];
+  let anyBands = false;
+
   for (const node of nodes) {
-    const variant = (node.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default';
-    if (node.type === 'headerBlock') {
-      if (variant === 'first') bands.headerFirst = node.content ?? [];
-      else bands.headerDefault = node.content ?? [];
-    } else if (node.type === 'footerBlock') {
-      if (variant === 'first') bands.footerFirst = node.content ?? [];
-      else bands.footerDefault = node.content ?? [];
+    if (node.type === 'headerBlock' || node.type === 'footerBlock') {
+      anyBands = true;
+      const variant = (node.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default';
+      const region =
+        (node.type === 'headerBlock' ? 'header' : 'footer') +
+        (variant === 'first' ? 'First' : 'Default');
+      const tag = (node.attrs as { sectionId?: string } | null)?.sectionId;
+      if (tag) {
+        const bucket = bandIndex.get(tag) ?? EMPTY_BANDS();
+        bucket[region as keyof Bands] = node.content ?? [];
+        bandIndex.set(tag, bucket);
+      } else {
+        docDefault[region as keyof Bands] = node.content ?? [];
+      }
+      continue;
     }
+    if (node.type === 'sectionBreak') {
+      const tag = (node.attrs as { sectionId?: string } | null)?.sectionId ?? null;
+      chunks[chunks.length - 1]!.setup =
+        (node.attrs as { setup?: PageSetup } | null)?.setup ?? null;
+      // The break's `type` = how the FOLLOWING section starts — it
+      // rides the NEXT chunk's sectPr (Word's spelling).
+      chunks.push({
+        setup: null,
+        startType: (node.attrs as { type?: 'nextPage' | 'continuous' } | null)?.type === 'continuous'
+          ? 'continuous'
+          : 'nextPage',
+        bands: EMPTY_BANDS(),
+        children: [],
+      });
+      breakTags.push(tag);
+      continue;
+    }
+    chunks[chunks.length - 1]!.children.push(node);
   }
-  return bands;
+  // The tagged buckets resolve AFTER the full pass (the container →
+  // break order is arbitrary): break ordinal ↔ sectionId. The FINAL
+  // chunk's bands = the reserved final-section tag (it has no break).
+  breakTags.forEach((tag, ordinal) => {
+    chunks[ordinal]!.bands = (tag && bandIndex.get(tag)) || EMPTY_BANDS();
+  });
+  chunks[chunks.length - 1]!.bands = bandIndex.get(FINAL_SECTION_ID) ?? EMPTY_BANDS();
+  return { chunks, docDefault, anyBands };
 }
 
 function bandToPart(children: JSONContent[], kind: 'header' | 'footer', state: WalkState): Header | Footer | undefined {
@@ -947,16 +1015,74 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     needsUpdateFields: false,
   };
 
-  const bands = collectBands(input.json.content ?? []);
-  const body = mapBlocks(input.json.content ?? [], state);
-
-  const { width, height, orientation } = pageDims(input.pageSetup);
+  // #58 — the multi-section split. Each section's EFFECTIVE bands =
+  // its tagged overrides ?? the doc default; exported EXPLICITLY per
+  // section (Word's headerReference per sectPr — exact visual
+  // fidelity; a resolved-EMPTY region under a doc that carries ANY
+  // band content exports an explicit EMPTY part, because omitting it
+  // would spell "link to previous" and inherit a neighbor's content).
+  // A doc with NO band content at all exports header-free (today's
+  // shape). The first-class parts ride SECTION 0 only (the doc's page
+  // 0 is its first page — the differentFirstPage model).
+  const { chunks, docDefault, anyBands } = splitSections(input.json.content ?? []);
   const differentFirst = input.headerFooter?.differentFirstPage === true;
 
-  const headerDefault = bandToPart(bands.headerDefault, 'header', state);
-  const headerFirst = differentFirst ? bandToPart(bands.headerFirst, 'header', state) ?? new Header({ children: [] }) : undefined;
-  const footerDefault = bandToPart(bands.footerDefault, 'footer', state);
-  const footerFirst = differentFirst ? bandToPart(bands.footerFirst, 'footer', state) ?? new Footer({ children: [] }) : undefined;
+  const sectionProps = (setup: PageSetup): {
+    width: number;
+    height: number;
+    orientation?: typeof PageOrientation.LANDSCAPE;
+  } => pageDims(setup);
+
+  const docxSections = chunks.map((chunk, i) => {
+    const isSection0 = i === 0;
+    // The section's page setup: the break's attrs, else the store's.
+    const setup: PageSetup = chunk.setup ?? input.pageSetup;
+    const { width, height, orientation } = sectionProps(setup);
+    // The effective bands: the tagged overrides ?? the doc default
+    // (the two-level resolution — the export's mirror of the engine's).
+    const resolve = (region: keyof Bands): JSONContent[] =>
+      chunk.bands[region].length > 0 ? chunk.bands[region] : docDefault[region];
+    const build = (region: 'header' | 'footer', cls: 'Default' | 'First') => {
+      const content = resolve(`${region}${cls}` as keyof Bands);
+      return bandToPart(content, region, state) ?? new (region === 'header' ? Header : Footer)({ children: [] });
+    };
+    const headers: Record<string, Header | Footer> = {};
+    const footers: Record<string, Header | Footer> = {};
+    if (anyBands) {
+      headers.default = build('header', 'Default');
+      footers.default = build('footer', 'Default');
+      // The first class: SECTION 0 alone (the doc's page 0), under the
+      // doc-level differentFirstPage flag.
+      if (isSection0 && differentFirst) {
+        headers.first = build('header', 'First');
+        footers.first = build('footer', 'First');
+      }
+    }
+    return {
+      properties: {
+        page: {
+          size: { width, height, orientation },
+          margin: {
+            top: ptToTwip(setup.margins.top),
+            bottom: ptToTwip(setup.margins.bottom),
+            left: ptToTwip(setup.margins.left),
+            right: ptToTwip(setup.margins.right),
+          },
+        },
+        // titlePg lives on the section whose FIRST page differs —
+        // page 0 = section 0's (the doc-level model).
+        titlePage: isSection0 && differentFirst ? true : undefined,
+        // #58 — the section START (the break BEFORE this section's
+        // type): continuous flows on the same page (Word's w:type).
+        ...(isSection0
+          ? {}
+          : { type: chunk.startType === 'continuous' ? SectionType.CONTINUOUS : SectionType.NEXT_PAGE }),
+      },
+      ...(Object.keys(headers).length ? { headers: headers as never } : {}),
+      ...(Object.keys(footers).length ? { footers: footers as never } : {}),
+      children: mapBlocks(chunk.children, state),
+    };
+  });
 
   const doc = new Document({
     ...input.coreProperties,
@@ -964,31 +1090,7 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     ...(state.needsUpdateFields ? { features: { updateFields: true } } : {}),
     styles: buildStylesConfig(input, state.defs) as never,
     numbering: { config: numberingConfigs(state) as never },
-    sections: [
-      {
-        properties: {
-          page: {
-            size: { width, height, orientation },
-            margin: {
-              top: ptToTwip(input.pageSetup.margins.top),
-              bottom: ptToTwip(input.pageSetup.margins.bottom),
-              left: ptToTwip(input.pageSetup.margins.left),
-              right: ptToTwip(input.pageSetup.margins.right),
-            },
-          },
-          titlePage: differentFirst || undefined,
-        },
-        headers: {
-          ...(headerDefault ? { default: headerDefault } : {}),
-          ...(headerFirst ? { first: headerFirst } : {}),
-        },
-        footers: {
-          ...(footerDefault ? { default: footerDefault } : {}),
-          ...(footerFirst ? { first: footerFirst } : {}),
-        },
-        children: body,
-      },
-    ],
+    sections: docxSections as never,
   });
 
   // The webview path: toBlob (toBuffer is Node-only — the spike lesson).

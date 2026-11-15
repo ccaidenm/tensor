@@ -33,7 +33,7 @@ beforeEach(() => {
   });
   useDocumentPropertiesStore.setState({
     isOpen: false,
-    marginsIsOpen: false,
+    pageSetupIsOpen: false,
     statsIsOpen: false,
     customSizeIsOpen: false,
   });
@@ -434,12 +434,12 @@ describe('margin dragging', () => {
     act(() => {
       fireEvent.doubleClick(bar, { clientX: 40 }); // the left margin span (0..96)
     });
-    expect(useDocumentPropertiesStore.getState().marginsIsOpen).toBe(true);
+    expect(useDocumentPropertiesStore.getState().pageSetupIsOpen).toBe(true);
     act(() => {
-      useDocumentPropertiesStore.getState().closeMargins();
+      useDocumentPropertiesStore.getState().closePageSetup();
       fireEvent.doubleClick(bar, { clientX: 300 }); // inside the content box
     });
-    expect(useDocumentPropertiesStore.getState().marginsIsOpen).toBe(false);
+    expect(useDocumentPropertiesStore.getState().pageSetupIsOpen).toBe(false);
   });
 
   it('Reduce Motion OFF: the document reflows under the drag (live commits)', async () => {

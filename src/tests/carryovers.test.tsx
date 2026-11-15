@@ -3,7 +3,7 @@ import { act, render, fireEvent } from '@testing-library/react';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useConfigStore } from '@/lib/config/store';
-import { MarginsDialog } from '@/components/dialogs/MarginsDialog';
+import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
 import { DocumentFileSchema } from '@/lib/document/schema';
 import { parseUnitToPt } from '@/lib/document/pageSetup';import { DEFAULT_MARGINS, MARGIN_PRESETS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { renderTensor } from './harness';
@@ -27,7 +27,7 @@ beforeEach(() => {
   useDocumentStore.setState({
     pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
   });
-  useDocumentPropertiesStore.setState({ marginsIsOpen: false });
+  useDocumentPropertiesStore.setState({ pageSetupIsOpen: false });
   // The config store persists across tests — restore the layout mode
   // and the paste toggle each time (the page-background test flips to
   // Pageless; the paste tests set both polarities).
@@ -60,15 +60,18 @@ describe('margins-0', () => {
 
   it('entering 0 through the margins dialog applies 0 (no CSS/paint clamp)', async () => {
     const utils = renderTensor('<p>hello world</p>');
-    render(<MarginsDialog />);
+    render(<PageSetupDialog />);
     await settle();
     act(() => {
-      useDocumentPropertiesStore.getState().openMargins();
+      useDocumentPropertiesStore.getState().openPageSetup();
     });
     for (const label of ['Top', 'Bottom', 'Left', 'Right']) {
       const input = document.querySelector(`input[aria-label="${label} margin"]`)!;
       act(() => {
         fireEvent.change(input, { target: { value: '0' } });
+        // The ticker commits on blur/Enter (typing doesn't fire a
+        // commit per keystroke) — blur lands the draft.
+        fireEvent.blur(input);
       });
     }
     act(() => {
@@ -79,7 +82,7 @@ describe('margins-0', () => {
       top: 0, bottom: 0, left: 0, right: 0,
     });
     act(() => {
-      useDocumentPropertiesStore.getState().closeMargins();
+      useDocumentPropertiesStore.getState().closePageSetup();
     });
     utils.unmount();
   });

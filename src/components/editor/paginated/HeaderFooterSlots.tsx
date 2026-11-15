@@ -24,10 +24,17 @@ export function HeaderFooterSlots({
   pageIndex,
   geometry,
   editor,
+  sectionId = null,
 }: {
   pageIndex: number;
   geometry: PageGeometry;
   editor: Editor | null;
+  /** #58 — the page's section's tag (null = unsectioned/uniform): the
+   *  slot resolves the RESOLVED band (this section's override ?? the
+   *  doc default) — a section inheriting a live default has NO slot
+   *  (its strip is live), and dblclick enables the SECTION's own
+   *  container (Word: editing an inherited header unlinks it). */
+  sectionId?: string | null;
 }) {
   const show = useConfigStore((s) => s.config.editor.showHeadersFooters);
   const settings = useDocumentStore((s) => s.headerFooter);
@@ -35,25 +42,35 @@ export function HeaderFooterSlots({
 
   const differentFirst = settings?.differentFirstPage ?? false;
   const isFirst = pageIndex === 0;
-  // The region this page paints (first vs default containers).
+  // The region this page paints (first vs default containers). #58:
+  // the first class is section 0's alone (the doc's page 0); sections
+  // > 0 always paint the default class.
   const wants: ('header' | 'footer')[] = [];
   const variantFor = (which: 'header' | 'footer'): 'default' | 'first' => {
     void which;
+    // The class depends only on the PAGE (the doc's page 0 under
+    // differentFirstPage) — a section 0 override can tag EITHER class.
     return isFirst && differentFirst ? 'first' : 'default';
   };
-  const hasContainer = (which: 'header' | 'footer'): boolean => {
+  const hasResolvedBand = (which: 'header' | 'footer'): boolean => {
     const name = which === 'header' ? 'headerBlock' : 'footerBlock';
     const variant = variantFor(which);
     let found = false;
     editor.state.doc.forEach((node: PMNode) => {
       if (found || node.type.name !== name) return;
       const v = node.attrs.variant === 'first' ? 'first' : 'default';
-      if (v === variant) found = true;
+      if (v !== variant) return;
+      const tag = typeof node.attrs.sectionId === 'string' ? node.attrs.sectionId : null;
+      // The RESOLUTION: this section's own override, OR the doc
+      // default (an untagged container paints for EVERY inheriting
+      // section — including id-carrying ones without an override, the
+      // final section's reserved id included).
+      if (tag === sectionId || tag === null) found = true;
     });
     return found;
   };
-  if (!hasContainer('header')) wants.push('header');
-  if (!hasContainer('footer')) wants.push('footer');
+  if (!hasResolvedBand('header')) wants.push('header');
+  if (!hasResolvedBand('footer')) wants.push('footer');
   if (wants.length === 0) return null;
 
   const stripStyle = (which: 'header' | 'footer'): CSSProperties =>
@@ -80,7 +97,7 @@ export function HeaderFooterSlots({
             width: geometry.contentBox.width,
             ...stripStyle(which),
           }}
-          onDoubleClick={() => enableRegion(editor, which, variantFor(which))}
+          onDoubleClick={() => enableRegion(editor, which, variantFor(which), sectionId)}
         />
       ))}
     </>

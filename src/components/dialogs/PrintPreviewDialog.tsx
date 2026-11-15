@@ -251,14 +251,16 @@ export function PrintPreviewDialog() {
   // the CONTENT box (the default border-box never fires on scrollbar
   // appearance), or fit pages would overflow horizontally and force
   // the scroll the user reported.
-  const firstPage = build?.pages[0];
+  // #58 — fit against the WIDEST page (mixed sections make pages
+  // differ; fitting to pages[0] would clip a wider section's sheet).
+  // Same scrollbar-fix observer as before — only the datum changed.
+  const widestPage = build ? build.pages.reduce((m, p) => Math.max(m, p.width), 0) : 0;
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || !firstPage) return;
+    if (!el || widestPage <= 0) return;
     const compute = () => {
       const avail = el.clientWidth - 48; // the sheet side gutters
-      if (firstPage.width > 0)
-        setFitScale(Math.min(1, avail / firstPage.width));
+      setFitScale(Math.min(1, avail / widestPage));
     };
     compute();
     // Post-animation settle (the dialog's zoom-in): one deferred pass.
@@ -269,7 +271,7 @@ export function PrintPreviewDialog() {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [firstPage, isOpen]);
+  }, [widestPage, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -299,13 +301,23 @@ export function PrintPreviewDialog() {
   const scale = zoom === "fit" ? fitScale : zoom / 100;
   const visiblePages = parsePageRange(rangeRaw, build.total);
 
-  const pageW = build.pages[0]?.width ?? 0;
-  const paperLabel = `${pageSetup.pageSize}${pageSetup.orientation === "landscape" ? " (landscape)" : ""}`;
+  // #58 — the centering wrapper spans the WIDEST page (mixed sections);
+  // the sheets center within it (the view's align prop).
+  const pageW = widestPage;
+  // #58 — the summary's paper line: per-section setups make pages
+  // differ; a single size name would lie. Uniform docs keep the exact
+  // label (pages all equal — the degenerate check, no doc-schema read).
+  const sizesUniform =
+    build.pages.every((p) => p.width === build.pages[0]!.width && p.height === build.pages[0]!.height);
+  const paperLabel = sizesUniform
+    ? `${pageSetup.pageSize}${pageSetup.orientation === "landscape" ? " (landscape)" : ""}`
+    : "Mixed (per section)";
   // HUMAN margins (the user's ask): the display unit is the user's
   // config.editor.measurementUnit (one source — the same unit the
   // margins/page-size dialogs use), never raw "72/72/72/72 pt".
   const marginsLabel = formatMarginsSummary(pageSetup.margins, unit);
-  const paperSizeLabel = PAGE_SIZES[pageSetup.pageSize]?.inches;
+  // The inches suffix only means something under ONE paper size.
+  const paperSizeLabel = sizesUniform ? PAGE_SIZES[pageSetup.pageSize]?.inches : undefined;
 
   const nameBase = safeName(fileNameRaw);
 
@@ -555,6 +567,10 @@ export function PrintPreviewDialog() {
                       <PrintDocumentView
                         pages={build.pages}
                         visiblePages={visiblePages}
+                        // #58 — mixed page widths center in the PREVIEW
+                        // (Word's posture); the print container keeps
+                        // flex-start (ink at the paper origin).
+                        align="center"
                       />
                     </div>
                   </div>

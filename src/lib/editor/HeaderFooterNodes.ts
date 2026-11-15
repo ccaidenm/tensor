@@ -50,6 +50,20 @@ function createHeaderFooterNode({ name, tag, legacyTag }: HeaderFooterNodeOption
             'data-variant': attrs.variant === 'first' ? 'first' : 'default',
           }),
         },
+        // #58 SECTIONS — the section OVERRIDE tag: a container tagged
+        // with a sectionBreak's sectionId feeds THAT section's bands
+        // (Word's "this section's own header"); UNTAGGED containers are
+        // the doc default every non-overriding section inherits ("link
+        // to previous" by construction). The adapter resolves the tag
+        // to a section index; a stale tag (the break deleted) resolves
+        // to the doc default — content preserved. The merge-on-delete
+        // law drops tagged containers WITH their break (one undo step).
+        sectionId: {
+          default: null,
+          parseHTML: (el: HTMLElement) => el.getAttribute('data-section-id'),
+          renderHTML: (attrs: Record<string, unknown>) =>
+            attrs.sectionId ? { 'data-section-id': attrs.sectionId } : {},
+        },
       };
     },
 
@@ -74,6 +88,17 @@ export const FooterBlock = createHeaderFooterNode({
   tag: 'footer-block',
   legacyTag: 'footerBlock',
 });
+
+/**
+ * #58 — the FINAL section's band-override identity. The breaks carry
+ * sections 0..n-1's ids (the preceding-section spelling); the FINAL
+ * section rides the store's pageSetup — and its BAND override needs a
+ * key too: a container tagged with this reserved id feeds the FINAL
+ * section only (the adapter maps it to the last index; the docx export
+ * routes it to the final sectPr). Uncolliding with the generated
+ * `sec-…` ids by construction.
+ */
+export const FINAL_SECTION_ID = 'sec-final';
 
 export type HeaderFooterVariant = 'default' | 'first';
 

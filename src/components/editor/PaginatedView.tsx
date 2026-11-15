@@ -67,6 +67,9 @@ import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/re
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
 import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
+import { pageIndexAtY, pageTops, stackSize } from '@/lib/paginated/pageStack';
+import { enableRegion, findBandContainer, type BandWhich } from '@/lib/editor/headerFooterCommands';
+import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import { PageSheet } from './paginated/PageSheet';
 import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
@@ -80,6 +83,7 @@ import { Ruler, VerticalRuler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
+import { BreakMarks } from './paginated/BreakMarks';
 import { SpellHighlights, type SpellBar } from './paginated/SpellHighlights';
 import { FloatingToolbar } from './FloatingToolbar';
 import { LinkBubble } from './LinkBubble';
@@ -146,6 +150,8 @@ interface PaginatedViewProps {
 interface LayoutState {
   blocks: AdapterBlock[];
   result: LayoutResult;
+  /** #58 — the NPC break facts (the BreakMarks layer's sidecar). */
+  breakFacts: import('@/lib/paginated/adapter').AdapterResult['breakFacts'];
   /**
    * M-HEADER-FOOTER-3: the band blocks' ids — the cross-surface
    * selection clamp's membership set (from the adapter sidecar).
@@ -307,6 +313,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
   // Display-only ink (M6): NPCs paint on screen; never a layout fact.
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
+  const showBreakMarks = useConfigStore((s) => s.config.editor.showBreakMarks);
   // M-IMAGES-1: caption display toggle (NPC precedent — ink only).
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
   // M-RULER: per-axis display gates (the command palette owns the
@@ -537,11 +544,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // selection band would paint a full line-box stripe OVER the
     // image (and zero-width before the object-aware walk). The
     // caret is suppressed too: a NodeSelection has no text caret.
-    const stride = current.result.pages[0]!.size.height + useDocumentStore.getState().pageSetup.pageGap;
+    const tops = pageTops(current.result.pages, useDocumentStore.getState().pageSetup.pageGap);
     const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
       pageIndex: pr.pageIndex,
       left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
-      top: pr.pageIndex * stride + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
+      top: tops[pr.pageIndex]! + current.result.pages[pr.pageIndex]!.contentBox.y + pr.rect.y,
       width: pr.rect.width,
       height: pr.rect.height,
     });
@@ -800,7 +807,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         // M-HEADER-FOOTER-2: per-call band options (L4) — the engine
         // owns the band geometry from here.
         differentFirstPage: hfSettings?.differentFirstPage ?? false,
-      }, refPagesIn ?? undefined, fieldTotalIn);
+      }, refPagesIn ?? undefined, fieldTotalIn, pageSetupNow);
       const result1 = engineRef.current!.layout(
         // M-HEADER-FOOTER-2: the View ▸ Show Headers & Footers toggle is
         // DISPLAY-ONLY but rides the LAYOUT (the captions precedent is
@@ -810,7 +817,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         useConfigStore.getState().config.editor.showHeadersFooters === false
           ? { ...pass1.doc, bands: undefined }
           : pass1.doc,
-        toLayoutOptions(pageSetupNow),
+        {
+          ...toLayoutOptions(pageSetupNow),
+          // #58 — the resolved section table (absent when the doc
+          // carries no sectionBreak nodes — the additive law).
+          ...(pass1.sections ? { sections: pass1.sections } : {}),
+        },
       );
       const refPagesOut = resolveReferencePages(pass1.blocks, result1.lines, refPagesIn);
       // M-PAGEFIELD: the total resolves off pass 1's page count — the
@@ -830,12 +842,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           epoch: registryNow.epoch,
         }, {
           differentFirstPage: hfSettings?.differentFirstPage ?? false,
-        }, refPagesMoved ? refPagesOut : refPagesIn ?? undefined, totalNow);
+        }, refPagesMoved ? refPagesOut : refPagesIn ?? undefined, totalNow, pageSetupNow);
         result = engineRef.current!.layout(
           useConfigStore.getState().config.editor.showHeadersFooters === false
             ? { ...adapted.doc, bands: undefined }
             : adapted.doc,
-          toLayoutOptions(pageSetupNow),
+          {
+            ...toLayoutOptions(pageSetupNow),
+            ...(adapted.sections ? { sections: adapted.sections } : {}),
+          },
         );
       }
       // Permanent benchmark seam: total relayout time, readable
@@ -877,7 +892,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           spliced: engineRef.current!.lastStats.blocksSpliced,
         });
       }
-      const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch, bandBlockIds: adapted.bandBlockIds };
+      const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch, bandBlockIds: adapted.bandBlockIds, breakFacts: adapted.breakFacts };
       layoutRef.current = next;
       // No flushSync — React batches setLayout calls
       // from N input events into ONE render + ONE useLayoutEffect paint
@@ -1025,11 +1040,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const sr = stack.getBoundingClientRect();
     const localX = (e.clientX - sr.left) / z;
     const localY = (e.clientY - sr.top) / z;
-    const page0 = layout.result.pages[0]!;
-    const stride = page0.size.height + pageSetup.pageGap;
-    const pageIndex = Math.max(0, Math.min(layout.result.pages.length - 1, Math.floor(localY / stride)));
+    const tops = pageTops(layout.result.pages, pageSetup.pageGap);
+    const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
     const page = layout.result.pages[pageIndex]!;
-    const inPageY = localY - pageIndex * stride - page.contentBox.y;
+    const inPageY = localY - tops[pageIndex]! - page.contentBox.y;
     const inPageX = localX - page.contentBox.x;
     const inside = (p: (typeof layout.result.placed)[number]) =>
       inPageX >= p.rect.x &&
@@ -1095,6 +1109,46 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     applyRightClickSelection(editor, pmPosAt(e));
   }
 
+  /** #58 — the UNLINK flow (Word's edit-unlinks): double-clicking a
+   *  LIVE band strip of an INHERITING section creates that section's
+   *  own header/footer — seeded with a copy of the inherited content —
+   *  instead of word-selecting into the doc default (whose edits would
+   *  restyle every section). An OVERRIDING section's strip dblclicks
+   *  normally (word-select in its own content). Uniform docs: normal
+   *  word-select everywhere (there is nothing to unlink). */
+  function handleBandDoubleClick(e: React.MouseEvent) {
+    if (!editor || adapterError || !layout) return;
+    const stack = stackRef.current;
+    if (!stack) return;
+    const z = useConfigStore.getState().config.editor.zoomLevel / 100;
+    const sr = stack.getBoundingClientRect();
+    const localY = (e.clientY - sr.top) / z;
+    const tops = pageTops(layout.result.pages, pageSetup.pageGap);
+    const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
+    const page = layout.result.pages[pageIndex]!;
+    const inPageY = localY - tops[pageIndex]!;
+    const which: BandWhich | null =
+      inPageY < page.contentBox.y
+        ? 'header'
+        : inPageY > page.contentBox.y + page.contentBox.height
+          ? 'footer'
+          : null;
+    if (!which) return; // the body — normal word-select
+    // A sectioned document only (a uniform doc has nothing to unlink).
+    if (sectionIds.length === 0) return;
+    const variant =
+      pageIndex === 0 && (useDocumentStore.getState().headerFooter?.differentFirstPage ?? false)
+        ? 'first'
+        : 'default';
+    const sectionId = sectionIdOfPage(page.sectionIndex);
+    // An OVERRIDING section's band is live content — normal editing.
+    if (findBandContainer(editor, which, variant, sectionId)) return;
+    // The section INHERITS — unlink: create its own band (the seed =
+    // a copy of the inherited content) and focus it.
+    e.preventDefault();
+    enableRegion(editor, which, variant, sectionId);
+  }
+
   function handleMouseDown(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
     // Middle button: paste-on-middle-click (settings > General >
@@ -1135,11 +1189,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       const sr = stack.getBoundingClientRect();
       const localX = (e.clientX - sr.left) / z;
       const localY = (e.clientY - sr.top) / z;
-      const page0 = layout.result.pages[0]!;
-      const stride = page0.size.height + pageSetup.pageGap;
-      const pageIndex = Math.max(0, Math.min(layout.result.pages.length - 1, Math.floor(localY / stride)));
+      const tops = pageTops(layout.result.pages, pageSetup.pageGap);
+      const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
       const page = layout.result.pages[pageIndex]!;
-      const inPageY = localY - pageIndex * stride - page.contentBox.y;
+      const inPageY = localY - tops[pageIndex]! - page.contentBox.y;
       const inPageX = localX - page.contentBox.x;
       const inside = (p: (typeof layout.result.placed)[number]) =>
         inPageX >= p.rect.x &&
@@ -1337,17 +1390,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         selectionInBand(editor) ? activeBandPage() : undefined
       );
       if (!caretGeom) return; // selection outside text: nothing to reveal
-      const page0 = current.result.pages[0];
       const { pageSetup: setupNow } = useDocumentStore.getState();
       const zoomNow = useConfigStore.getState().config.editor.zoomLevel / 100;
+      // #58: the caret's OWN page carries the geometry (mixed sections).
+      const caretPage = current.result.pages[caretGeom.pageIndex]!;
+      const topsNow = pageTops(current.result.pages, setupNow.pageGap);
       scrollCaretIntoView(
         stack,
         caretStackRect(
           caretGeom,
-          page0.contentBox.x,
-          page0.contentBox.y,
-          page0.size.height,
-          setupNow.pageGap
+          caretPage.contentBox.x,
+          caretPage.contentBox.y,
+          topsNow[caretGeom.pageIndex]!
         ),
         zoomNow
       );
@@ -1890,12 +1944,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const page0 = current.result.pages[0];
     if (!geom || !page0) return { left: 0, top: 0 };
     const { pageSetup: setup } = useDocumentStore.getState();
+    // #58: the caret's OWN page carries the geometry (mixed sections).
+    const caretPage = current.result.pages[geom.pageIndex]!;
     const r = caretStackRect(
       geom,
-      page0.contentBox.x,
-      page0.contentBox.y,
-      page0.size.height,
-      setup.pageGap
+      caretPage.contentBox.x,
+      caretPage.contentBox.y,
+      pageTops(current.result.pages, setup.pageGap)[geom.pageIndex]!
     );
     return { left: sr.left + r.left * z, top: sr.top + (r.top + r.height) * z };
   }, []);
@@ -1918,14 +1973,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (!placed) return { left: 0, top: 0 };
     const z = useConfigStore.getState().config.editor.zoomLevel / 100;
     const sr = stack.getBoundingClientRect();
-    const page0 = current.result.pages[0]!;
-    const stride = page0.size.height + pageSetup.pageGap;
     const page = current.result.pages[placed.pageIndex]!;
+    const top = pageTops(current.result.pages, pageSetup.pageGap)[placed.pageIndex]!;
     return {
       left:
         sr.left +
         (page.contentBox.x + placed.rect.x + placed.rect.width / 2 - 160) * z,
-      top: sr.top + (placed.pageIndex * stride + page.contentBox.y + placed.rect.y + placed.rect.height) * z + 4,
+      top: sr.top + (top + page.contentBox.y + placed.rect.y + placed.rect.height) * z + 4,
     };
   }, [pageSetup.pageGap]);
   const equationBubbleRef = useRef<HTMLDivElement>(null);
@@ -1936,6 +1990,40 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   );
 
   if (!editor) return null;
+
+  // #58 — the SECTION→ID map (break order = section order): the band
+  // slots resolve a page's section tag to enable/focus the right
+  // container. A plain render-time walk over the immutable PM state
+  // (the rulerModel precedent — NO hook: this sits after the early
+  // returns; the derivation is cheap, breaks are top-level atoms).
+  const sectionIds: (string | null)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const tag = node.attrs.sectionId;
+      sectionIds.push(typeof tag === 'string' && tag ? tag : null);
+    }
+  });
+  const sectionIdOfPage = (sectionIndex: number): string | null => {
+    // The FINAL section has no break node — its band-override identity
+    // is the reserved id (the store law's spelling). SECTIONED docs
+    // only: a uniform doc's pages stay untagged (they ARE the doc
+    // default).
+    if (sectionIds.length === 0) return null;
+    return sectionIds[sectionIndex] ?? (sectionIndex === sectionIds.length ? FINAL_SECTION_ID : null);
+  };
+  // #58 — the per-section PAGE BACKGROUND: each break's setup carries
+  // its section's color; UNSET inherits the doc default (the store's
+  // pageColor — the two-level band model). View-only ink (the print
+  // walk paints white paper, unchanged).
+  const sectionColors: (string | undefined)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const color = (node.attrs.setup as { pageColor?: string } | undefined)?.pageColor;
+      sectionColors.push(typeof color === 'string' && color ? color : undefined);
+    }
+  });
+  const backgroundForPage = (sectionIndex: number): string | undefined =>
+    sectionColors[sectionIndex] ?? (pageSetup.pageColor || undefined);
 
   // Fallback: the strict-adapter throw surfaces as a pageless render of
   // the SAME EditorContent — never a crash. The input-view container
@@ -1976,8 +2064,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   }
 
   const { result, blocks } = layout;
-  const geometry = result.pages[0];
-  const { width: pageW, height: pageH } = geometry.size;
+  // #58 — pageW/pageH are gone (pages differ per section); every
+  // consumer reads its OWN page's geometry or the cumulative table.
+  // The rulers keep the desk's FIRST page (their section-aware
+  // follow-up rides Phase 2's band work).
+  const firstGeometry = result.pages[0];
   const gap = pageSetup.pageGap;
   const z = zoomLevel / 100;
   // M-RULER: the caret block's indent attrs — derived straight from the
@@ -1989,8 +2080,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // state, so the ruler rules it identically (tab stops land in band
   // paragraphs while the selection sits there).
   const rulerModel = editor && layout ? deriveRulerModel(editor.state) : null;
-  const stackW = pageW;
-  const stackH = result.pages.length * pageH + (result.pages.length - 1) * gap;
+  // #58 — the stack's cumulative arithmetic (mixed page sizes): the
+  // sheet tops, the max width, the total height — one helper, shared
+  // with the hit-testers and the overlays.
+  const pageTopTable = pageTops(result.pages, gap);
+  const stackDims = stackSize(result.pages, gap);
+  const stackW = stackDims.width;
+  const stackH = stackDims.height;
   const rootRect = rootRef.current?.getBoundingClientRect();
   // The spell bubble's anchor: the flagged word's painted text extent
   // (stack-local pre-zoom) → viewport (the transform's scale applied —
@@ -2042,10 +2138,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         editor &&
         createPortal(
           <VerticalRuler
-            geometry={geometry}
+            pages={result.pages}
             zoom={z}
             editor={editor}
-            pageCount={result.pages.length}
           />,
           deskWrapper,
         )}
@@ -2068,6 +2163,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         onMouseDown={handleMouseDown}
         onMouseUp={swallowMiddleClick}
         onAuxClick={swallowMiddleClick}
+        onDoubleClick={handleBandDoubleClick}
       >
         <div
           ref={stackRef}
@@ -2092,9 +2188,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
               <PageSheet
                 key={page.index}
                 geometry={page}
-                top={page.index * (pageH + gap)}
+                top={pageTopTable[page.index]!}
                 observeRef={observeSheet}
-                background={pageSetup.pageColor || undefined}
+                background={backgroundForPage(page.sectionIndex)}
               >
                 {/* M-IMAGES-2 PAINT ORDER: 'behind' floats mount (and
                     paint) BEFORE the text tracks; 'front' + in-flow
@@ -2256,7 +2352,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     CONTENT is canvas paint (engine band lines —
                     see the BlockCanvas muted pass), interaction is
                     the ONE hidden view via hitTest's band-strip rule. */}
-                <HeaderFooterSlots pageIndex={page.index} geometry={page} editor={editor} />
+                <HeaderFooterSlots
+                  pageIndex={page.index}
+                  geometry={page}
+                  editor={editor}
+                  sectionId={sectionIdOfPage(page.sectionIndex)}
+                />
               </PageSheet>
             );
           })}
@@ -2265,15 +2366,21 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           {searchPaint && (
             <SearchHighlights matches={searchPaint.all} current={searchPaint.current} />
           )}
+          {/* #58 — the break marks (the structural NPC layer, the
+              Review ▸ Show Break Marks toggle): the page/section-break
+              badges — view-only ink, never printed. */}
+          {showBreakMarks && (
+            <BreakMarks facts={layout.breakFacts} result={result} pageGap={gap} />
+          )}
           <SelectionHighlights rects={selRects} color={selectionColor || undefined} />
           {caret && editorFocused && selRects.length === 0 &&
             (() => {
+              const caretPage = result.pages[caret.pageIndex]!;
               const r = caretStackRect(
                 caret,
-                geometry.contentBox.x,
-                geometry.contentBox.y,
-                pageH,
-                gap
+                caretPage.contentBox.x,
+                caretPage.contentBox.y,
+                pageTopTable[caret.pageIndex]!
               );
               return (
                 <div
@@ -2286,12 +2393,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             })()}
           {composing != null && caret &&
             (() => {
+              const caretPage = result.pages[caret.pageIndex]!;
               const r = caretStackRect(
                 caret,
-                geometry.contentBox.x,
-                geometry.contentBox.y,
-                pageH,
-                gap
+                caretPage.contentBox.x,
+                caretPage.contentBox.y,
+                pageTopTable[caret.pageIndex]!
               );
               return (
                 <div
@@ -2373,7 +2480,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         deskWrapper &&
         editor &&
         createPortal(
-          <Ruler geometry={geometry} zoom={z} model={rulerModel} editor={editor} />,
+          <Ruler geometry={firstGeometry} zoom={z} model={rulerModel} editor={editor} />,
           deskWrapper,
         )}
     </div>

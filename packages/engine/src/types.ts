@@ -697,6 +697,27 @@ export interface BandSet {
    * BAND_ANCHOR_PX (Word's 36pt at 96dpi = 48px).
    */
   anchorPx?: number
+  /**
+   * #58 SECTIONS — the per-section band OVERRIDES: section s's band is
+   * its override here, else the doc-level default above (Word's "link
+   * to previous" resolution — the adapter resolves the tagged band
+   * containers to section indexes; untagged containers ARE the doc
+   * default). Absent (or a missing entry) = the section inherits. The
+   * first* regions are meaningful only under differentFirstPage and
+   * only for section 0 (the doc's page 0 lives there); sections > 0
+   * always paint the default class.
+   */
+  perSection?: PerSectionBands[]
+}
+
+/** One section's band overrides (the non-inherited content). */
+export interface PerSectionBands {
+  /** The 0-based section index (the LayoutOptions.sections order). */
+  section: number
+  header?: Block[]
+  footer?: Block[]
+  firstHeader?: Block[]
+  firstFooter?: Block[]
 }
 
 /** Word's header/footer anchor distance: 36pt → 48 CSS px (96dpi). */
@@ -710,14 +731,70 @@ export interface LayoutOptions {
    * when omitted; per-block flow.widowControl overrides this.
    */
   preventWidowsAndOrphans?: boolean
+  /**
+   * #58 SECTIONS — the per-section geometry table. Each boundary is a
+   * FORCED PAGE BREAK + a geometry swap: the walk crossing it closes
+   * a non-fresh page (the breakBefore law) and switches the ACTIVE
+   * geometry (page dims, margins, band wrap width, contentBox) to
+   * `geometry` — the FOLLOWING section's setup.
+   *
+   * THE ADAPTER RESOLVES EVERYTHING: the shell's sectionBreak nodes
+   * carry the PRECEDING section's props (Word's sectPr spelling), so
+   * the adapter — which sees the whole doc — emits one boundary per
+   * section START: afterBlock -1 carries section 0's geometry (the
+   * first break's attrs), each subsequent boundary carries the next
+   * break's attrs or the doc defaults for the final section. The
+   * engine never parses node attrs. Absent → ONE section of the
+   * opts geometry (today's shape exactly — additive).
+   *
+   * RIDES THE CONTEXT HASH: stableStringify(opts) covers sections, so
+   * any boundary/geometry change invalidates the walk caches wholesale
+   * (the same class as a page-margin change — L4's per-call law).
+   */
+  sections?: SectionBoundary[]
+}
+
+/** One section's page geometry (the active-geometry swap target). */
+export interface SectionGeometry {
+  page: { width: number; height: number }
+  margins: { top: number; right: number; bottom: number; left: number }
+}
+
+export interface SectionBoundary {
+  /**
+   * The boundary sits BETWEEN blocks[afterBlock] and
+   * blocks[afterBlock + 1]; -1 = the document start (section 0's
+   * geometry — the walk applies it before the first block). Boundaries
+   * must be sorted ascending; several may share afterBlock (consecutive
+   * breaks — an EMPTY middle section holds no pages: pages derive from
+   * placed lines, the walk's invariant; its geometry simply never
+   * renders).
+   */
+  afterBlock: number
+  geometry: SectionGeometry
+  /**
+   * #58 — how the section STARTS (Word's "Section start"): 'nextPage'
+   * closes the previous page; 'continuous' flows on — UNLESS the new
+   * section's geometry differs, which Word upgrades to a page start
+   * (a page cannot hold two geometries — the engine's one-geometry-
+   * per-page law; the same-page sections simply share the frame).
+   * The doc-start boundary (−1) ignores this (a document opens a page).
+   */
+  type?: 'nextPage' | 'continuous'
 }
 
 export interface PageGeometry {
   index: number
   size: Rect
   contentBox: Rect
-  // All pages share opts geometry. TODO(sections): per-section
-  // page descriptors.
+  /**
+   * #58 — the section this page belongs to (0-based, in boundary
+   * order). Derives from the walk's own per-block entry pages: a block
+   * never spans a boundary (the boundary closes before the block), so
+   * every page a block touches carries its entry section. Uniform
+   * documents (no sections option) are all 0.
+   */
+  sectionIndex: number
 }
 
 export interface LineBox {

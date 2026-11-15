@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Table } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Table } from 'lucide-react';
 import { usePaletteStore } from '@/lib/palette/store';
 import { useAppCommands } from '@/lib/commands/useAppCommands';
 import type { CommandAction, CommandGroup as CommandGroupKind } from '@/lib/commands/registry';
@@ -148,7 +148,26 @@ export function CommandPalette() {
         data-testid="palette-footer"
         className="border-t px-3 py-2 text-center text-xs text-muted-foreground"
       >
-        ↑↓ navigate · ↵ run · esc close
+        <div className="flex items-center justify-between px-2 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1">
+            <Kbd>
+              <CornerDownLeft className="size-3.5" />
+            </Kbd>
+            <span>to select</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Kbd>
+              <ArrowUp className="size-3.5" />
+            </Kbd>
+            <Kbd>
+              <ArrowDown className="size-3.5" />
+            </Kbd>
+            <span>to navigate</span>
+            <span>·</span>
+            <Kbd>esc</Kbd>
+            <span>to close</span>
+          </div>
+        </div>
       </div>
     </CommandDialog>
   );

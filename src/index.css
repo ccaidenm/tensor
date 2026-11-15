@@ -314,6 +314,32 @@ body {
   color: #94a3b8;
 }
 
+/* #58 — the section-break marker: the page-break marker's shape, a
+   DOUBLE dash (two lines — a section is a break + a geometry swap).
+   Same muted family; the label names it. */
+.section-break-marker {
+  height: 5px;
+  margin: 1.5rem 0;
+  border-top: 2px dashed #94a3b8;
+  border-bottom: 2px dashed #94a3b8;
+  position: relative;
+}
+.section-break-marker::after {
+  content: 'Section Break';
+  position: absolute;
+  top: -0.95em;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-background);
+  padding: 0 0.5em;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+/* #58 — the continuous spelling reads in the marker's label too. */
+.section-break-marker[data-section-type="continuous"]::after {
+  content: 'Section Break (Continuous)';
+}
+
 .show-non-printing p::after {
   content: '¶';
   color: theme(colors.muted-foreground);

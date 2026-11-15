@@ -138,11 +138,16 @@ function PrintElementView({ el }: { el: PrintElement }) {
 export const PrintDocumentView = memo(function PrintDocumentView({
   pages,
   visiblePages,
+  align = 'start',
 }: {
   pages: readonly PrintPage[];
   /** Page-range filter (the preview's option): a set of 0-based indexes,
    *  or null for all. */
   visiblePages?: ReadonlySet<number> | null;
+  /** #58 — mixed page widths: the PREVIEW centers sheets (Word's
+   *  posture); the print container keeps 'start' (ink at the paper
+   *  origin — a centered sheet would shift the print). */
+  align?: 'start' | 'center';
 }) {
   return (
     <div
@@ -152,7 +157,12 @@ export const PrintDocumentView = memo(function PrintDocumentView({
       // a column with a visible gutter — the modal's preview consumer
       // styles the gap (PAGE_GAP in the dialog); the PRINT container
       // (Mark 2) sets gap 0 (the @page breaks separate sheets there).
-      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--print-page-gap, 24px)' }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--print-page-gap, 24px)',
+        alignItems: align === 'center' ? 'center' : undefined,
+      }}
     >
       {pages.map((page) => {
         if (visiblePages && !visiblePages.has(page.index)) return null;
