@@ -58,12 +58,14 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
   const fieldTotalIn = 8;
   const pass1 = pmDocToSemantic(editor.state.doc, baseStyle, registry, {
     differentFirstPage: doc.headerFooter?.differentFirstPage ?? false,
-  }, undefined, fieldTotalIn);
+  }, undefined, fieldTotalIn, pageSetup);
   const result1 = engine.layout(
     config.editor.showHeadersFooters === false
       ? { ...pass1.doc, bands: undefined }
       : pass1.doc,
-    layoutOptions,
+    // #58 — the sections ride (ONE geometry source: the preview, the
+    // print, and the PDF consume the same table).
+    { ...layoutOptions, ...(pass1.sections ? { sections: pass1.sections } : {}) },
   );
   const total = result1.pages.length;
   const guess = fieldTotalIn ?? 8;
@@ -72,12 +74,12 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
   if (String(total).length > String(guess).length) {
     adapted = pmDocToSemantic(editor.state.doc, baseStyle, registry, {
       differentFirstPage: doc.headerFooter?.differentFirstPage ?? false,
-    }, undefined, total);
+    }, undefined, total, pageSetup);
     layout = engine.layout(
       config.editor.showHeadersFooters === false
         ? { ...adapted.doc, bands: undefined }
         : adapted.doc,
-      layoutOptions,
+      { ...layoutOptions, ...(adapted.sections ? { sections: adapted.sections } : {}) },
     );
   }
 

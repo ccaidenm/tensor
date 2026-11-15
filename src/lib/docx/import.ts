@@ -130,6 +130,9 @@ export interface DocxImportReport {
   evenOddHeaders: number;
   internalLinks: number;
   sectionBreaks: number;
+  /** #58 — a NON-first section's titlePg (per-section first-page has
+   *  no v1 model; the doc flag governs page 0 = section 0's first). */
+  perSectionFirstPage: number;
   textboxes: number;
   footnotes: number;
   unknownNodes: number;
@@ -140,8 +143,8 @@ function emptyReport(): DocxImportReport {
   return {
     trackedChanges: 0, comments: 0, tocFields: 0, pageFields: 0, otherFields: 0,
     inlineEquations: 0, degradedEquations: 0, refusedImages: 0, wrapAroundFloats: 0,
-    vertAligns: 0, evenOddHeaders: 0, internalLinks: 0, sectionBreaks: 0, textboxes: 0,
-    footnotes: 0, unknownNodes: 0, unknownNumbering: 0,
+    vertAligns: 0, evenOddHeaders: 0, internalLinks: 0, sectionBreaks: 0, perSectionFirstPage: 0,
+    textboxes: 0, footnotes: 0, unknownNodes: 0, unknownNumbering: 0,
   };
 }
 
@@ -185,8 +188,8 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
   if (report.internalLinks > 0) {
     lines.push(`Internal links imported as plain text (${report.internalLinks})`);
   }
-  if (report.sectionBreaks > 0) {
-    lines.push(`Section breaks collapsed to one section (${report.sectionBreaks})`);
+  if (report.perSectionFirstPage > 0) {
+    lines.push(`Per-section first-page settings collapsed to the document's (${report.perSectionFirstPage})`);
   }
   if (report.unknownNumbering > 0) {
     lines.push(`Unknown list numbering formats mapped to decimal (${report.unknownNumbering})`);
@@ -740,10 +743,19 @@ function findBlip(node: ONode): ONode | undefined {
 interface ParagraphResult {
   json: JSONContent | null;
   numPr: { numId: number; ilvl: number } | null;
+  /**
+   * #58 — the paragraph's OWN sectPr when it carries one (Word's
+   * mid-doc section break spelling: the sectPr rides the section's
+   * LAST paragraph's pPr; the body-level sectPr is the final one).
+   * The body walk flushes it AFTER the paragraph's content emits (the
+   * content belongs to the ENDING section — the break follows it).
+   */
+  sectPr?: ONode;
 }
 
 function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): ParagraphResult {
   const pPr = oSub(p, 'pPr');
+  const ownSectPr = oSub(pPr, 'sectPr');
   const numPrNode = oSub(pPr, 'numPr');
   const numId = numPrNode ? ovalNum(numPrNode, 'numId') : null;
   const ilvl = numPrNode ? (ovalNum(numPrNode, 'ilvl') ?? 0) : 0;
@@ -968,6 +980,7 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
   return {
     json: merged.length ? { type: 'paragraph', attrs, content: merged } : { type: 'paragraph', attrs },
     numPr: numId != null ? { numId, ilvl } : null,
+    ...(ownSectPr ? { sectPr: ownSectPr } : {}),
   };
 }
 
@@ -1163,6 +1176,9 @@ interface SectionResult {
   headerFooter: HeaderFooterSettings;
   lineNumbers: LineNumbersSetting | null;
   bands: JSONContent[];
+  /** #58 — Word's sectPr `type`: how THIS section begins
+   *  ('continuous' | 'nextPage' — the default). */
+  type: 'nextPage' | 'continuous';
 }
 
 function mapSection(sectPr: ONode, ctx: MapContext, trees: DocxTrees): SectionResult {
@@ -1199,6 +1215,10 @@ function mapSection(sectPr: ONode, ctx: MapContext, trees: DocxTrees): SectionRe
   const headerFooter = defaultHeaderFooterSettings();
   headerFooter.differentFirstPage = oSub(sectPr, 'titlePg') != null;
 
+  // #58 — the section START type (Word's w:type; absent = nextPage).
+  const startType: 'nextPage' | 'continuous' =
+    oat(oSub(sectPr, 'type'), 'val') === 'continuous' ? 'continuous' : 'nextPage';
+
   const lineNumbers: LineNumbersSetting | null = (() => {
     const ln = oSub(sectPr, 'lnNumType');
     if (!ln) return null;
@@ -1232,7 +1252,7 @@ function mapSection(sectPr: ONode, ctx: MapContext, trees: DocxTrees): SectionRe
     });
   }
 
-  return { pageSetup, headerFooter, lineNumbers, bands };
+  return { pageSetup, headerFooter, lineNumbers, bands, type: startType };
 }
 
 // ─── Core properties ─────────────────────────────────────────────────────
@@ -1371,8 +1391,46 @@ export function mapDocxDocument(
   // ONode walk preserves document order — p/tbl interleaving is real.
   const output: JSONContent[] = [];
   const listStack: { numId: number; list: JSONContent; lastItem: JSONContent }[] = [];
-  let section: SectionResult | null = null;
   let sectionBreaks = 0;
+
+  // ── #58 SECTIONS — the un-collapse (#57): Word's mid-doc sectPr
+  // ends the PRECEDING section (its props describe everything since
+  // the previous break); the FINAL sectPr (the walk's last) is the
+  // store's pageSetup. The walk can't know which sectPr is last, so
+  // each mapping is held PENDING and flushed when the NEXT sectPr
+  // arrives — the survivor is the final section (store props +
+  // UNTAGGED band containers = the doc default; every flushed one
+  // emits a sectionBreak node + ITS OWN tagged band containers).
+  const flushedSections: {
+    setup: PageSetup;
+    sectionId: string;
+    bands: JSONContent[];
+    /** The section's own titlePg (the doc flag resolves from the FIRST). */
+    titlePg: boolean;
+  }[] = [];
+  let pendingSection: (SectionResult & { sectionId: string }) | null = null;
+  let sectionOrdinal = 0;
+  // The FOLLOWING sectPr's start type — the boundary AT the flushed
+  // break is where that section begins (the break node's `type` attr).
+  let nextStartType: 'nextPage' | 'continuous' = 'nextPage';
+
+  const flushPendingSection = (): void => {
+    if (!pendingSection) return;
+    const sectionId = `sec-imp-${sectionOrdinal}`;
+    flushedSections.push({
+      setup: pendingSection.pageSetup,
+      sectionId,
+      bands: pendingSection.bands,
+      titlePg: pendingSection.headerFooter.differentFirstPage === true,
+    });
+    output.push({
+      type: 'sectionBreak',
+      attrs: { setup: pendingSection.pageSetup, sectionId, type: nextStartType },
+    });
+    sectionOrdinal += 1;
+    pendingSection = null;
+    nextStartType = 'nextPage';
+  };
 
   const feedList = (numId: number, ilvl: number, paragraph: JSONContent): void => {
     // The stack holds levels 0..depth; feeding level L keeps 0..L —
@@ -1432,16 +1490,34 @@ export function mapDocxDocument(
   for (const kid of body?.kids ?? []) {
     switch (kid.tag) {
       case 'p': {
-        emitMapped(mapParagraph(kid, ctx, trees.rels));
+        const mapped = mapParagraph(kid, ctx, trees.rels);
+        // The paragraph's content belongs to the ENDING section — it
+        // emits BEFORE the break node (Word: the sectPr rides the
+        // section's last paragraph's pPr; the break follows it).
+        emitMapped(mapped);
+        if (mapped.sectPr) {
+          const incoming = mapSection(mapped.sectPr, ctx, trees);
+          nextStartType = incoming.type;
+          if (pendingSection) sectionBreaks += 1;
+          flushPendingSection();
+          pendingSection = { ...incoming, sectionId: '' };
+        }
         break;
       }
       case 'tbl':
         if (!ctx.tocCapture) emitBlock(mapTable(kid, ctx, trees.rels), null);
         break;
-      case 'sectPr':
-        if (section) sectionBreaks += 1;
-        section = mapSection(kid, ctx, trees);
+      case 'sectPr': {
+        // #58 — the delayed flush: the PREVIOUS pending sectPr ends a
+        // section HERE (a real mid-doc break); this mapping becomes
+        // the new pending (the final survivor becomes the store's).
+        const incomingSection = mapSection(kid, ctx, trees);
+        nextStartType = incomingSection.type;
+        if (pendingSection) sectionBreaks += 1;
+        flushPendingSection();
+        pendingSection = { ...incomingSection, sectionId: '' };
         break;
+      }
       case 'ins': {
         // block-level tracked insertion — its paragraphs are kept
         for (const p of oKids(kid, 'p')) {
@@ -1472,15 +1548,87 @@ export function mapDocxDocument(
   }
   ctx.report.sectionBreaks = sectionBreaks;
 
-  const bands = section?.bands ?? [];
-  const headerBlocks = bands.filter((b) => b.type === 'headerBlock');
-  const footerBlocks = bands.filter((b) => b.type === 'footerBlock');
+  // ── #58 — the band INHERITANCE CHAIN (Word's "link to previous" is
+  // CHAINED: section k's header = its own refs ?? section k−1's
+  // resolved). Our model is two-level (section override ?? doc
+  // default), so the chain MATERIALIZES: each flushed section whose
+  // effective bands differ from the FINAL section's effective bands
+  // gets its own tagged containers; matching sections emit NOTHING
+  // (they inherit the doc default = the final's effective — exact
+  // visual fidelity, no dead containers).
+  const finalBands = pendingSection?.bands ?? [];
+  const effectiveOf = (own: JSONContent[], inherited: JSONContent[]): JSONContent[] => {
+    // Per region (headerBlock/footerBlock × variant): own wins, else
+    // the inherited resolved set.
+    const resolved = [...inherited];
+    for (const band of own) {
+      const variant = (band.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default';
+      const idx = resolved.findIndex(
+        (b) => b.type === band.type && ((b.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default') === variant,
+      );
+      if (idx >= 0) resolved[idx] = band;
+      else resolved.push(band);
+    }
+    return resolved;
+  };
+  let chain: JSONContent[] = [];
+  const sectionBands: { sectionId: string; effective: JSONContent[] }[] = [];
+  for (const flushed of flushedSections) {
+    chain = effectiveOf(flushed.bands, chain);
+    sectionBands.push({ sectionId: flushed.sectionId, effective: chain });
+  }
+  const finalEffective = effectiveOf(finalBands, chain);
+  const sameBands = (a: JSONContent[], b: JSONContent[]): boolean =>
+    a.length === b.length && a.every((band, i) => {
+      if (b[i]!.type !== band.type) return false;
+      if (((b[i]!.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default') !==
+          ((band.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default')) return false;
+      return JSON.stringify(b[i]!.content ?? []) === JSON.stringify(band.content ?? []);
+    });
+
+  const taggedHeaderBlocks: JSONContent[] = [];
+  const taggedFooterBlocks: JSONContent[] = [];
+  for (const entry of sectionBands) {
+    for (const band of entry.effective) {
+      const type = band.type === 'headerBlock' ? 'headerBlock' : 'footerBlock';
+      const match = finalEffective.find(
+        (b) => b.type === type &&
+          ((b.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default') ===
+            ((band.attrs as { variant?: string } | null)?.variant === 'first' ? 'first' : 'default'),
+      );
+      if (match && sameBands([match], [band])) continue; // inherits the doc default
+      const json = structuredClone(band);
+      json.attrs = { ...(json.attrs as Record<string, unknown> | undefined), sectionId: entry.sectionId };
+      (type === 'headerBlock' ? taggedHeaderBlocks : taggedFooterBlocks).push(json);
+    }
+  }
+
+  // The FINAL section's effective bands = the UNTAGGED doc default
+  // (every non-overriding section inherits them — the two-level model).
+  const headerBlocks = finalEffective.filter((b) => b.type === 'headerBlock');
+  const footerBlocks = finalEffective.filter((b) => b.type === 'footerBlock');
+
+  // titlePg: the doc-level flag governs the DOC's page 0 (section 0's
+  // first page) — the FIRST section's titlePg. A non-first section's
+  // titlePg has no v1 model (per-section first-page) — counted.
+  const firstTitlePg = flushedSections[0]?.titlePg === true;
+  let otherTitlePgs = 0;
+  for (let i = 1; i < flushedSections.length; i++) {
+    if (flushedSections[i]!.titlePg) otherTitlePgs += 1;
+  }
+  if (pendingSection?.headerFooter.differentFirstPage === true && sectionBreaks > 0) {
+    otherTitlePgs += 1; // the final section's titlePg (a non-first section)
+  }
+  if (otherTitlePgs > 0) ctx.report.perSectionFirstPage += otherTitlePgs;
 
   return {
-    json: { type: 'doc', content: [...headerBlocks, ...output, ...footerBlocks] },
-    pageSetup: section?.pageSetup ?? { pageSize: 'Letter', margins: { top: 72, bottom: 72, left: 72, right: 72 }, pageGap: 32 },
-    headerFooter: section?.headerFooter ?? defaultHeaderFooterSettings(),
-    lineNumbers: section?.lineNumbers ?? null,
+    json: { type: 'doc', content: [...taggedHeaderBlocks, ...headerBlocks, ...output, ...footerBlocks, ...taggedFooterBlocks] },
+    pageSetup: pendingSection?.pageSetup ?? { pageSize: 'Letter', margins: { top: 72, bottom: 72, left: 72, right: 72 }, pageGap: 32 },
+    headerFooter: {
+      ...(pendingSection?.headerFooter ?? defaultHeaderFooterSettings()),
+      differentFirstPage: firstTitlePg || (sectionBreaks === 0 && (pendingSection?.headerFooter.differentFirstPage === true)),
+    },
+    lineNumbers: pendingSection?.lineNumbers ?? null,
     coreProperties: mapCoreProperties(trees.core),
     styleDefinitions: styles.definitions,
     report: ctx.report,
