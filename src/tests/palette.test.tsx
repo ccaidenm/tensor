@@ -351,7 +351,7 @@ describe('palette UI', () => {
     });
     expect(document.body.textContent).toContain('No matching commands.');
     expect(document.querySelector('[data-testid="palette-footer"]')?.textContent).toContain(
-      '↑↓ navigate · ↵ run · esc close',
+      'to select',
     );
   });
 
