@@ -12,17 +12,48 @@ import type { PageSetup } from '@/lib/document/pageSetup';
  * THE CORRELATION (doc-snapshot law): each entry carries the setup it
  * replaced plus the document BEFORE and AFTER the write. The undo
  * command override fires the co-restore ONLY when the live document
- * equals the entry's post-write snapshot (doc.eq — content equality):
- * the page-setup action is then the NEWEST recorded action, so one
- * Ctrl+Z reverts the PM part and the store part together. The redo
- * fires on the PRE-write snapshot (the state Ctrl+Y starts from). Any
- * later typing buries both (the doc no longer matches) until the
- * interloper is undone/redone — the standard PM ordering, never a
- * corruption.
+ * equals the entry's post-write snapshot (doc.eq — content equality)
+ * AND the plugin's pending law says our item is the one PM's next
+ * undo/redo would move; the redo mirrors on the pre-write snapshot.
+ * Any later typing buries both (a foreign recorded transaction also
+ * EMPTIES PM's redo stack — the coincidence guard: a net-zero edit
+ * cycle like bold+unbold can return the doc to a snapshot without our
+ * item being next, and the emptied redo stack is what refuses it).
  *
  * NOT undoable (by design): file-open migrations and test fixtures
  * write the store directly — opening a document must not be undoable.
  */
+
+/** The marker on OUR page-setup transactions (the history-joined ones;
+ *  the ruler's preview frames stay out entirely). */
+export const PAGE_SETUP_MARKER = 'pageSetupOurs';
+
+export type PageSetupPending = 'undo' | 'redo' | null;
+
+/** The plugin's state: which stack side holds our newest item, and
+ *  whether PM's redo stack is non-empty (the coincidence guard). */
+export interface PageSetupPendingState {
+  pending: PageSetupPending;
+  redoNonEmpty: boolean;
+}
+
+/** The pending-state transitions (pure — the plugin's apply). */
+export function nextPending(pending: PageSetupPending, event: 'ours' | 'foreign-recorded' | 'history-undo' | 'history-redo'): PageSetupPending {
+  switch (event) {
+    case 'ours':
+      return 'undo';
+    case 'foreign-recorded':
+      return null;
+    case 'history-undo':
+      // Our item moves done->redo; a foreign undo pops the done-top
+      // (not ours when pending is 'redo').
+      return pending === 'undo' ? 'redo' : pending;
+    case 'history-redo':
+      // Our item moves redo->done; a foreign redo pops the redo-top
+      // (not ours when pending is 'undo').
+      return pending === 'redo' ? 'undo' : pending;
+  }
+}
 
 export interface PageSetupUndoEntry {
   prev: PageSetup;

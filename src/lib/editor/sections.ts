@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { useDocumentStore } from '@/lib/document/store';
-import { pushPageSetupUndo } from '@/lib/editor/pageSetupHistory';
+import { pushPageSetupUndo, PAGE_SETUP_MARKER } from '@/lib/editor/pageSetupHistory';
 import type { PageSetup } from '@/lib/document/pageSetup';
 
 /**
@@ -166,14 +166,6 @@ function breakPositions(editor: Editor): number[] {
   return out;
 }
 
-/** The section-start type write (the boundary break's `type` attr). */
-function writeStartType(editor: Editor, pos: number, type: 'nextPage' | 'continuous'): void {
-  const node = editor.state.doc.nodeAt(pos);
-  if (node && node.attrs.type !== type) {
-    editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, type }));
-  }
-}
-
 export function applyPageSetup(
   scope: PageSetupScope,
   full: PageSetup,
@@ -201,12 +193,23 @@ export function applyPageSetup(
   // BEFORE any dispatch; the writeStore's docAfter reads the post-tr
   // state, which view.dispatch applies synchronously).
   const docBefore = editor?.state.doc ?? null;
+  // Whether OUR marker already rode a dispatched tr (the mixed paths);
+  // a STORE-ONLY write dispatches a marker-only empty tr so the
+  // pending law sees it (the plugin applies to marker-only trs even
+  // though history records nothing).
+  let markerDispatched = false;
   /** The store write + its co-undo push (AFTER the PM tr dispatches —
    *  the snapshot carries the post-write document; the pageSetupHistory
    *  module's law: one Ctrl+Z reverts the PM part and the store part
    *  together, never half). */
   const writeStore = (next: PageSetup): void => {
     if (pushUndo) {
+      if (editor && !markerDispatched) {
+        const tr = editor.state.tr;
+        tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
+        editor.view.dispatch(tr);
+      }
       pushPageSetupUndo(options?.undoPrev ?? store.pageSetup, editor?.state.doc ?? null, docBefore);
     }
     store.setPageSetup(next);
@@ -219,6 +222,11 @@ export function applyPageSetup(
       // (the doc-snapshot correlation). The ruler's frames pass
       // addToHistory false — the drag's end commit is the ONE item.
       if (!addToHistory) tr.setMeta('addToHistory', false);
+      // OURS — the co-undo's pending law tracks this tr (the marker
+      // rides only the history-joined trs; the ruler's preview frames
+      // stay out entirely).
+      if (addToHistory) tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
       for (const pos of breakPositions(editor)) {
         const node = editor.state.doc.nodeAt(pos);
         if (!node) continue;
@@ -239,6 +247,8 @@ export function applyPageSetup(
     }
     const positions = breakPositions(editor);
     const tr = editor.state.tr;
+    tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
     let touchedStore = false;
     for (const k of set) {
       if (k < positions.length) {
@@ -272,9 +282,11 @@ export function applyPageSetup(
       const pos = positions[targetOrdinal]!;
       const node = editor.state.doc.nodeAt(pos);
       if (node) {
-        editor.view.dispatch(
-          editor.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, setup: full }),
-        );
+        const tr = editor.state.tr;
+        tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, setup: full });
+        editor.view.dispatch(tr);
       }
     } else {
       writeStore({ ...store.pageSetup, ...full });
@@ -311,16 +323,27 @@ export function applyPageSetup(
     if (touchedStore) writeStore({ ...store.pageSetup, ...full });
     return;
   }
+  // 'section' — ONE transaction for the setup + the start type (one
+  // history item, one co-undo entry; a split would half-undo).
   const facts = sectionAtCaret(editor, store.pageSetup);
-  if (options?.startType && facts.startBreakPos != null && editor) {
-    writeStartType(editor, facts.startBreakPos, options.startType);
-  }
-  if (facts.breakPos != null && editor) {
-    const node = editor.state.doc.nodeAt(facts.breakPos);
-    if (node) {
-      editor.view.dispatch(
-        editor.state.tr.setNodeMarkup(facts.breakPos, undefined, { ...node.attrs, setup: full }),
-      );
+  if (editor) {
+    const tr = editor.state.tr;
+    tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
+    if (options?.startType && facts.startBreakPos != null) {
+      writeStartTypeInTr(tr, editor, facts.startBreakPos, options.startType);
+    }
+    if (facts.breakPos != null) {
+      const node = editor.state.doc.nodeAt(facts.breakPos);
+      if (node) {
+        tr.setNodeMarkup(facts.breakPos, undefined, { ...node.attrs, setup: full });
+      }
+    }
+    if (tr.docChanged) {
+      editor.view.dispatch(tr);
+      if (pushUndo) {
+        pushPageSetupUndo(options?.undoPrev ?? store.pageSetup, editor.state.doc, docBefore);
+      }
       return;
     }
   }

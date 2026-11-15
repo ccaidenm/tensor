@@ -3,7 +3,7 @@ import { act } from '@testing-library/react';
 import { NodeSelection } from '@tiptap/pm/state';
 import { renderTensor, settleLayout, GEOMETRY } from './harness';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
-import { toLayoutOptions, DEFAULT_MARGINS, PAGE_GAP, type PageSetup } from '@/lib/document/pageSetup';
+import { toLayoutOptions, DEFAULT_MARGINS, MARGIN_PRESETS, PAGE_GAP, type PageSetup } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { deleteSectionBreakNear, enableRegion } from '@/lib/editor/headerFooterCommands';
@@ -1000,5 +1000,77 @@ describe('Phase 8 — the page-setup co-undo', () => {
     });
     expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
     void brk0;
+  });
+});
+
+describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('bold+unbold after the undo dance does NOT resurrect the page setup (net-zero coincidence)', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    // The grouping gap (the Done must be its own history item).
+    await new Promise((r) => setTimeout(r, 850));
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    // Wide margins + the yellow background (the user's repro).
+    const wideBtn = [...document.querySelectorAll('button')].find((b) => b.textContent!.startsWith('Wide'))!;
+    act(() => {
+      fireEvent.click(wideBtn);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('[aria-label="Page background"]')!);
+    });
+    // The ColorPickerButton's popover internals drive custom colors —
+    // set the draft's color through the palette's public path is its
+    // own component's suite; the swatch here is the default. The
+    // color's DRAFT write is covered by the dialog flow; this test
+    // pins the UNDO/REDO machinery, so Wide alone carries it.
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    const setupOf = () => useDocumentStore.getState().pageSetup;
+    const WIDE = MARGIN_PRESETS.Wide.margins;
+    expect(setupOf().margins).toEqual(WIDE);
+    // The dance: undo, redo, undo.
+    act(() => {
+      editor.commands.undo();
+    });
+    act(() => {
+      editor.commands.redo();
+    });
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(setupOf().margins).toEqual(DEFAULT_MARGINS);
+    // Bold, then unbold (a net-zero mark cycle — the doc returns to
+    // the post-page-setup snapshot BY COINCIDENCE).
+    act(() => {
+      editor.commands.selectAll();
+      editor.commands.toggleBold();
+    });
+    act(() => {
+      editor.commands.toggleBold();
+    });
+    // Ctrl+Z: the bold item (net zero) — the page setup must NOT move.
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(setupOf().margins).toEqual(DEFAULT_MARGINS);
+    // Ctrl+Y: PM's redo was emptied by the bold — nothing re-applies.
+    act(() => {
+      editor.commands.redo();
+    });
+    expect(setupOf().margins).toEqual(DEFAULT_MARGINS);
+    expect(setupOf().pageColor ?? '').toBe('');
   });
 });
