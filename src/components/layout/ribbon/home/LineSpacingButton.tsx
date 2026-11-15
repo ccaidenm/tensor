@@ -38,13 +38,36 @@ const FLOW_LABELS: Record<FlowFlagKey, string> = {
 
 const slug = (label: string) => label.toLowerCase().replace(/[^a-z]+/g, '-');
 
+/** The popover's section header — the FontGroup picker's exact
+ * rhythm (px-2 pt-1 pb-0.5, 12px, muted), so the two dropdowns read
+ * as one kit. Title case, rendered as typed (no CSS uppercase). */
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">{children}</div>
+  );
+}
+
+/** One menu row (radio or checkbox): identical padding and hover for
+ * both sections — one rhythm, no per-section drift. */
+function MenuRow({ testId, control, label }: { testId?: string; control: React.ReactNode; label: string }) {
+  return (
+    <label
+      data-testid={testId ? `row-${testId}` : undefined}
+      className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
+    >
+      {control}
+      {label}
+    </label>
+  );
+}
+
 /**
- * One pagination checkbox (shadcn kit): uniform `checked` renders the
- * plain box, 'mixed' renders the INDETERMINATE box (clicking either way
- * applies the explicit next state to every selected paragraph —
- * Word's dialog semantics). Stays-open: the line-spacing radio closes
- * the popover on pick (menu semantics), the break toggles apply live
- * so a user can watch the pages reflow.
+ * One pagination checkbox: uniform `checked` renders the plain box,
+ * 'mixed' renders the INDETERMINATE box (clicking either way applies
+ * the explicit next state to every selected paragraph — Word's dialog
+ * semantics). Stays-open: the line-spacing radio closes the popover on
+ * pick (menu semantics), the break toggles apply live so a user can
+ * watch the pages reflow.
  */
 function FlowToggle({
   label,
@@ -56,28 +79,34 @@ function FlowToggle({
   onToggle: (nextChecked: boolean) => void;
 }) {
   return (
-    <label
-      className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-    >
-      <Checkbox
-        data-testid={`flow-toggle-${slug(label)}`}
-        checked={state === true}
-        indeterminate={state === 'mixed'}
-        onCheckedChange={(checked: boolean) => onToggle(!!checked)}
-      />
-      {label}
-    </label>
+    <MenuRow
+      testId={`flow-toggle-${slug(label)}`}
+      control={
+        <Checkbox
+          data-testid={`flow-toggle-${slug(label)}`}
+          checked={state === true}
+          indeterminate={state === 'mixed'}
+          onCheckedChange={(checked: boolean) => onToggle(!!checked)}
+        />
+      }
+      label={label}
+    />
   );
 }
 
 /**
  * The paragraph popover (M5 rework of the line-spacing dropdown): LINE
  * SPACING above (a radio group reflecting the selection's EFFECTIVE
- * multiplier — every paragraph always has one — plus the custom
- * escape hatch), LINE & PAGE BREAKS below (the six M-FLOW pagination
+ * multiplier — every paragraph always has one — plus the custom escape
+ * hatch), LINE & PAGE BREAKS below (the six M-FLOW pagination
  * checkboxes — live, stay-open, mixed-state aware). One popover is
  * Word's Paragraph dialog in ribbon clothing; both readers resolve
  * through the style registry — the same cascade the adapter runs.
+ *
+ * CHROME: aligns its START edge with the trigger (the FontGroup
+ * picker's law); the section headers/rows/dividers share the font
+ * picker's exact rhythm; the trigger is ONE fluid button whose icon
+ * and chevron sit in equal 16px boxes — the hover reads symmetric.
  */
 export function LineSpacingButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
@@ -146,10 +175,12 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
                   variant="ghost"
                   size="sm"
                   data-testid="line-spacing-trigger"
-                  className="h-8 gap-1 rounded-md px-1.5"
+                  className="h-8 gap-0.5 rounded-md px-1.5"
                 >
                   <AlignVerticalSpaceAround size={16} />
-                  <ChevronDown size={12} className="text-muted-foreground" />
+                  <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
+                    <ChevronDown size={12} />
+                  </span>
                 </Button>
               }
             />
@@ -158,38 +189,42 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
         <TooltipContent>Line Spacing &amp; Page Breaks</TooltipContent>
       </Tooltip>
 
-      <PopoverContent className="w-60 p-1.5">
+      <PopoverContent className="w-60 p-1" align="start">
         {/* ── Line Spacing (the radio reflects the always-present
               attribute; a pick applies and closes — menu semantics) ── */}
-        <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">Line Spacing</div>
+        <SectionHeader>Line Spacing</SectionHeader>
         <RadioGroup
           value={radioValue}
           onValueChange={(value: unknown) => apply(String(value))}
-          className="flex flex-col gap-0.5"
+          className="flex flex-col gap-0"
         >
           {PRESETS.map((preset) => (
-            <label
+            <MenuRow
               key={preset.value}
-              className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted"
-            >
-              <RadioGroupItem data-testid={`spacing-radio-${preset.value}`} value={preset.value} />
-              {preset.label}
-            </label>
+              testId={`spacing-row-${preset.value}`}
+              control={
+                <RadioGroupItem data-testid={`spacing-radio-${preset.value}`} value={preset.value} />
+              }
+              label={preset.label}
+            />
           ))}
         </RadioGroup>
 
-        {/* Custom — the preset family's escape hatch (multipliers; a
-            px spelling rides the attr via the command path). */}
-        <div className="mt-1.5 flex items-center gap-1 border-t border-border px-1 pt-2">
+        {/* Custom — the preset family's escape hatch (multipliers; a px
+            spelling rides the attr via the command path). Part of the
+            Line Spacing section: no divider above it — a border here
+            read as an unlabeled section break. */}
+        <div className="flex items-center gap-1 px-1 pt-1">
           <Input
             type="number"
             step="0.05"
             min="0.5"
             max="4"
             placeholder="Custom"
+            data-testid="line-spacing-custom-input"
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
-            className="mx-1 h-7 text-sm"
+            className="h-7 flex-1 text-sm"
           />
           <Button
             size="sm"
@@ -200,21 +235,20 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
           </Button>
         </div>
 
+        {/* The section divider — the font picker's idiom. */}
+        <div className="mx-1 my-1 border-t" />
+
         {/* ── Line & Page Breaks (M-FLOW; Word's tab name) ── */}
-        <div className="mt-1.5 border-t border-border pt-1.5">
-          <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">
-            Line &amp; Page Breaks
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {FLOW_FLAG_KEYS.map((flag) => (
-              <FlowToggle
-                key={flag}
-                label={FLOW_LABELS[flag]}
-                state={flow?.[flag] ?? (flag === 'widowControl')}
-                onToggle={(next) => toggleFlag(flag, next)}
-              />
-            ))}
-          </div>
+        <SectionHeader>Line &amp; Page Breaks</SectionHeader>
+        <div className="flex flex-col gap-0">
+          {FLOW_FLAG_KEYS.map((flag) => (
+            <FlowToggle
+              key={flag}
+              label={FLOW_LABELS[flag]}
+              state={flow?.[flag] ?? (flag === 'widowControl')}
+              onToggle={(next) => toggleFlag(flag, next)}
+            />
+          ))}
         </div>
       </PopoverContent>
     </Popover>

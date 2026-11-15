@@ -1,26 +1,28 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
-import { CheckIcon, MinusIcon } from "lucide-react"
 import { cn } from "cn"
+import { CheckIcon, MinusIcon } from "lucide-react"
 
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border border-input outline-none transition-[color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50",
-        "dark:bg-input/30 dark:border-input",
-        "data-[checked]:border-primary data-[checked]:bg-primary data-[checked]:text-primary-foreground",
-        "data-[indeterminate]:border-primary data-[indeterminate]:bg-primary data-[indeterminate]:text-primary-foreground",
-        "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+        "peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input transition-colors outline-none group-has-disabled/field:opacity-50 group-has-[:focus-visible]/field-label:ring-0 group-has-[:focus-visible]/field-label:not-data-checked:border-input after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:aria-checked:border-primary dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground group-has-[:focus-visible]/field-label:data-checked:border-primary dark:data-checked:bg-primary",
+        // Project-owned addition over the canonical shadcn base-nova
+        // file: the MIXED state (Base UI's `indeterminate`) — the
+        // ribbon's mixed-selection rows need the minus glyph and the
+        // same filled treatment as checked (shadcn's own forms docs
+        // add this the same way).
+        "data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:text-primary-foreground dark:data-indeterminate:bg-primary",
         className
       )}
       {...props}
     >
       <CheckboxPrimitive.Indicator
         data-slot="checkbox-indicator"
-        className="flex items-center justify-center text-current transition-none"
+        className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
       >
-        {props.indeterminate ? <MinusIcon className="size-3.5" /> : <CheckIcon className="size-3.5" />}
+        {props.indeterminate ? <MinusIcon /> : <CheckIcon />}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )
