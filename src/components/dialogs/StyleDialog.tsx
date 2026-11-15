@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { IconButton } from '@/components/layout/IconButton';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
@@ -477,6 +478,47 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
             </>
           )}
         </div>
+
+        {/* M-FLOW — pagination flags at the STYLE tier (Word's style
+         * pPr: w:keepNext / w:keepLines / w:pageBreakBefore, plus the
+         * Tensor superset). Paragraph kind only. The checkbox is
+         * opt-in: CHECKED writes the affirmative spelling, UNCHECKED
+         * leaves the property ABSENT (the style says nothing — inherit
+         * the engine defaults: keeps off, widowControl on). Explicit
+         * style-level OFF is not expressible in the v1 dialog (rare;
+         * the direct-attr popover owns the off spelling). */}
+        {kind === 'paragraph' && (
+          <>
+            <div className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Pagination
+            </div>
+            <div className="grid gap-x-8 gap-y-1.5 sm:grid-cols-2">
+              {(
+                [
+                  { key: 'keepNext', label: 'Keep with next' },
+                  { key: 'keepLines', label: 'Keep lines together' },
+                  { key: 'keepPrevious', label: 'Keep with previous' },
+                  { key: 'widowControl', label: 'Widow/orphan control' },
+                  { key: 'breakBefore', label: 'Page break before' },
+                  { key: 'breakAfter', label: 'Page break after' },
+                ] as const
+              ).map(({ key, label }) => (
+                <label key={key} className="flex cursor-pointer select-none items-center gap-2 text-sm">
+                  <Checkbox
+                    data-testid={`style-flow-${key}`}
+                    checked={properties[key] === true || properties[key] === 'page'}
+                    onCheckedChange={(checked: boolean) =>
+                      set({
+                        [key]: checked ? (key === 'breakBefore' || key === 'breakAfter' ? 'page' : true) : undefined,
+                      })
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
 
         <DialogFooter>
           {editing && !isBuiltinId(editing.id) && (
