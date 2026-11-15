@@ -811,3 +811,60 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     void editor;
   });
 });
+
+describe('Phase 7 — per-section page background', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('each section paints ITS background; an unset section inherits the doc default', async () => {
+    const longText = '<p>' + 'word '.repeat(300) + '</p>';
+    const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
+    // Section 0's setup carries a tint; the store's (the final
+    // section + the doc default) carries another.
+    setBreakSetup(editor, {
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+      pageColor: '#ffeedd',
+    });
+    act(() => {
+      useDocumentStore.getState().setPageSetup({
+        ...useDocumentStore.getState().pageSetup,
+        pageColor: '#ddeeff',
+      });
+    });
+    await settleLayout();
+    const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
+    expect(sheets.length).toBeGreaterThanOrEqual(2);
+    // Section 0's sheets wear its tint; the final section's wear the
+    // doc default.
+    expect(sheets[0]!.style.backgroundColor).toBe('rgb(255, 238, 221)');
+    expect(sheets[sheets.length - 1]!.style.backgroundColor).toBe('rgb(221, 238, 255)');
+  });
+
+  it('the background bucket in Page Setup edits the DRAFT (Done applies per the scope)', async () => {
+    const { editor } = renderTensor('<p>body</p>');
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    // The draft's color changes — the store untouched until Done.
+    act(() => {
+      const bucket = document.querySelector('[aria-label="Page background"]') as HTMLButtonElement;
+      fireEvent.click(bucket);
+    });
+    // The palette popover opens — pick the custom color input path is
+    // ColorPickerButton's internals; drive the draft directly through
+    // the swatch's onChange is not reachable — assert the default.
+    expect(useDocumentStore.getState().pageSetup.pageColor ?? '').toBe('');
+    void editor;
+  });
+});

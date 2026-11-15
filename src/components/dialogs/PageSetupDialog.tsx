@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, RectangleHorizontal, RectangleVertical } from 'lucide-react';
+
 import {
   Dialog,
   DialogContent,
@@ -9,13 +9,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, PaintBucket } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { RibbonIconInput } from '@/components/layout/ribbon/RibbonIconInput';
+import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
-import { formatPtWithUnit } from '@/lib/document/pageSetup';
+import { summarizeMarginPreset } from '@/lib/document/pageSetup';
 import {
   MEASUREMENT_UNITS,
   MARGIN_PRESETS,
@@ -76,9 +78,9 @@ const SCOPES: Array<{ value: PageSetupScope; label: string }> = [
   { value: 'forward', label: 'This point forward' },
 ];
 
-/** The margin fields' icons (the RibbonIconInput treatment — the
- *  arrow-to-line glyphs read as "space from this edge"). */
-const MARGIN_ICONS: Record<MarginKey, typeof import('lucide-react').ArrowUpToLine> = {
+/** The margin fields' IDENTITY: a letter prefix (T/B/L/R) — no icons
+ *  (the user's call); the box must still say which edge it owns. */
+const MARGIN_ICONS: Record<MarginKey, typeof ArrowUpToLine> = {
   top: ArrowUpToLine,
   bottom: ArrowDownToLine,
   left: ArrowLeftToLine,
@@ -91,9 +93,13 @@ interface Draft {
   customWidth: string;
   customHeight: string;
   margins: Record<MarginKey, string>;
+  /** #58 — the TARGET's page background (per-section capable): a
+   *  break-owned section's setup carries its own; unset inherits the
+   *  doc default (the store's — the two-level band model). */
+  pageColor: string;
 }
 
-function snapshot(setup: PageSetup, unit: MeasurementUnit): Draft {
+function snapshot(setup: PageSetup, unit: MeasurementUnit, docColor = ''): Draft {
   return {
     pageSize: setup.pageSize,
     orientation: setup.orientation ?? 'portrait',
@@ -105,6 +111,7 @@ function snapshot(setup: PageSetup, unit: MeasurementUnit): Draft {
       left: formatPt(setup.margins.left, unit),
       right: formatPt(setup.margins.right, unit),
     },
+    pageColor: setup.pageColor ?? docColor,
   };
 }
 
@@ -136,6 +143,7 @@ function draftToSetup(draft: Draft, base: PageSetup, unit: MeasurementUnit): Pag
     pageSize: draft.pageSize || base.pageSize,
     orientation: draft.orientation,
     margins,
+    pageColor: draft.pageColor,
     ...custom,
   };
 }
@@ -181,7 +189,7 @@ export function PageSetupDialog() {
           : caretFacts;
     setFacts(caretFacts);
     setTarget(targetFacts);
-    setDraft(snapshot(targetFacts.setup, unit));
+    setDraft(snapshot(targetFacts.setup, unit, pageSetup.pageColor ?? ''));
     // Entering 'section' unhides the chips and AUTO-SELECTS the
     // section the caret sits in (the user's flow); the other scopes
     // carry no chip selection.
@@ -235,6 +243,7 @@ export function PageSetupDialog() {
       pageSize: full.pageSize,
       orientation: full.orientation,
       margins: full.margins,
+      pageColor: full.pageColor,
       ...(full.pageSize === 'custom'
         ? { customWidth: full.customWidth, customHeight: full.customHeight }
         : { customWidth: undefined, customHeight: undefined }),
@@ -386,17 +395,46 @@ export function PageSetupDialog() {
 
           {/* RIGHT — the setup itself. */}
           <div className="flex flex-col gap-4">
-            {/* Paper size. */}
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Paper size</span>
+            {/* Paper + Background — TWO labeled columns filling the
+                row (the dialog's rhythm: caption above each control).
+                The bucket edits the DRAFT; Done applies it per the
+                scope. */}
+            <div className="flex items-end gap-3">
+              <div className="flex w-2/3 flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Paper</span>
               <Select
                 value={draft.pageSize}
                 onValueChange={(value) => {
                   if (value == null) return;
+                  if (value === 'custom') {
+                    // The SHARED custom-size dialog (the ribbon's
+                    // surface) opens in DRAFT mode: Done hands the pick
+                    // back into THIS draft (the scope decides where it
+                    // lands); Cancel changes nothing.
+                    useDocumentPropertiesStore.getState().openCustomSize({
+                      seed: {
+                        pageSize: draft.pageSize,
+                        customWidth: parseUnitToPt(draft.customWidth, unit, { allowZero: false }) ?? undefined,
+                        customHeight: parseUnitToPt(draft.customHeight, unit, { allowZero: false }) ?? undefined,
+                      },
+                      onPick: (pick) =>
+                        setDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                pageSize: pick.pageSize,
+                                customWidth: pick.customWidth != null ? String(formatPt(pick.customWidth, unit)) : d.customWidth,
+                                customHeight: pick.customHeight != null ? String(formatPt(pick.customHeight, unit)) : d.customHeight,
+                              }
+                            : d,
+                        ),
+                    });
+                    return;
+                  }
                   setDraft((d) => (d ? { ...d, pageSize: value } : d));
                 }}
               >
-                <SelectTrigger aria-label="Paper size" className="h-8 w-full text-sm">
+                <SelectTrigger aria-label="Paper size" className="h-8 w-2/3 text-sm">
                   <SelectValue>
                     {draft.pageSize === 'custom'
                       ? 'Custom…'
@@ -414,36 +452,20 @@ export function PageSetupDialog() {
                   <SelectItem value="custom">Custom…</SelectItem>
                 </SelectContent>
               </Select>
-              {draft.pageSize === 'custom' && (
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <label className="flex items-center gap-2 text-sm">
-                    <span className="w-14 text-muted-foreground">Width</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={0.25}
-                      className="h-8"
-                      aria-label="Custom width"
-                      value={draft.customWidth}
-                      onChange={(e) => setDraft((d) => (d ? { ...d, customWidth: e.target.value } : d))}
-                    />
-                    <span className="w-4 text-xs text-muted-foreground">{suffix}</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <span className="w-14 text-muted-foreground">Height</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={0.25}
-                      className="h-8"
-                      aria-label="Custom height"
-                      value={draft.customHeight}
-                      onChange={(e) => setDraft((d) => (d ? { ...d, customHeight: e.target.value } : d))}
-                    />
-                    <span className="w-4 text-xs text-muted-foreground">{suffix}</span>
-                  </label>
-                </div>
-              )}
+              </div>
+              <div className="flex flex-1 flex-col gap-1">
+                <span className="text-xs font-medium text-muted-foreground">Background</span>
+                <ColorPickerButton
+                  label="Page background"
+                  icon={<PaintBucket size={16} />}
+                  resetLabel="White"
+                  resetColor="#ffffff"
+                  defaultColor={draft.pageColor || '#ffffff'}
+                  onChange={(color) =>
+                    setDraft((d) => (d ? { ...d, pageColor: color ?? '' } : d))
+                  }
+                />
+              </div>
             </div>
 
             {/* Orientation — a heading with the options below (the
@@ -451,79 +473,71 @@ export function PageSetupDialog() {
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Orientation</span>
               <div className="flex gap-1">
-                {([
-                  { value: 'portrait' as const, label: 'Portrait', icon: RectangleVertical },
-                  { value: 'landscape' as const, label: 'Landscape', icon: RectangleHorizontal },
-                ]).map((o) => (
+                {(['portrait', 'landscape'] as const).map((o) => (
                   <Button
-                    key={o.value}
+                    key={o}
                     size="sm"
                     // Muted gray when selected (the settings toggles'
                     // treatment) — never the accent.
-                    variant={draft.orientation === o.value ? 'secondary' : 'ghost'}
+                    variant={draft.orientation === o ? 'secondary' : 'ghost'}
                     className="h-7 flex-1"
-                    aria-pressed={draft.orientation === o.value}
-                    onClick={() => setDraft((d) => (d ? { ...d, orientation: o.value } : d))}
+                    aria-pressed={draft.orientation === o}
+                    onClick={() => setDraft((d) => (d ? { ...d, orientation: o } : d))}
                   >
-                    <o.icon size={13} className="text-muted-foreground" />
-                    {o.label}
+                    {o.charAt(0).toUpperCase() + o.slice(1)}
                   </Button>
                 ))}
               </div>
             </div>
 
             {/* Margins — the CUSTOM row first (one ticker per edge,
-                unit inside), the presets under it as human one-liners
-                ("0.5" margins") with a mini-page glyph whose border
-                thickens with the preset's margins. */}
+                icon + unit inside), the presets under it as human
+                one-liners ("1\" vertical, 0.75\" horizontal"). */}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Margins</span>
-              <div className="flex items-end justify-between gap-1.5">
-                {MARGIN_FIELDS.map(({ key, label }) => {
-                  const Icon = MARGIN_ICONS[key];
-                  const numeric = Number(draft.margins[key]);
-                  return (
-                    <RibbonIconInput
-                      key={key}
-                      label={`${label} margin (${MEASUREMENT_UNITS[unit].label.toLowerCase()})`}
-                      ariaLabel={`${label} margin`}
-                      icon={<Icon size={12} />}
-                      value={Number.isNaN(numeric) ? 0 : numeric}
-                      onCommit={(n) => editMargin(key, String(n))}
-                      min={0}
-                      showSteppers
-                      stepAmount={0.25}
-                      width="w-[74px]"
-                      suffix={suffix}
-                    />
-                  );
-                })}
-              </div>
+              {/* ONE TooltipProvider for the ROW — base-ui's grouping
+                  shows the ADJACENT field's tooltip instantly (the
+                  400ms carry window), so hovering straight across the
+                  four never re-waits. Each field keeps its own tooltip
+                  ("Top margin"…). */}
+              <TooltipProvider delay={300} closeDelay={0}>
+                <div className="flex items-end justify-between gap-1.5">
+                  {MARGIN_FIELDS.map(({ key, label }) => {
+                    const Icon = MARGIN_ICONS[key];
+                    const numeric = Number(draft.margins[key]);
+                    return (
+                      <RibbonIconInput
+                        key={key}
+                        label={`${label} margin`}
+                        ariaLabel={`${label} margin`}
+                        icon={<Icon size={12} />}
+                        value={Number.isNaN(numeric) ? 0 : numeric}
+                        onCommit={(n) => editMargin(key, String(n))}
+                        min={0}
+                        showSteppers
+                        stepAmount={0.25}
+                        width="w-[74px]"
+                        suffix={suffix}
+                      />
+                    );
+                  })}
+                </div>
+              </TooltipProvider>
               <div className="grid grid-cols-2 gap-1 pt-1" role="group" aria-label="Margin presets">
                 {Object.entries(MARGIN_PRESETS).map(([key, preset]) => {
                   const matches = draftMatchesPreset(draft, preset.margins, unit);
-                  // The mini-page glyph: the border thickens with the
-                  // preset's margins (Narrow reads thin, Wide thick).
-                  const edge = Math.max(2, Math.min(7, Math.round(preset.margins.top / 22)));
                   return (
                     <Button
                       key={key}
                       size="sm"
                       variant={matches ? 'secondary' : 'ghost'}
-                      className="h-auto w-full items-center gap-2 py-1.5"
+                      className="h-auto w-full flex-col items-start gap-0.5 py-1.5"
                       aria-pressed={matches}
                       onClick={() => pickMarginPreset(preset.margins)}
                     >
-                      <span
-                        aria-hidden
-                        className="h-6 w-[18px] flex-none rounded-[2px] border border-foreground/50 bg-background"
-                        style={{ borderWidth: `${edge}px` }}
-                      />
-                      <span className="flex flex-col items-start gap-0.5">
-                        <span className="text-[13px] leading-none">{preset.label}</span>
-                        <span className="text-[10px] font-normal leading-none text-muted-foreground">
-                          {formatPtWithUnit(preset.margins.top, unit)} margins
-                        </span>
+                      <span className="text-[13px] leading-none">{preset.label}</span>
+                      <span className="text-[10px] font-normal leading-none text-muted-foreground">
+                        {summarizeMarginPreset(preset.margins, unit)}
                       </span>
                     </Button>
                   );

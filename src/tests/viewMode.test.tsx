@@ -139,8 +139,8 @@ describe('Layout tab page-geometry controls in pageless mode', () => {
     expect(button('Page Setup')!.disabled).toBe(true);
     expect(button('Orientation (whole document)')!.disabled).toBe(true);
     expect(button('Paper Size (whole document)')!.disabled).toBe(true);
-    expect(button('Page Background')!.disabled).toBe(false);
-    expect(button('Page Background options')!.disabled).toBe(false);
+    expect(button('Page Background (whole document)')!.disabled).toBe(false);
+    expect(button('Page Background (whole document) options')!.disabled).toBe(false);
 
     // Toggling back re-enables them.
     act(() => {
@@ -185,7 +185,7 @@ describe('Page Background in pageless mode', () => {
     // Open the palette (the chevron) and pick a swatch — the real
     // user path in pageless mode.
     act(() => {
-      fireEvent.click(button('Page Background options')!);
+      fireEvent.click(button('Page Background (whole document) options')!);
     });
     const swatch = document.querySelector('button[aria-label="#dc2626"]') as HTMLElement;
     expect(swatch).not.toBeNull();
@@ -202,7 +202,7 @@ describe('Page Background in pageless mode', () => {
 
     // Reset ("Default") clears it back to no background.
     act(() => {
-      fireEvent.click(button('Page Background options')!);
+      fireEvent.click(button('Page Background (whole document) options')!);
     });
     const reset = [...document.querySelectorAll('button')].find(
       (b) => b.textContent === 'Default'

@@ -21,6 +21,10 @@ interface RibbonIconInputProps {
    *  steppers when they show): "0.5 in" reads without leaving the
    *  field. */
   suffix?: string;
+  /** #58 — suppress this field's OWN tooltip (a tooltip GROUP wraps
+   *  the row instead: one hover, one delay, carried across the
+   *  fields). */
+  hideTooltip?: boolean;
 }
 
 export function RibbonIconInput({
@@ -35,6 +39,7 @@ export function RibbonIconInput({
   stepAmount = 1,
   ariaLabel,
   suffix,
+  hideTooltip = false,
 }: RibbonIconInputProps) {
   const [localValue, setLocalValue] = useState(String(value));
 
@@ -54,11 +59,8 @@ export function RibbonIconInput({
     onCommit(next);
   }
 
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <div className="relative flex h-8 items-stretch">
+  const field = (
+    <div className="relative flex h-8 items-stretch">
             <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-muted-foreground">
               {icon}
             </span>
@@ -120,8 +122,11 @@ export function RibbonIconInput({
               </div>
             )}
           </div>
-        }
-      />
+  );
+  if (hideTooltip) return field;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={field} />
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );

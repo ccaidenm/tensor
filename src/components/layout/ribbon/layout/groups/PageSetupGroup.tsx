@@ -106,13 +106,22 @@ export function PageSetupGroup() {
         <TooltipContent>Paper Size (whole document)</TooltipContent>
       </Tooltip>
 
+      {/* #58 — DOCUMENT-WIDE (the quick-controls law): the color merges
+          into every section + the store. Per-section colors live in the
+          Page Setup dialog (the scope decides where they land). */}
       <ColorPickerButton
-        label="Page Background"
+        label="Page Background (whole document)"
         icon={<PaintBucket size={16} />}
         resetLabel="Default"
         resetColor="#ffffff"
         defaultColor={pageSetup.pageColor || '#ffffff'}
-        onChange={(color) => useDocumentStore.getState().setPageSetup({ ...pageSetup, pageColor: color ?? '' })}
+        onChange={(color) =>
+          applyPageSetup(
+            'document',
+            { ...pageSetup, pageColor: color ?? '' },
+            { pageColor: color ?? '' },
+          )
+        }
       />
     </RibbonGroup>
   );

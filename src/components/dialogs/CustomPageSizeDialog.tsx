@@ -8,8 +8,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { RibbonIconInput } from '@/components/layout/ribbon/RibbonIconInput';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
@@ -35,10 +36,19 @@ const MAX_PT = 52 * 72;
  * size untouched. The store holds POINTS (customWidth/customHeight);
  * this dialog converts at the boundary. If the entered dimensions
  * match a preset, the preset is used instead of 'custom'.
+ *
+ * #58 — TWO TARGETS: 'document' (the ribbon's path — Done applies
+ * document-wide, the quick-controls scope) or 'draft' (the Page Setup
+ * dialog's path — Done hands the pick BACK through customSizeOnPick;
+ * the page-setup scope then decides where it lands, and a Cancel
+ * changes nothing).
  */
 export function CustomPageSizeDialog() {
   const isOpen = useDocumentPropertiesStore((s) => s.customSizeIsOpen);
   const closeCustomSize = useDocumentPropertiesStore((s) => s.closeCustomSize);
+  const target = useDocumentPropertiesStore((s) => s.customSizeTarget);
+  const seed = useDocumentPropertiesStore((s) => s.customSizeSeed);
+  const onPick = useDocumentPropertiesStore((s) => s.customSizeOnPick);
   const pageSetup = useDocumentStore((s) => s.pageSetup);
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   const setMeasurementUnit = useConfigStore((s) => s.setMeasurementUnit);
@@ -46,12 +56,15 @@ export function CustomPageSizeDialog() {
   const [draft, setDraft] = useState({ width: '', height: '' });
 
   useEffect(() => {
-    if (isOpen) {
-      const preset = PAGE_SIZES[pageSetup.pageSize] ?? PAGE_SIZES[FALLBACK_PAGE_SIZE];
-      const widthPt = pageSetup.customWidth ?? preset.width;
-      const heightPt = pageSetup.customHeight ?? preset.height;
-      setDraft({ width: formatPt(widthPt, unit), height: formatPt(heightPt, unit) });
-    }
+    if (!isOpen) return;
+    // The DRAFT target seeds from the caller's pick (the page-setup
+    // draft's current size — possibly a custom one mid-edit); the
+    // document target seeds from the store.
+    const source = (target === 'draft' && seed) || pageSetup;
+    const preset = PAGE_SIZES[source.pageSize] ?? PAGE_SIZES[FALLBACK_PAGE_SIZE];
+    const widthPt = source.customWidth ?? preset.width;
+    const heightPt = source.customHeight ?? preset.height;
+    setDraft({ width: formatPt(widthPt, unit), height: formatPt(heightPt, unit) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -70,12 +83,23 @@ export function CustomPageSizeDialog() {
   function handleDone() {
     const wPt = parseUnitToPt(draft.width, unit);
     const hPt = parseUnitToPt(draft.height, unit);
-    if (
-      wPt != null && hPt != null &&
-      wPt >= MIN_PT && wPt <= MAX_PT &&
-      hPt >= MIN_PT && hPt <= MAX_PT
-    ) {
-      const preset = findMatchingPreset(wPt, hPt);
+    const valid = wPt != null && hPt != null && wPt >= MIN_PT && wPt <= MAX_PT && hPt >= MIN_PT && hPt <= MAX_PT;
+    if (target === 'draft' && onPick) {
+      // The Page Setup dialog's draft: hand the pick back (invalid
+      // entries keep the seeded values — the caller re-renders them).
+      if (valid) {
+        const preset = findMatchingPreset(wPt!, hPt!);
+        onPick(
+          preset
+            ? { pageSize: preset }
+            : { pageSize: 'custom', customWidth: wPt!, customHeight: hPt! },
+        );
+      }
+      closeCustomSize();
+      return;
+    }
+    if (valid) {
+      const preset = findMatchingPreset(wPt!, hPt!);
       // #58 — DOCUMENT-WIDE (the ribbon quick controls' scope): the
       // size merges into every section + the store in one commit.
       if (preset) {
@@ -83,8 +107,8 @@ export function CustomPageSizeDialog() {
       } else {
         applyPageSetup(
           'document',
-          { ...pageSetup, pageSize: 'custom', customWidth: wPt, customHeight: hPt },
-          { pageSize: 'custom', customWidth: wPt, customHeight: hPt },
+          { ...pageSetup, pageSize: 'custom', customWidth: wPt!, customHeight: hPt! },
+          { pageSize: 'custom', customWidth: wPt!, customHeight: hPt! },
         );
       }
     }
@@ -103,34 +127,37 @@ export function CustomPageSizeDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <span className="w-14 text-muted-foreground">Width</span>
-            <Input
-              type="number"
-              min={0}
-              step={0.25}
-              className="h-8"
-              aria-label="Page width"
-              value={draft.width}
-              onChange={(e) => setDraft((d) => ({ ...d, width: e.target.value }))}
+        {/* The margins' ticker treatment: letter-prefixed, unit inside,
+            steppers — ONE provider so the tooltips carry between the
+            two fields. */}
+        <TooltipProvider delay={300} closeDelay={0}>
+          <div className="flex items-end justify-between gap-1.5">
+            <RibbonIconInput
+              label="Width"
+              ariaLabel="Page width"
+              icon={<span className="text-[10px] font-medium">W</span>}
+              value={Number(draft.width) || 0}
+              onCommit={(n) => setDraft((d) => ({ ...d, width: String(n) }))}
+              min={2}
+              showSteppers
+              stepAmount={0.25}
+              width="w-full"
+              suffix={suffix}
             />
-            <span className="w-4 text-xs text-muted-foreground">{suffix}</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <span className="w-14 text-muted-foreground">Height</span>
-            <Input
-              type="number"
-              min={0}
-              step={0.25}
-              className="h-8"
-              aria-label="Page height"
-              value={draft.height}
-              onChange={(e) => setDraft((d) => ({ ...d, height: e.target.value }))}
+            <RibbonIconInput
+              label="Height"
+              ariaLabel="Page height"
+              icon={<span className="text-[10px] font-medium">H</span>}
+              value={Number(draft.height) || 0}
+              onCommit={(n) => setDraft((d) => ({ ...d, height: String(n) }))}
+              min={2}
+              showSteppers
+              stepAmount={0.25}
+              width="w-full"
+              suffix={suffix}
             />
-            <span className="w-4 text-xs text-muted-foreground">{suffix}</span>
-          </label>
-        </div>
+          </div>
+        </TooltipProvider>
 
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Units</span>

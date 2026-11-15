@@ -76,6 +76,28 @@ export function formatPtWithUnit(pt: number, unit: MeasurementUnit): string {
   return unit === 'inches' ? `${value}"` : `${value} ${MEASUREMENT_UNITS[unit].suffix}`;
 }
 
+/** #58 — the PRESET margins → ONE human line: uniform margins read as
+ *  one number ("1\" margins"); the top/bottom vs left/right pairs read
+ *  by AXIS ("1\" vertical, 0.75\" horizontal" — the CSS box model's
+ *  pairing; "gutter" is Word's binding-edge margin, a different
+ *  thing). */
+export function summarizeMarginPreset(margins: Margins, unit: MeasurementUnit): string {
+  if (margins.top === margins.bottom && margins.left === margins.right) {
+    const top = formatPtWithUnit(margins.top, unit);
+    const side = formatPtWithUnit(margins.left, unit);
+    return margins.top === margins.left
+      ? `${top} margins`
+      : `${top} vertical, ${side} horizontal`;
+  }
+  // An all-different shape: spell the four edges.
+  return (
+    `${formatPtWithUnit(margins.top, unit)} top, ` +
+    `${formatPtWithUnit(margins.bottom, unit)} bottom, ` +
+    `${formatPtWithUnit(margins.left, unit)} left, ` +
+    `${formatPtWithUnit(margins.right, unit)} right`
+  );
+}
+
 /**
  * The four margins → ONE human summary (the print dialog's Paper card):
  *  - all equal        → `1" all sides`

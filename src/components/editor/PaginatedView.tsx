@@ -1963,6 +1963,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   });
   const sectionIdOfPage = (sectionIndex: number): string | null =>
     sectionIds[sectionIndex] ?? null;
+  // #58 — the per-section PAGE BACKGROUND: each break's setup carries
+  // its section's color; UNSET inherits the doc default (the store's
+  // pageColor — the two-level band model). View-only ink (the print
+  // walk paints white paper, unchanged).
+  const sectionColors: (string | undefined)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const color = (node.attrs.setup as { pageColor?: string } | undefined)?.pageColor;
+      sectionColors.push(typeof color === 'string' && color ? color : undefined);
+    }
+  });
+  const backgroundForPage = (sectionIndex: number): string | undefined =>
+    sectionColors[sectionIndex] ?? (pageSetup.pageColor || undefined);
 
   // Fallback: the strict-adapter throw surfaces as a pageless render of
   // the SAME EditorContent — never a crash. The input-view container
@@ -2128,7 +2141,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 geometry={page}
                 top={pageTopTable[page.index]!}
                 observeRef={observeSheet}
-                background={pageSetup.pageColor || undefined}
+                background={backgroundForPage(page.sectionIndex)}
               >
                 {/* M-IMAGES-2 PAINT ORDER: 'behind' floats mount (and
                     paint) BEFORE the text tracks; 'front' + in-flow
