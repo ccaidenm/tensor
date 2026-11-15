@@ -113,7 +113,7 @@ interface SemanticDoc {
 }
 ```
 
-A **block** is the unit of flow (paragraph or heading). A **run** is a maximal stretch of text with a single `TextStyle`, the atomic unit of measurement. Blocks may carry a `flow` policy (widow/orphan control, keep-together, keep-with-next, forced breaks); the adapter uses exactly one field of it, `breakBefore: 'page'`, derived from the PM `pageBreak` node.
+A **block** is the unit of flow (paragraph or heading). A **run** is a maximal stretch of text with a single `TextStyle`, the atomic unit of measurement. Blocks may carry a `flow` policy (widow/orphan control, keep-together, keep-with-next, keep-previous, forced breaks). M-FLOW: paragraphs, headings, and tables carry the six flow attrs under their engine/OOXML spellings, resolved attr-over-style through `resolveFlowTier` (the styles registry is the natural home — Word's style pPr); the PM `pageBreak` node's stamp (`breakBefore: 'page'` on the following block) MERGES with a block's own flow, and a pending break passes THROUGH floated blocks (floats carry no flow — the engine's law).
 
 Second, `LayoutOptions`, the page size and margins in CSS pixels:
 

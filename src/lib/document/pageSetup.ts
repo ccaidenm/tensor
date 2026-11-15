@@ -26,6 +26,13 @@ export interface PageSetup {
   /** When pageSize === 'custom': the user-defined dimensions in POINTS. */
   customWidth?: number;
   customHeight?: number;
+  /**
+   * M-FLOW — the DOCUMENT-LEVEL widow/orphan default (Word's
+   * Compatibility/layout option): true/absent = protection ON (the
+   * engine's LayoutOptions default); false = natural splits
+   * everywhere a paragraph doesn't override via its own flow.
+   */
+  widowControl?: boolean;
 }
 
 // ─── Unit system ─────────────────────────────────────────────────────────────
@@ -233,5 +240,8 @@ export function toLayoutOptions(pageSetup: PageSetup): LayoutOptions {
       bottom: ptToPx(pageSetup.margins.bottom),
       left: ptToPx(pageSetup.margins.left),
     },
+    // M-FLOW — the document-level widow/orphan default; the engine's
+    // own default (true) covers absent (old documents).
+    preventWidowsAndOrphans: pageSetup.widowControl ?? true,
   };
 }
