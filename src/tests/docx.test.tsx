@@ -55,6 +55,80 @@ async function exportParts(input: DocxExportInput): Promise<{ parts: Record<stri
   return { parts, text: (part: string) => decoder.decode(parts[part]!), report };
 }
 
+describe('docx export — M-FLOW pagination properties', () => {
+  it('paragraph flags map to their w: spellings (keepNext/keepLines/pageBreakBefore)', async () => {
+    const { text } = await exportParts(makeInput(doc(
+      para('bonded', { keepNext: true, keepLines: true }),
+      para('forced', { breakBefore: 'page' }),
+    )));
+    const xml = text('word/document.xml');
+    expect(xml).toContain('<w:keepNext/>');
+    expect(xml).toContain('<w:keepLines/>');
+    expect(xml).toContain('<w:pageBreakBefore/>');
+  });
+
+  it('widowControl writes the deviation ONLY (false → w:val="false"; on/unset → nothing)', async () => {
+    const { text } = await exportParts(makeInput(doc(
+      para('off', { widowControl: false }),
+      para('on', { widowControl: true }),
+      para('unset'),
+    )));
+    const xml = text('word/document.xml');
+    expect(xml).toContain('<w:widowControl w:val="false"/>');
+    // No second spelling: on/unset paragraphs write nothing.
+    expect(xml.match(/<w:widowControl/g)?.length ?? 0).toBe(1);
+  });
+
+  it('breakAfter exports as the TRAILING page-break run (Word\'s break-after spelling)', async () => {
+    const { text } = await exportParts(makeInput(doc(para('ends here', { breakAfter: 'page' }))));
+    const xml = text('word/document.xml');
+    expect(xml).toContain('<w:br w:type="page"/>');
+  });
+
+  it('style-tier flags emit in styles.xml; headings no longer hardcode keepLines (the retirement)', async () => {
+    const { text } = await exportParts(makeInput(doc(
+      { type: 'heading', attrs: { level: 1, styleId: 'heading-1' }, content: [{ type: 'text', text: 'T' }] },
+    )));
+    const styles = text('word/styles.xml');
+    // heading-1's builtin carries keepNext (Word's own Heading default):
+    expect(styles).toContain('<w:keepNext/>');
+    // The pre-M-FLOW hardcode kept lines together on EVERY heading —
+    // retired: only a style that SAYS keepLines emits it.
+    expect(styles).not.toContain('<w:keepLines/>');
+  });
+
+  it('a style-level keepNext paragraph writes NOTHING at the paragraph level (no double-write)', async () => {
+    // The heading's style carries keepNext; the paragraph attr is unset
+    // — the paragraph pPr must NOT re-spell it (the round-trip gate
+    // would import the double-write back as a direct attr).
+    const { text } = await exportParts(makeInput(doc(
+      { type: 'heading', attrs: { level: 1, styleId: 'heading-1' }, content: [{ type: 'text', text: 'T' }] },
+    )));
+    expect(text('word/document.xml')).not.toContain('<w:keepNext/>');
+  });
+
+  it('a DIRECT explicit-off override emits w:val="false" (beats a style\'s on)', async () => {
+    const { text } = await exportParts(makeInput(doc(
+      para('over', { keepNext: false }),
+    )));
+    const xml = text('word/document.xml');
+    expect(xml).toContain('<w:keepNext w:val="false"/>');
+  });
+
+  it('table rows write w:cantSplit when the row must not break', async () => {
+    const row = (cantSplit: boolean) => ({
+      type: 'tableRow',
+      ...(cantSplit ? { attrs: { cantSplit: true } } : {}),
+      content: [{ type: 'tableCell', content: [para('x')] }],
+    });
+    const { text } = await exportParts(makeInput(doc({
+      type: 'table', content: [row(false), row(true)],
+    })));
+    const xml = text('word/document.xml');
+    expect(xml.match(/<w:cantSplit\/>/g)?.length ?? 0).toBe(1);
+  });
+});
+
 describe('docx export — page geometry (units seam)', () => {
   it('Letter + 1in margins land in twips (pt × 20)', async () => {
     const { text } = await exportParts(makeInput(doc(para('x'))));

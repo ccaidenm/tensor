@@ -19,6 +19,8 @@ const PageSetupSchema = z.object({
   pageColor: z.string().optional(),
   customWidth: z.number().optional(),
   customHeight: z.number().optional(),
+  /** M-FLOW — the document-level widow/orphan default; absent = ON. */
+  widowControl: z.boolean().optional(),
 }) satisfies z.ZodType<PageSetup>;
 
 /**

@@ -1933,9 +1933,11 @@ function sameState(a: WalkState, b: WalkState): boolean {
 //
 // THE MODEL (spec of record, mirrored in types.ts's TableBlock doc):
 // the table's flow units are BANDS — a band is one row's line-grid
-// slice. An ordinary row (fits a page) is exactly ONE band; a monster
-// row (taller than the content box) fragments into per-line-grid
-// bands, the codeBlock taller-than-page ruling family. Bands tile the
+// slice. A cantSplit row (fits a page) is exactly ONE band (atomic);
+// a split-allowed row (cantSplit unset — Word/GDocs' "allow row to
+// break across pages" DEFAULT) and a monster row (taller than the
+// content box) fragment into per-line-grid bands, the codeBlock
+// taller-than-page ruling family. Bands tile the
 // flow track exactly like lines (the contiguity contract holds
 // band-wise); the cell LINES within a band are PARALLEL lanes that
 // ride lines[] as ordinary LineBoxes carrying `tableCell` identity.
@@ -2285,16 +2287,32 @@ function computeTableLayout(
   }
 
   // ── BAND SLOTS per row ──
-  // Ordinary row (fits a page): ONE band holding every own cell's full
-  // stack. Monster row: per-line-grid bands (each own cell contributes
-  // its k-th line to band k); the row's negotiated height reconciles
-  // into the last band. Degenerate monster (no own lines — the
-  // monster-ness came from a rowspan share or minHeight): one
-  // un-fragmentable band (the R6 floor family owns the overflow).
+  // Atomic row (cantSplit === true AND fits a page): ONE band holding
+  // every own cell's full stack. Split-allowed row (cantSplit unset —
+  // Word/GDocs' DEFAULT) or monster row: per-line-grid bands (each own
+  // cell contributes its k-th line to band k); the row's negotiated
+  // height reconciles into the last band. Degenerate row (no own
+  // lines — a rowspan-covered or empty row): one un-fragmentable band
+  // (the R6 floor family owns the overflow). A monster row fragments
+  // regardless of cantSplit — you can't keep together what can't fit
+  // together.
+  //
+  // THE BAND-ALIGNMENT PRICE (M-FLOW ruling, spec of record): a
+  // split-allowed row's lines are BAND-ALIGNED (a line never straddles
+  // a band boundary — the rowspan ruling extended to ordinary rows),
+  // so a row whose cells MIX line heights can tile taller than its
+  // negotiated max stack (band k must be tall enough for the tallest
+  // cell's line k, even where a shorter cell keeps the band). Uniform
+  // line heights — the overwhelmingly common case — are pixel-for-
+  // pixel the one-band model: bandSum == the stack height and the
+  // pads reconcile into the last band. When the row fits its page
+  // whole, the bands simply tile back-to-back — no split, same
+  // geometry; R5 splits ONLY when the page remainder runs out.
   const rowBands: TableBand[][] = block.rows.map((rowData, r) => {
     const h = heights[r]!
     const own = stacks.filter((s) => s.row === r && s.rowspan === 1)
-    if (h <= contentHeight || own.length === 0) {
+    const atomic = own.length === 0 || (rowData.cantSplit === true && h <= contentHeight)
+    if (atomic) {
       const lanes: TableBand['lanes'] = []
       for (const s of own) {
         let y = s.pad.top
@@ -2313,13 +2331,22 @@ function computeTableLayout(
       for (const s of own) {
         const line = s.lines[k]
         if (!line) continue
-        height = Math.max(height, line.height)
+        // BAND 0 CARRIES THE TOP PAD (M-FLOW fix of a pre-existing
+        // monster-path bug): the lane sits at pad.top, so its bottom
+        // is pad.top + line.height — the band must be tall enough for
+        // the lane it holds, or band 0's lines poke pad.top px into
+        // band 1's region and overlap its lines (4px under the default
+        // pads; pinned by the split-row tests). The BOTTOM pad rides
+        // the last band via the reconcile below, so a uniform-line row
+        // tiles to exactly its negotiated height h.
+        const laneTop = k === 0 ? s.pad.top : 0
+        height = Math.max(height, laneTop + line.height)
         lanes.push({
           stack: s,
           paraIndex: s.linePara[k]!,
           lineIndex: s.lineIndexBase + k,
           line,
-          y: k === 0 ? s.pad.top : 0,
+          y: laneTop,
         })
       }
       bands.push({ row: r, height, lanes, isFirstOfRow: k === 0, isHeader: rowData.isHeader, data: null as unknown as TableBandData, start: 0, end: 0 })
@@ -2573,11 +2600,14 @@ function hashBlock(block: Block): string {
           : block.kind === 'table'
           ? {
               // M-TABLES: the hash covers the full grid structure —
-              // rows (isHeader/minHeight), cells (colspan/rowspan/
-              // colwidth/backgroundColor/padding) and each cell
-              // paragraph's runs (the same run-union dispatch as the
-              // flow tier). align/margin/cellPadding ride too (the
+              // rows (isHeader/minHeight/cantSplit), cells (colspan/
+              // rowspan/colwidth/backgroundColor/padding) and each
+              // cell paragraph's runs (the same run-union dispatch as
+              // the flow tier). align/margin/cellPadding ride too (the
               // emit geometry and the padding resolution read them).
+              // M-FLOW: cantSplit changes the BAND SLOTS (atomic vs
+              // line-grid) — cache-relevant ≡ layout-relevant; absent
+              // ≡ unset via the stableStringify drop rule.
               // Cell paragraph ids are NOT hashed (the cells are
               // embedded, never walked as blocks). Undefined/null
               // attrs drop (absent ≡ unset, the stableStringify rule);
@@ -2599,6 +2629,7 @@ function hashBlock(block: Block): string {
               rows: block.rows.map((row) => ({
                 isHeader: row.isHeader,
                 minHeight: row.minHeight ?? undefined,
+                cantSplit: row.cantSplit ?? undefined,
                 cells: row.cells.map((cell) => ({
                   colspan: cell.colspan,
                   rowspan: cell.rowspan,

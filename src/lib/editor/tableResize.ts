@@ -192,3 +192,32 @@ export function setRowMinHeight(editor: Editor, tablePos: number, rowIndex: numb
   );
   return true;
 }
+
+/**
+ * M-FLOW — the row's split control (Word's "Allow row to break across
+ * pages" checkbox, stored under the OOXML w:cantSplit spelling):
+ * null = unset = the row MAY split at the cell line grid (Word's AND
+ * GDocs' default); true = atomic (moves wholly). The MODEL is binary
+ * null|true — a write of `false` normalizes to null (they layout
+ * identically; the parseHTML side still tolerates a literal false
+ * from hand-written HTML). ONE transaction per commit.
+ */
+export function setRowCantSplit(
+  editor: Editor,
+  tablePos: number,
+  rowIndex: number,
+  cantSplit: boolean | null
+): boolean {
+  const table: PMNode | null = editor.state.doc.nodeAt(tablePos);
+  if (!table || table.type.name !== 'table') return false;
+  const row = table.maybeChild(rowIndex);
+  if (!row) return false;
+  let rowPos = tablePos + 1;
+  for (let i = 0; i < rowIndex; i++) rowPos += table.child(i)!.nodeSize;
+  const next = cantSplit === true ? true : null;
+  if ((row.attrs.cantSplit ?? null) === next) return false;
+  editor.view.dispatch(
+    editor.state.tr.setNodeMarkup(rowPos, undefined, { ...row.attrs, cantSplit: next }),
+  );
+  return true;
+}

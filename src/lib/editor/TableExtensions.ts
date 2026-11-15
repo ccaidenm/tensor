@@ -8,6 +8,7 @@ import {
 import type { EditorState } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { CellSelection, TableView as ResizableTableView } from '@tiptap/pm/tables';
+import { tableFlowAttributes } from '@/lib/editor/ParagraphExtensions';
 
 /**
  * M-TABLES — the table model.
@@ -183,6 +184,11 @@ export const TensorTable = TableBase.extend({
       margin: edgesAttr('data-table-margin', 'margin'),
       // M-T4 — default cell padding (per-side; cells override).
       cellPadding: edgesAttr('data-table-cell-padding', 'cellPadding'),
+      // M-FLOW — table-level pagination flags (keepLines = keep the
+      // whole table on one page when it fits; keepNext/keepPrevious
+      // bond the table to a caption/neighbor; forced breaks around
+      // it). The engine's TableBlock accepts FlowPolicy directly.
+      ...tableFlowAttributes,
     };
   },
 }).configure({
@@ -214,6 +220,28 @@ export const TensorTableRow = TableRowBase.extend({
         renderHTML: (attributes) =>
           typeof attributes.minHeight === 'number' && attributes.minHeight > 0
             ? { 'data-row-min-height': String(attributes.minHeight) }
+            : {},
+      },
+      // M-FLOW — Word's per-row "Allow row to break across pages",
+      // stored under the OOXML w:cantSplit spelling (the DOCX
+      // round-trip's name; the PANEL's checkbox label is Word's
+      // user-facing inverted phrasing): null = unset = the row MAY
+      // split at the cell line grid (Word's AND GDocs' DEFAULT — the
+      // engine's per-line-grid banding); true = the row is atomic,
+      // it moves wholly when it doesn't fit the page remainder. A
+      // monster row (taller than a page) fragments regardless — the
+      // engine's "can't keep together what can't fit together".
+      cantSplit: {
+        default: null,
+        parseHTML: (element) => {
+          const v = element.getAttribute('data-cant-split');
+          if (v === 'true') return true;
+          if (v === 'false') return false;
+          return null;
+        },
+        renderHTML: (attributes) =>
+          attributes.cantSplit === true || attributes.cantSplit === false
+            ? { 'data-cant-split': String(attributes.cantSplit) }
             : {},
       },
     };

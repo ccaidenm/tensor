@@ -445,7 +445,21 @@ interface ParagraphOptionsBag {
     spacing?: { before?: number; after?: number; line?: number; lineRule?: 'auto' | 'atLeast' };
     indent?: { left?: number; right?: number; firstLine?: number; hanging?: number };
     tabStops?: { type: (typeof TabStopType)[keyof typeof TabStopType]; position: number }[];
+    /** M-FLOW — w:keepNext / w:keepLines / w:pageBreakBefore: written
+     * ONLY when the effective (attr-over-style) value is ON; undefined
+     * = omitted (Word's default is off). */
+    keepNext?: boolean;
+    keepLines?: boolean;
+    pageBreakBefore?: boolean;
+    /** M-FLOW — w:widowControl: written ONLY when effectively OFF
+     * (Word's default is ON — the deviation-only emission). */
+    widowControl?: boolean;
   };
+  /** M-FLOW — breakAfter has no OOXML paragraph property; the export
+   * spelling is a TRAILING page-break run (mapParagraph appends it),
+   * which the import maps back to breakAfter — behavior- and
+   * round-trip-preserving. */
+  breakAfter?: boolean;
 }
 
 /** The spacing bag (px attrs → OOXML): before/after in twips; the line
@@ -506,6 +520,22 @@ function paragraphOptions(node: JSONContent, state: WalkState): ParagraphOptions
         }))
     : undefined;
 
+  // M-FLOW — the pagination flags: DIRECT-ATTR DEVIATIONS ONLY. The
+  // style tier emits its own pPr through styleParagraphProps; writing
+  // the style's value here TOO would double-write (and the round-trip
+  // gate would import it back as a direct attr). So: true → emit the
+  // on-flag; false → emit the EXPLICIT OFF (w:val="false" — an
+  // override that beats a style's on); unset → nothing at the
+  // paragraph level. widowControl: false is the only deviation (Word's
+  // default is ON). breakAfter is the trailing-run spelling below.
+  const directBool = (name: 'keepNext' | 'keepLines' | 'widowControl'): boolean | null => {
+    const v = attrs[name];
+    return v === true || v === false ? v : null;
+  };
+  const keepNext = directBool('keepNext');
+  const keepLines = directBool('keepLines');
+  const widowControl = directBool('widowControl');
+
   const options: ParagraphOptionsBag['options'] = {
     heading: headingLevel,
     style: !isHeading && styleId !== 'normal' ? wordStyleId(styleId) : undefined,
@@ -513,13 +543,20 @@ function paragraphOptions(node: JSONContent, state: WalkState): ParagraphOptions
     ...(Object.keys(spacing).length ? { spacing } : {}),
     ...(Object.keys(indent).length ? { indent } : {}),
     ...(tabStops ? { tabStops } : {}),
+    ...(keepNext != null ? { keepNext } : {}),
+    ...(keepLines != null ? { keepLines } : {}),
+    ...(attrs.breakBefore === 'page' ? { pageBreakBefore: true } : {}),
+    ...(widowControl === false ? { widowControl: false } : {}),
   };
-  return { paragraphStyle, options };
+  return { paragraphStyle, options, breakAfter: attrs.breakAfter === 'page' ? true : undefined };
 }
 
 function mapParagraph(node: JSONContent, state: WalkState): Paragraph {
-  const { paragraphStyle, options } = paragraphOptions(node, state);
-  return new Paragraph({ ...options, children: mapInlineContent(node.content ?? [], state, paragraphStyle) });
+  const { paragraphStyle, options, breakAfter } = paragraphOptions(node, state);
+  const children = mapInlineContent(node.content ?? [], state, paragraphStyle);
+  // M-FLOW — the breakAfter spelling is the trailing page-break RUN
+  // (Word's own break-after shape); the import maps it back.
+  return new Paragraph({ ...options, children: breakAfter ? [...children, new PageBreak()] : children });
 }
 
 /** THE HEADING paragraph option: the level rides the options bag (used
@@ -655,7 +692,9 @@ function mapTable(node: JSONContent, state: WalkState): Table {
     // A leading all-header row repeats across page breaks (Word's own
     // table convention, and what Tensor's tableHeader cells mean).
     const allHeader = cells.length > 0 && cells.every((c) => c.type === 'tableHeader');
-    return new TableRow({ children: built, tableHeader: allHeader });
+    // M-FLOW — w:cantSplit: the row must not break across pages.
+    const cantSplit = (row.attrs as { cantSplit?: unknown } | null | undefined)?.cantSplit === true;
+    return new TableRow({ children: built, tableHeader: allHeader, ...(cantSplit ? { cantSplit: true } : {}) });
   });
 
   return new Table({
@@ -915,6 +954,18 @@ function styleParagraphProps(props: StyleProperties | undefined): object {
     ...(props.textAlign ? { alignment: toAlignment(props.textAlign) } : {}),
     ...(Object.keys(spacing).length ? { spacing } : {}),
     ...(Object.keys(indent).length ? { indent } : {}),
+    // M-FLOW — the pagination flags (Word's style pPr: w:keepNext,
+    // w:keepLines, w:pageBreakBefore, w:widowControl), emitted from the
+    // STYLE's own properties — the same registry every render path
+    // reads. The pre-M-FLOW heading hardcode (keepNext+keepLines on
+    // Heading1–6 unconditionally) is RETIRED: the heading-1..3 builtins
+    // now carry keepNext themselves, and style-defined flags flow
+    // through here for custom styles too. Deviation-only: widowControl
+    // is written only when the style explicitly DISABLES it.
+    ...(props.keepNext === true ? { keepNext: true } : {}),
+    ...(props.keepLines === true ? { keepLines: true } : {}),
+    ...(props.breakBefore === 'page' ? { pageBreakBefore: true } : {}),
+    ...(props.widowControl === false ? { widowControl: false } : {}),
   };
 }
 
@@ -933,7 +984,10 @@ function buildStylesConfig(input: DocxExportInput, defs: Map<string, StyleDefini
       ?? { bold: true };
     return {
       run: { ...styleRunProps(props), bold: props.bold ?? true },
-      paragraph: { ...styleParagraphProps(props), keepNext: true, keepLines: true },
+      // M-FLOW: no hardcode — the style's own properties emit the
+      // pagination flags (heading-1..3 builtins carry keepNext; the
+      // 4..6 legacy fallbacks do too).
+      paragraph: styleParagraphProps(props),
     };
   };
 

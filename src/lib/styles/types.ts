@@ -57,6 +57,22 @@ export const StylePropertiesSchema = z.object({
   textAlign: z.enum(['left', 'center', 'right', 'justify']).optional(),
   fontVariant: z.enum(['small-caps', 'normal']).optional(),
   textTransform: z.enum(['uppercase', 'lowercase', 'capitalize', 'title-case', 'none']).optional(),
+  /**
+   * M-FLOW — pagination flags at the style tier (Word's style pPr:
+   * w:keepNext / w:keepLines / w:widowControl / w:pageBreakBefore —
+   * plus keepPrevious/breakAfter, the Tensor superset). All optional;
+   * absent = the style says nothing (inherit — the engine defaults:
+   * keeps off, widowControl on). Same spellings as the engine's
+   * FlowPolicy, resolved through resolveFlowTier (direct attrs beat
+   * the style). Paragraph-kind styles only (the dialog hides the
+   * section for character styles).
+   */
+  keepNext: z.boolean().optional(),
+  keepLines: z.boolean().optional(),
+  keepPrevious: z.boolean().optional(),
+  widowControl: z.boolean().optional(),
+  breakBefore: z.literal('page').optional(),
+  breakAfter: z.literal('page').optional(),
 });
 
 export type StyleProperties = z.infer<typeof StylePropertiesSchema>;

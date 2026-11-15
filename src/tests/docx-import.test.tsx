@@ -87,6 +87,132 @@ function importParts(entries: Record<string, string | Uint8Array>, fontPolicy: '
 }
 void importParts;
 
+describe('docx import — M-FLOW pagination properties', () => {
+  it('the pPr pagination block maps to paragraph attrs (on flags, off overrides, break-before)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p><w:pPr><w:keepNext/><w:keepLines/><w:pageBreakBefore/></w:pPr>${runXml('a')}</w:p>` +
+        `<w:p><w:pPr><w:keepNext w:val="0"/><w:widowControl w:val="0"/></w:pPr>${runXml('b')}</w:p>` +
+        `<w:p><w:pPr><w:widowControl/></w:pPr>${runXml('c')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const [a, b, c] = parsed.json.content!;
+    expect(a!.attrs!.keepNext).toBe(true);
+    expect(a!.attrs!.keepLines).toBe(true);
+    expect(a!.attrs!.breakBefore).toBe('page');
+    // Explicit-off overrides: val="0" → false (must beat a style's on).
+    expect(b!.attrs!.keepNext).toBe(false);
+    expect(b!.attrs!.widowControl).toBe(false);
+    // widowControl PRESENT (on) ≡ absent (Word's default ON) — neither writes.
+    expect(c!.attrs!.widowControl).toBeUndefined();
+  });
+
+  it('a TRAILING page-break run imports as breakAfter (the previously-lost shape)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        // Word's Ctrl+Enter-at-paragraph-end spelling: text, then a
+        // page-break run as the paragraph's last content.
+        `<w:p>${runXml('chapter ends')}<w:r><w:br w:type="page"/></w:r></w:p>` +
+        `<w:p>${runXml('next page')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const [first, second] = parsed.json.content!;
+    expect(first!.type).toBe('paragraph');
+    expect(first!.attrs!.breakAfter).toBe('page');
+    expect((first!.content![0] as { text: string }).text).toBe('chapter ends');
+    expect(second!.attrs!.breakAfter).toBeUndefined();
+  });
+
+  it('a break with content AFTER it inside one paragraph stays counted (no mid-paragraph breaks)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p>${runXml('before')}<w:r><w:br w:type="page"/></w:r>${runXml('after')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const first = parsed.json.content![0]!;
+    expect(first.type).toBe('paragraph');
+    expect(first.attrs!.breakAfter).toBeUndefined();
+    expect(parsed.report.unknownNodes).toBe(1);
+  });
+
+  it('the standalone break paragraph still maps to the pageBreak node (both break spellings kept)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:p>${runXml('a')}</w:p><w:p><w:r><w:br w:type="page"/></w:r></w:p><w:p>${runXml('b')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    expect(parsed.json.content![1]!.type).toBe('pageBreak');
+  });
+
+  it('style pPr pagination flags land in the style definitions (the Heading1 keepNext, un-dropped)', () => {
+    const parts = zipParts({
+      'word/document.xml': body(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${runXml('Title')}</w:p>`),
+      'word/styles.xml': STYLES_XML, // Heading1 carries <w:keepNext/> in its pPr
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const heading = parsed.styleDefinitions.find((d) => d.id === 'heading-1')!;
+    expect(heading.properties.keepNext).toBe(true);
+  });
+
+  it('w:cantSplit imports as the row attr', () => {
+    const cell = '<w:tc><w:tcPr><w:gridSpan w:val="1"/></w:tcPr><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>';
+    const parts = zipParts({
+      'word/document.xml': body(
+        `<w:tbl><w:tr><w:trPr><w:cantSplit/></w:trPr>${cell}</w:tr>` +
+        `<w:tr>${cell}</w:tr></w:tbl>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const parsed = mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const table = parsed.json.content![0]!;
+    expect(table.type).toBe('table');
+    const [r0, r1] = table.content!;
+    expect(r0!.attrs?.cantSplit).toBe(true);
+    expect(r1!.attrs?.cantSplit).toBeUndefined();
+  });
+
+  it('ROUND-TRIP: the flow attrs survive export → import (keepNext, widowControl off, cantSplit, breakAfter)', async () => {
+    const source = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', attrs: { keepNext: true, keepLines: true }, content: [{ type: 'text', text: 'kept' }] },
+        { type: 'paragraph', attrs: { widowControl: false, breakAfter: 'page' }, content: [{ type: 'text', text: 'breaks after' }] },
+        {
+          type: 'table',
+          content: [
+            { type: 'tableRow', attrs: { cantSplit: true }, content: [{ type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'atomic' }] }] }] },
+          ],
+        },
+      ],
+    };
+    const input: DocxExportInput = {
+      json: source,
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: 32 },
+      headerFooter: null,
+      coreProperties: { title: 'flow', creator: 'Tensor' },
+      styleDefinitions: [...BUILTIN_DEFINITIONS],
+      baseStyle: { fontFamily: 'Source Serif 4', fontSize: 16 },
+      media: new Map(),
+    };
+    const { bytes } = await buildDocx(input);
+    const imported = mapDocxDocument(parseDocxTrees(unzipSync(bytes)), { fontPolicy: 'keep', mediaPartToId: new Map() });
+    const [kept, breaksAfter, table] = imported.json.content!;
+    expect(kept.attrs!.keepNext).toBe(true);
+    expect(kept.attrs!.keepLines).toBe(true);
+    expect(breaksAfter.attrs!.widowControl).toBe(false);
+    expect(breaksAfter.attrs!.breakAfter).toBe('page');
+    expect(table.content![0]!.attrs!.cantSplit).toBe(true);
+  });
+});
+
 describe('docx import — runs and marks', () => {
   it('rPr maps to marks (bold, italic, strike, underline, highlight, color, font, size)', async () => {
     const parts = zipParts({

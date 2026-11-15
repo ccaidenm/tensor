@@ -1,4 +1,4 @@
-import type { TextStyle } from '@tensor-editor/engine';
+import type { TextStyle, FlowPolicy } from '@tensor-editor/engine';
 import type { StyleDefinition, StyleProperties, TextTransform } from './types';
 import type { TextAlign } from '@/lib/paginated/positionMap';
 
@@ -156,6 +156,62 @@ export function resolveBlockTier(
     indentRight: attrIndentRight ?? p?.indentRight ?? 0,
     firstLineIndent: attrs.firstLineIndent != null ? attrFirstLine : p?.firstLineIndent,
     align: attrAlign ?? (p?.textAlign as TextAlign | 'justify' | undefined) ?? 'left',
+  };
+}
+
+// ─── Flow-tier resolution (pagination flags — M-FLOW) ───────────────────
+
+/** The flow-flag spellings on paragraph/heading attrs (null = unset —
+ * the PM JSON round-trip convention; ParagraphExtensions owns the
+ * schema and writer). */
+export interface FlowTierAttrs {
+  keepNext?: unknown;
+  keepLines?: unknown;
+  keepPrevious?: unknown;
+  widowControl?: unknown;
+  breakBefore?: unknown;
+  breakAfter?: unknown;
+}
+
+const boolOrUndefined = (v: unknown): boolean | undefined => (v === true || v === false ? v : undefined);
+const pageOrUndefined = (v: unknown): 'page' | undefined => (v === 'page' ? 'page' : undefined);
+
+/**
+ * M-FLOW — the pagination-flag cascade: direct attrs beat the
+ * paragraph style's flow properties; every unresolved flag stays UNSET
+ * (omitted — the engine then applies its own defaults: keeps off,
+ * widowControl on via the document-level default). Deliberately NOT
+ * part of BlockTier: geometry resolves to an always-complete value,
+ * while flow is tri-state by nature (null = inherit). Returns
+ * undefined when no flag resolves — the adapter then emits no `flow`
+ * field at all (hashBlock covers flow; an empty object would needlessly
+ * churn every paragraph's hash).
+ */
+export function resolveFlowTier(para: StyleDefinition | null, attrs: FlowTierAttrs): FlowPolicy | undefined {
+  const p = para?.properties;
+  const keepNext = boolOrUndefined(attrs.keepNext) ?? p?.keepNext;
+  const keepLines = boolOrUndefined(attrs.keepLines) ?? p?.keepLines;
+  const keepPrevious = boolOrUndefined(attrs.keepPrevious) ?? p?.keepPrevious;
+  const widowControl = boolOrUndefined(attrs.widowControl) ?? p?.widowControl;
+  const breakBefore = pageOrUndefined(attrs.breakBefore) ?? p?.breakBefore;
+  const breakAfter = pageOrUndefined(attrs.breakAfter) ?? p?.breakAfter;
+  if (
+    keepNext === undefined &&
+    keepLines === undefined &&
+    keepPrevious === undefined &&
+    widowControl === undefined &&
+    breakBefore === undefined &&
+    breakAfter === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(keepNext !== undefined ? { keepNext } : {}),
+    ...(keepLines !== undefined ? { keepLines } : {}),
+    ...(keepPrevious !== undefined ? { keepPrevious } : {}),
+    ...(widowControl !== undefined ? { widowControl } : {}),
+    ...(breakBefore !== undefined ? { breakBefore } : {}),
+    ...(breakAfter !== undefined ? { breakAfter } : {}),
   };
 }
 

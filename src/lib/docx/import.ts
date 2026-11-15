@@ -273,6 +273,20 @@ function paraPropsFromPPPr(pPr: ONode | undefined): StyleProperties {
   if (jc === 'center' || jc === 'right' || jc === 'both') {
     props.textAlign = jc === 'both' ? 'justify' : jc;
   }
+  // M-FLOW — the pagination pPr block at the STYLE tier (Word's style
+  // pPr: Heading styles carry w:keepNext). ABSENT = the style says
+  // nothing (inherit); PRESENT decides (val 0/false = explicit OFF —
+  // for widowControl that is the only meaningful spelling, Word's
+  // default being ON).
+  {
+    const keepNext = oSub(pPr, 'keepNext');
+    if (keepNext != null) props.keepNext = oflag(keepNext) === true;
+    const keepLines = oSub(pPr, 'keepLines');
+    if (keepLines != null) props.keepLines = oflag(keepLines) === true;
+    const widowControl = oSub(pPr, 'widowControl');
+    if (widowControl != null) props.widowControl = oflag(widowControl) === true;
+    if (oflag(oSub(pPr, 'pageBreakBefore')) === true) props.breakBefore = 'page';
+  }
   return props;
 }
 
@@ -576,6 +590,13 @@ interface RunPieces {
   pieces: JSONContent[];
   pageBreaks: number;
   hasContent: boolean;
+  /**
+   * M-FLOW — how many pieces follow the run's LAST page-break br: 0
+   * means the break is the run's trailing content (Word's
+   * break-after-this-paragraph spelling — Ctrl+Enter at the paragraph's
+   * end; the trailing-break mapping in mapParagraph reads this).
+   */
+  piecesAfterLastBreak: number;
 }
 
 function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: DocxTrees['rels']): RunPieces {
@@ -583,6 +604,9 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
   let textBuffer = '';
   let pageBreaks = 0;
   let hasContent = false;
+  // Pieces-array length (counting unflushed buffered text as one) at
+  // the last page-break br; -1 = no break in this run.
+  let piecesAtLastBreak = -1;
 
   const flushText = (): void => {
     if (textBuffer) {
@@ -608,7 +632,12 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
         if (!suppressed) textBuffer += '-';
         break;
       case 'br': {
-        if (oat(kid, 'type') === 'page') pageBreaks += 1;
+        if (oat(kid, 'type') === 'page') {
+          pageBreaks += 1;
+          // Text buffered BEFORE the break belongs before it — count it
+          // as pre-break content so piecesAfterLastBreak stays honest.
+          piecesAtLastBreak = pieces.length + (textBuffer ? 1 : 0);
+        }
         else { flushText(); pieces.push({ type: 'hardBreak' }); hasContent = true; }
         break;
       }
@@ -675,7 +704,12 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
     }
   }
   flushText();
-  return { pieces, pageBreaks, hasContent };
+  return {
+    pieces,
+    pageBreaks,
+    hasContent,
+    piecesAfterLastBreak: piecesAtLastBreak >= 0 ? pieces.length - piecesAtLastBreak : 0,
+  };
 }
 
 function mapDrawing(drawing: ONode, ctx: MapContext, rels: DocxTrees['rels']): JSONContent | null {
@@ -805,12 +839,32 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
       }));
     if (stops.length) attrs.tabStops = stops;
   }
+  // M-FLOW — the pagination pPr block (direct paragraph flags). The
+  // on/off elements carry Word's explicit-override spelling: PRESENT
+  // means the direct formatting decides (val 0/false = explicit OFF,
+  // which must beat a style's ON); ABSENT = inherit the style tier /
+  // the engine defaults. w:widowControl is the DEFAULT-ON family: only
+  // an explicit off value maps (attrs.widowControl false); absent and
+  // explicit-on are identical (engine default true), so neither writes.
+  {
+    const keepNext = oSub(pPr, 'keepNext');
+    if (keepNext != null) attrs.keepNext = oflag(keepNext) === true;
+    const keepLines = oSub(pPr, 'keepLines');
+    if (keepLines != null) attrs.keepLines = oflag(keepLines) === true;
+    const widowControl = oSub(pPr, 'widowControl');
+    if (widowControl != null && oflag(widowControl) === false) attrs.widowControl = false;
+    if (oflag(oSub(pPr, 'pageBreakBefore')) === true) attrs.breakBefore = 'page';
+  }
 
   // The runs — the field state machine lives in the run mapping and
   // spans paragraphs (fldChar begin/separate/end + instrText).
   const content: JSONContent[] = [];
   const ommlMarkers: ONode[] = [];
   let pageBreaks = 0;
+  // M-FLOW — content-array length at the LAST page-break run: equal to
+  // the final length ⟺ nothing follows the break (Word's break-after
+  // spelling). -1 = no break seen.
+  let contentAtLastBreak = -1;
   for (const kid of p.kids) {
     switch (kid.tag) {
       case 'r': {
@@ -818,6 +872,9 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         const mapped = mapRunChildren(kid, format, ctx, rels);
         pageBreaks += mapped.pageBreaks;
         content.push(...mapped.pieces);
+        if (mapped.pageBreaks > 0) {
+          contentAtLastBreak = content.length - mapped.piecesAfterLastBreak;
+        }
         break;
       }
       case 'hyperlink': {
@@ -951,6 +1008,18 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
 
   const merged = mergeRuns(content);
 
+  // M-FLOW — TRAILING page-break runs (Ctrl+Enter at the paragraph's
+  // end — Word's break-AFTER spelling): the breakAfter attr keeps the
+  // paragraph's run content AND its pagination (the engine closes the
+  // page after the block; the export re-emits the same trailing run,
+  // so the round-trip is stable). Runs BEFORE the heading return so a
+  // heading's trailing break rides too. Pre-M-FLOW this shape was
+  // silently lost.
+  if (pageBreaks > 0 && contentAtLastBreak === content.length && content.length > 0) {
+    attrs.breakAfter = 'page';
+    pageBreaks = 0;
+  }
+
   // THE HEADING MAPPING: Word spells headings as pStyle HeadingN — the
   // Tensor spelling is the heading NODE with its level. The runs ride
   // like any paragraph's (content never drops).
@@ -973,7 +1042,9 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
     return { json: { type: 'pageBreak' }, numPr: null };
   }
   if (pageBreaks > 0) {
-    // Mixed content + a break: the break is lost (counted) — rare.
+    // A break with content AFTER it inside the same paragraph: Tensor
+    // has no mid-paragraph page break — the break is lost (counted),
+    // the content never drops. Rare.
     ctx.report.unknownNodes += pageBreaks;
     return { json: { type: 'paragraph', attrs, content: merged }, numPr: numId != null ? { numId, ilvl } : null };
   }
@@ -1031,7 +1102,11 @@ function mapTable(tbl: ONode, ctx: MapContext, rels: DocxTrees['rels']): JSONCon
   // continuation cells FOLD into the origin's rowspan and vanish.
   const openMerges = new Map<number, { ref: JSONContent; span: number }>();
   const rows: JSONContent[] = oKids(tbl, 'tr').map((tr) => {
-    const repeatHeader = oflag(oSub(oSub(tr, 'trPr'), 'tblHeader')) === true;
+    const trPr = oSub(tr, 'trPr');
+    const repeatHeader = oflag(oSub(trPr, 'tblHeader')) === true;
+    // M-FLOW — w:cantSplit: the row must not break across pages (the
+    // Tensor row attr rides the same OOXML name).
+    const cantSplit = oflag(oSub(trPr, 'cantSplit')) === true;
     const cells: JSONContent[] = [];
     let col = 0;
     for (const tc of oKids(tr, 'tc')) {
@@ -1058,7 +1133,7 @@ function mapTable(tbl: ONode, ctx: MapContext, rels: DocxTrees['rels']): JSONCon
       if (vMerge) openMerges.set(col, { ref: origin, span: gridSpan });
       col += gridSpan;
     }
-    return { type: 'tableRow', content: cells };
+    return { type: 'tableRow', ...(cantSplit ? { attrs: { cantSplit: true } } : {}), content: cells };
   });
 
   return {

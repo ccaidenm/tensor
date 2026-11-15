@@ -36,6 +36,7 @@ import type { ReferencePagesMap } from './referencePages';
 import {
   baselineRunStyle,
   resolveBlockTier,
+  resolveFlowTier,
   resolveRun,
   transformText,
   type BlockTierAttrs,
@@ -73,9 +74,15 @@ export type { TextAlign } from './positionMap';
  * (CONVENTIONS.md, the fallback audit).
  *
  * The pageBreak node is NOT part of the IR: it becomes
- * `flow.breakBefore: 'page'` on the FOLLOWING block (the forced-break
- * spelling the engine's structural tier consumes — engine/src/types.ts
- * FlowPolicy).
+ * `flow.breakBefore: 'page'` on the FOLLOWING in-flow block (the
+ * forced-break spelling the engine's structural tier consumes —
+ * engine/src/types.ts FlowPolicy). M-FLOW: paragraphs and headings
+ * now carry their OWN flow attrs too (keepNext/keepLines/
+ * keepPrevious/widowControl/breakBefore/breakAfter), resolved
+ * attr-over-style through resolveFlowTier and merged with the
+ * pageBreak stamp; the image keepNext caption bond rides the same
+ * field. A pending break passes THROUGH a floated block (floats
+ * carry no flow — validateFloatFlow's law).
  */
 
 /**
@@ -1066,9 +1073,15 @@ function convertNode(
       // pure content height; the engine's TableRowData.minHeight
       // consumes it verbatim.
       const rowMin = row.attrs?.minHeight;
+      // M-FLOW: the row's split control (Word's "Allow row to break
+      // across pages" / w:cantSplit) — null = unset = MAY split (the
+      // Word/GDocs default); true = atomic. Verbatim to the engine's
+      // TableRowData.cantSplit.
+      const rowCantSplit = row.attrs?.cantSplit;
       rows.push({
         isHeader: allHeader,
         minHeight: typeof rowMin === 'number' && rowMin > 0 ? rowMin : null,
+        ...(rowCantSplit === true ? { cantSplit: true } : {}),
         cells,
       });
     });
@@ -1107,6 +1120,16 @@ function convertNode(
       cellPaddingAttr != null
         ? { top: padSide('top'), right: padSide('right'), bottom: padSide('bottom'), left: padSide('left') }
         : null;
+    // M-FLOW — the table-level pagination flags (the five-flag subset;
+    // the schema excludes widowControl). Emitted only when a flag is
+    // set — same all-null-no-field guard as paragraphs.
+    const tableFlow = resolveFlowTier(null, {
+      keepNext: node.attrs?.keepNext,
+      keepLines: node.attrs?.keepLines,
+      keepPrevious: node.attrs?.keepPrevious,
+      breakBefore: node.attrs?.breakBefore,
+      breakAfter: node.attrs?.breakAfter,
+    });
     const semantic: TableBlock = {
       id: blockId,
       kind: 'table',
@@ -1118,6 +1141,7 @@ function convertNode(
       ...(spaceAfter != null ? { spaceAfter } : {}),
       ...(marginLR ? { margin: marginLR } : {}),
       ...(cellPadding ? { cellPadding } : {}),
+      ...(tableFlow ? { flow: tableFlow } : {}),
     };
     return {
       gen: cacheGeneration,
@@ -1374,6 +1398,29 @@ function convertNode(
       : { textAlign: alignAttr };
   const tier = resolveBlockTier(paraDef, attrsTier, projection.indentLeft);
 
+  // M-FLOW — the pagination-flag cascade: direct attrs beat the
+  // paragraph style's flow properties, everything else stays unset.
+  // resolveFlowTier returns undefined when nothing resolves — the
+  // block then carries no `flow` field at all (hashBlock covers flow;
+  // an empty object would needlessly churn every paragraph's hash).
+  // Kinds 'paragraph'/'heading' only: codeBlocks carry no flow attrs,
+  // and table-cell / reference-entry paragraphs convert through their
+  // own arms (embedded content — cells paginate as ROWS, entries as
+  // lanes; per-paragraph flow is meaningless there). List-item and
+  // blockquote paragraphs project through THIS arm, so their flags
+  // ride too (Word: keep flags apply to list paragraphs).
+  const flow =
+    kind === 'paragraph' || kind === 'heading'
+      ? resolveFlowTier(paraDef, {
+          keepNext: node.attrs?.keepNext,
+          keepLines: node.attrs?.keepLines,
+          keepPrevious: node.attrs?.keepPrevious,
+          widowControl: node.attrs?.widowControl,
+          breakBefore: node.attrs?.breakBefore,
+          breakAfter: node.attrs?.breakAfter,
+        })
+      : undefined;
+
   // Validation before the engine can throw (negative left edge), plus
   // the style tier's own values — same clamps, same one-time warnings.
   const totalLeft = tier.indentLeft < 0 ? (warnIndentClamp(`style indentLeft < 0 → 0`), 0) : tier.indentLeft;
@@ -1419,6 +1466,7 @@ function convertNode(
     ...(indentRight ? { indentRight } : {}),
     ...(firstLineIndent != null ? { firstLineIndent } : {}),
     ...(tabStops ? { tabStops } : {}),
+    ...(flow ? { flow } : {}),
     ...hintFields,
   };
 
@@ -1523,6 +1571,10 @@ export function pmDocToSemantic(
   const semantic: Block[] = [];
   const dropped = new Set<string>();
   let pendingBreakBefore = false;
+  // M-FLOW — a breakAfter attr's badge anchors above the block it
+  // forces — the NEXT in-flow block. Set when the breaking block
+  // pushes, attached when the forced block pushes.
+  let pendingAfterBreakFact: { pos: number } | null = null;
 
   // #58 — the sectionBreak nodes in doc order (the walk collects;
   // the resolution below turns them into the engine's table).
@@ -1651,18 +1703,49 @@ export function pmDocToSemantic(
   /** Commit one projected block: forced breakBefore from a PRECEDING
    * pageBreak is a sibling fact, applied per call (the clone breaks
    * object identity for that one block and the engine re-hashes it;
-   * forced-break blocks are rare). Positions are always fresh. */
+   * forced-break blocks are rare). M-FLOW: the stamp MERGES over the
+   * block's own resolved flow — a paragraph after an explicit break
+   * may also carry keepNext etc., and replacing the object would drop
+   * them (breakBefore is the one field the stamp owns). A FLOATED
+   * block passes the pending break (and its NPC fact) THROUGH to the
+   * next in-flow block: the engine's validateFloatFlow refuses
+   * breakBefore on floats (a THROW at layout), and its ruled spelling
+   * is "put the forced break on the following text block" — the
+   * pre-M-FLOW unconditional stamp made pageBreak-then-float a crash
+   * path. Positions are always fresh. */
   const push = (conv: CachedConversion, node: PMNode, pos: number): void => {
-    const block = pendingBreakBefore
-      ? { ...conv.semantic, flow: { breakBefore: 'page' as const } }
-      : conv.semantic;
+    const floated =
+      conv.semantic.kind === 'image' && (conv.semantic as { float?: unknown }).float != null;
+    const block =
+      pendingBreakBefore && !floated
+        ? { ...conv.semantic, flow: { ...conv.semantic.flow, breakBefore: 'page' as const } }
+        : conv.semantic;
     // #58 — a pending pageBreak NPC attaches to THIS block (the block
     // it forces — the marker paints just above its first line).
-    if (pendingBreakFact) {
+    let stampedHere = false;
+    if (pendingBreakFact && !floated) {
       breakFacts.push({ ...pendingBreakFact, pos, afterBlockId: block.id });
       pendingBreakFact = null;
+      stampedHere = true;
     }
-    pendingBreakBefore = false;
+    // M-FLOW — the previous block's breakAfter anchors HERE (this is
+    // the block it forces), unless the same edge already carries the
+    // explicit node's badge — one badge per page edge.
+    if (pendingAfterBreakFact && !floated && !stampedHere) {
+      breakFacts.push({ kind: 'pageBreak', type: 'nextPage', pos: pendingAfterBreakFact.pos, afterBlockId: block.id });
+    }
+    pendingAfterBreakFact = null;
+    // M-FLOW — DIRECT-attr forced breaks badge like the node spelling
+    // (the two spellings, one visual language). Style-tier breaks do
+    // NOT badge (a style that breaks before every heading would paint
+    // every heading — the attr is the user's visible act).
+    if (!floated && !stampedHere && node.attrs?.breakBefore === 'page') {
+      breakFacts.push({ kind: 'pageBreak', type: 'nextPage', pos, afterBlockId: block.id });
+    }
+    if (!floated && node.attrs?.breakAfter === 'page') {
+      pendingAfterBreakFact = { pos };
+    }
+    if (!floated) pendingBreakBefore = false;
     semantic.push(block);
     blocks.push({ ...conv.adapter, from: pos, to: pos + node.nodeSize });
   };

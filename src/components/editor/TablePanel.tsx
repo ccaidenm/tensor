@@ -23,8 +23,9 @@ import {
   selectionHasMergedCells,
   type TableBorderPreset,
 } from '@/lib/editor/TableExtensions';
-import { clearAllColumnWidths, setColumnWidth, setRowMinHeight } from '@/lib/editor/tableResize';
+import { clearAllColumnWidths, setColumnWidth, setRowCantSplit, setRowMinHeight } from '@/lib/editor/tableResize';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { IconButton } from '@/components/layout/IconButton';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
@@ -59,12 +60,17 @@ interface TablePanelModel {
   colCount: number;
   /** Per-column fixed px widths (null = auto/flexible). */
   colWidths: (number | null)[];
-  /** Per-row minimum heights (null = auto) + header flag. */
-  rows: { minHeight: number | null; isHeader: boolean }[];
+  /** Per-row minimum heights (null = auto), header flag, and the
+   * M-FLOW split control (cantSplit: true = atomic; null = may split,
+   * the Word/GDocs default). */
+  rows: { minHeight: number | null; isHeader: boolean; cantSplit: boolean }[];
   border: TableBorderPreset;
   align: 'left' | 'center' | 'right';
   headerPinned: boolean;
   hasMerged: boolean;
+  /** M-FLOW — the table-level pagination flags (the five-flag schema
+   * subset's panel-relevant pair). */
+  flow: { keepNext: boolean; keepLines: boolean };
   /** M-T4 — the table's outer margins attr (null = never set → 0). */
   margin: { top: number | null; right: number | null; bottom: number | null; left: number | null } | null;
   /** M-T4 — the table's default cell padding attr (null = engine constants). */
@@ -100,6 +106,7 @@ function tablePanelModel(editor: Editor): TablePanelModel | null {
     rows.push({
       minHeight: typeof min === 'number' && min > 0 ? min : null,
       isHeader: allHeader,
+      cantSplit: row.attrs?.cantSplit === true,
     });
   });
   // The row the selection is in — toggleHeaderRow's subject (the same
@@ -132,6 +139,7 @@ function tablePanelModel(editor: Editor): TablePanelModel | null {
     align: node.attrs.align === 'center' || node.attrs.align === 'right' ? node.attrs.align : 'left',
     headerPinned: rows[currentRowIndex]?.isHeader ?? false,
     hasMerged: selectionHasMergedCells(editor.state),
+    flow: { keepNext: node.attrs.keepNext === true, keepLines: node.attrs.keepLines === true },
     margin: (node.attrs.margin as TablePanelModel['margin']) ?? null,
     cellPadding: (node.attrs.cellPadding as TablePanelModel['cellPadding']) ?? null,
     cellPaddingOverride,
@@ -414,7 +422,7 @@ function TablePanelInner({ editor }: { editor: Editor }) {
             </div>
 
             {/* ── Rows ── */}
-            <SectionHeader label="Rows — minimum height" />
+            <SectionHeader label="Rows — height & page breaking" />
             <div className="flex flex-col gap-1 px-3">
               {model.rows.map((row, i) => (
                 <div key={i} className="flex items-center justify-between gap-2 text-sm">
@@ -422,18 +430,74 @@ function TablePanelInner({ editor }: { editor: Editor }) {
                     Row {i + 1}
                     {row.isHeader ? ' · header' : ''}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <AutoNumberInput
-                      testId={`tp-row-input-${i}`}
-                      value={row.minHeight}
-                      min={0}
-                      max={2000}
-                      onCommit={(v) => setRowMinHeight(editor, model.pos, i, v)}
-                    />
-                    <span className="w-4 text-xs text-muted-foreground">px</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <AutoNumberInput
+                        testId={`tp-row-input-${i}`}
+                        value={row.minHeight}
+                        min={0}
+                        max={2000}
+                        onCommit={(v) => setRowMinHeight(editor, model.pos, i, v)}
+                      />
+                      <span className="w-4 text-xs text-muted-foreground">px</span>
+                    </div>
+                    {/* M-FLOW — Word's per-row "Allow row to break across
+                     * pages": ON = the row may split at the cell line
+                     * grid (the default); OFF = cantSplit, the row moves
+                     * wholly. Written through setRowCantSplit (null|true
+                     * — a `false` normalizes to null). */}
+                    <label
+                      className="flex items-center gap-1 text-xs text-muted-foreground"
+                      title="Allow row to break across pages (Word's default; off = keep the whole row on one page)"
+                    >
+                      <Switch
+                        size="sm"
+                        data-testid={`tp-row-split-${i}`}
+                        checked={row.cantSplit !== true}
+                        onCheckedChange={(checked: boolean) =>
+                          setRowCantSplit(editor, model.pos, i, checked ? null : true)
+                        }
+                      />
+                      break
+                    </label>
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* ── M-FLOW: Pagination (table-level keep flags) ── */}
+            <SectionHeader label="Pagination" />
+            <div className="flex flex-col gap-1 px-3 text-sm">
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Keep with next</span>
+                <Switch
+                  size="sm"
+                  data-testid="tp-table-keep-next"
+                  checked={model.flow.keepNext}
+                  onCheckedChange={(checked: boolean) =>
+                    editor
+                      .chain()
+                      .focus()
+                      .updateAttributes('table', { keepNext: checked ? true : null })
+                      .run()
+                  }
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Keep lines together</span>
+                <Switch
+                  size="sm"
+                  data-testid="tp-table-keep-lines"
+                  checked={model.flow.keepLines}
+                  onCheckedChange={(checked: boolean) =>
+                    editor
+                      .chain()
+                      .focus()
+                      .updateAttributes('table', { keepLines: checked ? true : null })
+                      .run()
+                  }
+                />
+              </label>
             </div>
 
             {/* ── M-T4: Spacing (margins + padding) ── */}

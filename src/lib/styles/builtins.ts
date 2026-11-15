@@ -15,9 +15,14 @@ import type { StyleDefinition, StyleProperties } from './types';
  */
 export const BUILTIN_DEFINITIONS: StyleDefinition[] = [
   { id: 'normal', name: 'Normal Text', kind: 'paragraph', properties: {} },
-  { id: 'heading-1', name: 'Heading 1', kind: 'paragraph', properties: { fontSize: 32, bold: true } },
-  { id: 'heading-2', name: 'Heading 2', kind: 'paragraph', properties: { fontSize: 24, bold: true } },
-  { id: 'heading-3', name: 'Heading 3', kind: 'paragraph', properties: { fontSize: 19, bold: true } },
+  // M-FLOW: heading styles ship keepNext: true — Word's own Heading
+  // 1–3 default (their style pPr carries w:keepNext), so a heading
+  // never strands at a page bottom away from its first paragraph.
+  // A DELIBERATE default change, announced in the milestone: existing
+  // documents re-paginate wherever a heading sat at a page bottom.
+  { id: 'heading-1', name: 'Heading 1', kind: 'paragraph', properties: { fontSize: 32, bold: true, keepNext: true } },
+  { id: 'heading-2', name: 'Heading 2', kind: 'paragraph', properties: { fontSize: 24, bold: true, keepNext: true } },
+  { id: 'heading-3', name: 'Heading 3', kind: 'paragraph', properties: { fontSize: 19, bold: true, keepNext: true } },
   { id: 'quote', name: 'Quote', kind: 'paragraph', properties: { italic: true } },
   // M-IMAGES-1: the caption style — an ordinary built-in, editable
   // like all built-ins (the ToF #31 hook reads captions REGARDLESS of
@@ -38,9 +43,12 @@ export const BUILTIN_DEFINITIONS: StyleDefinition[] = [
  * Values are the legacy adapter HEADING_DEFAULTS, verbatim.
  */
 export const LEGACY_HEADING_FALLBACK: Record<string, StyleProperties> = {
-  'heading-4': { fontSize: 16, bold: true },
-  'heading-5': { fontSize: 13, bold: true },
-  'heading-6': { fontSize: 11, bold: true },
+  // M-FLOW: keepNext on the keyboard-only levels too — Word's own
+  // Heading 4–6 ship with it, and the DOCX style export reads these
+  // fallbacks when no registry definition exists.
+  'heading-4': { fontSize: 16, bold: true, keepNext: true },
+  'heading-5': { fontSize: 13, bold: true, keepNext: true },
+  'heading-6': { fontSize: 11, bold: true, keepNext: true },
 };
 
 /** The one-time custom seed: the stamp-era dropdown's 'Hyperlink'

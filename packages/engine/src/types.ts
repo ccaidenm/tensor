@@ -490,9 +490,11 @@ export interface EquationBlock extends BlockBase {
  *
  * PAGE-BREAKING MODEL (the spec of record for this kind): the table's
  * flow units are ROWS, expressed internally as BANDS — a band is one
- * row's line-grid slice (an ordinary row is exactly one band; a row
- * taller than the content box fragments into per-line-grid bands, the
- * codeBlock "taller-than-page" ruling family). Bands tile the flow
+ * row's line-grid slice (a cantSplit row is exactly one band — atomic,
+ * it moves wholly; a split-allowed row — the null/absent DEFAULT,
+ * Word's "Allow row to break across pages" — and a row taller than
+ * the content box fragment into per-line-grid bands, the codeBlock
+ * "taller-than-page" ruling family). Bands tile the flow
  * track like lines; the cell LINES within a band are PARALLEL lanes
  * (same y, one per column) — they ride lines[] as ordinary LineBoxes
  * carrying `tableCell` lane identity, so the shell's caret/selection/
@@ -551,6 +553,19 @@ export interface TableRowData {
    * spacing is max(content, this)). Never a MAXIMUM: rows grow.
    */
   minHeight?: number | null
+  /**
+   * M-FLOW (row split) — Word's per-row "Allow row to break across
+   * pages" checkbox, OOXML w:cantSplit spelling. true = the row is
+   * ATOMIC: it moves wholly to the next page when it doesn't fit the
+   * page remainder. null/absent = the row MAY split at the cell line
+   * grid (Word's AND GDocs' DEFAULT), the monster-row per-line-grid
+   * banding applied to ordinary rows — bands that fit stay, R5 splits
+   * only when the remainder runs out. A monster row (taller than the
+   * content box) fragments regardless: you can't keep together what
+   * can't fit together. null counts as unset at every use site (the
+   * PM JSON round-trip convention, FlowPolicy's law).
+   */
+  cantSplit?: boolean | null
 }
 
 /**
