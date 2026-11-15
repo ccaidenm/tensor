@@ -1,7 +1,10 @@
 import { Extension } from '@tiptap/core';
+import type { Editor } from '@tiptap/core';
 import Paragraph from '@tiptap/extension-paragraph';
 import Heading from '@tiptap/extension-heading';
 import type { TabStop } from '@tensor-editor/engine';
+import type { StyleDefinition } from '@/lib/styles/types';
+import { resolveFlowTier } from '@/lib/styles/resolve';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -13,6 +16,7 @@ declare module '@tiptap/core' {
       clearFormatting: () => ReturnType;
       setTabStops: (stops: TabStop[]) => ReturnType;
       setIndents: (indents: { indentLeft?: number; indentRight?: number; firstLineIndent?: number }) => ReturnType;
+      setFlowAttrs: (flow: ParagraphFlowAttrs) => ReturnType;
     };
   }
 }
@@ -20,6 +24,196 @@ declare module '@tiptap/core' {
 const MAX_INDENT = 8;
 const INDENT_STEP_PX = 32;
 const MAX_INDENT_PX = MAX_INDENT * INDENT_STEP_PX;
+
+/**
+ * M-FLOW — PARAGRAPH PAGINATION FLAGS: the engine FlowPolicy's six
+ * fields under their OOXML-mirrored names (w:keepNext / w:keepLines /
+ * w:widowControl / w:pageBreakBefore round-trip through DOCX;
+ * keepPrevious and breakAfter are the Tensor superset — the engine's
+ * two extra bond/break spellings, .wpdoc-native). null = UNSET at
+ * every use site (the PM JSON round-trip convention): the flag
+ * inherits the STYLE tier (M-STYLES) and, for widowControl, the
+ * document-level default (engine opts — on). Pagination inputs ONLY:
+ * the pageless editor never renders them as CSS (no UA property
+ * exists for "keep with next"); the paginated view consumes them
+ * through the adapter into engine `flow`. Clipboard spelling:
+ * data-keep-next / data-keep-lines / data-keep-previous /
+ * data-widow-control / data-break-before / data-break-after (the
+ * ImageNode data-keep-next precedent), so flags survive intra-app
+ * copy/paste.
+ */
+export type ParagraphFlowAttrs = {
+  keepNext?: boolean | null;
+  keepLines?: boolean | null;
+  keepPrevious?: boolean | null;
+  widowControl?: boolean | null;
+  breakBefore?: 'page' | null;
+  breakAfter?: 'page' | null;
+};
+
+const kebab = (name: string): string => name.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+
+const boolFlowAttr = (name: 'keepNext' | 'keepLines' | 'keepPrevious' | 'widowControl') => ({
+  [name]: {
+    default: null,
+    parseHTML: (element: HTMLElement) => {
+      const raw = element.getAttribute(`data-${kebab(name)}`);
+      if (raw === 'true') return true;
+      if (raw === 'false') return false;
+      return null;
+    },
+    renderHTML: (attributes: Record<string, unknown>) => {
+      const v = attributes[name];
+      if (v !== true && v !== false) return {};
+      return { [`data-${kebab(name)}`]: String(v) };
+    },
+  },
+});
+
+const breakFlowAttr = (name: 'breakBefore' | 'breakAfter') => ({
+  [name]: {
+    default: null,
+    parseHTML: (element: HTMLElement) =>
+      element.getAttribute(`data-${kebab(name)}`) === 'page' ? ('page' as const) : null,
+    renderHTML: (attributes: Record<string, unknown>) =>
+      attributes[name] === 'page' ? { [`data-${kebab(name)}`]: 'page' } : {},
+  },
+});
+
+const flowAttributes = {
+  ...boolFlowAttr('keepNext'),
+  ...boolFlowAttr('keepLines'),
+  ...boolFlowAttr('keepPrevious'),
+  ...boolFlowAttr('widowControl'),
+  ...breakFlowAttr('breakBefore'),
+  ...breakFlowAttr('breakAfter'),
+};
+
+/**
+ * M-FLOW — the TABLE-level subset: the five flags meaningful for a
+ * table block (keepLines = R-ATOMIC band-wise, keepNext/keepPrevious
+ * bond the table to a neighbor, the forced breaks close pages around
+ * it). widowControl is EXCLUDED — the engine ignores boundary
+ * minimums between a table's bands (rows break naturally), so the
+ * flag is inert there and never offered.
+ */
+export const tableFlowAttributes = {
+  keepNext: flowAttributes.keepNext,
+  keepLines: flowAttributes.keepLines,
+  keepPrevious: flowAttributes.keepPrevious,
+  breakBefore: flowAttributes.breakBefore,
+  breakAfter: flowAttributes.breakAfter,
+};
+
+/** The flow flag keys in popover order (Word's Line and Page Breaks
+ * tab order, plus the two Tensor superset flags). */
+export const FLOW_FLAG_KEYS = [
+  'keepNext',
+  'keepLines',
+  'keepPrevious',
+  'widowControl',
+  'breakBefore',
+  'breakAfter',
+] as const;
+
+export type FlowFlagKey = (typeof FLOW_FLAG_KEYS)[number];
+
+/**
+ * M-FLOW — the ribbon's mixed-state reader: for each flow flag, the
+ * selection's uniform EFFECTIVE state (the style tier resolved through
+ * resolveFlowTier — the SAME cascade the adapter runs), or 'mixed'
+ * when paragraphs in the selection disagree (the indeterminate-
+ * checkbox spelling). The DEFAULT-ON / DEFAULT-OFF split mirrors
+ * Word's dialog: widowControl is ON when unset (null = inherit the
+ * document default, true); the keep flags and forced breaks are OFF
+ * when unset. Top-level paragraphs and headings only — the same
+ * targeting contract as the writer and clearFormatting (header/footer
+ * band paragraphs never paginate, so flags there are inert and the UI
+ * never reports them).
+ *
+ * `resolveStyle` supplies the STYLE TIER (the ribbon passes the
+ * registry's merged definitions + the node's styleId; omitted =
+ * attr-only, the cascade floor — the unit-test spelling).
+ */
+export function flowSelectionState(
+  editor: Editor,
+  resolveStyle?: (node: { type: { name: string }; attrs?: Record<string, unknown> }) => StyleDefinition | null
+): Record<FlowFlagKey, boolean | 'mixed'> {
+  const { from, to } = editor.state.selection;
+  const values = new Map<FlowFlagKey, Set<boolean>>();
+  let touched = 0;
+  editor.state.doc.forEach((node, offset) => {
+    const name = node.type.name;
+    if (name !== 'paragraph' && name !== 'heading') return;
+    if (offset >= to || offset + node.nodeSize <= from) return;
+    touched += 1;
+    const paraDef = resolveStyle?.(node) ?? null;
+    const policy = resolveFlowTier(paraDef, node.attrs ?? {});
+    for (const flag of FLOW_FLAG_KEYS) {
+      const effective =
+        flag === 'widowControl'
+          ? policy?.widowControl !== false
+          : flag === 'breakBefore' || flag === 'breakAfter'
+            ? policy?.[flag] === 'page'
+            : policy?.[flag] === true;
+      if (!values.has(flag)) values.set(flag, new Set());
+      values.get(flag)!.add(effective);
+    }
+  });
+  const out = {} as Record<FlowFlagKey, boolean | 'mixed'>;
+  for (const flag of FLOW_FLAG_KEYS) {
+    const set = values.get(flag);
+    if (touched === 0 || set === undefined || set.size === 0) {
+      out[flag] = flag === 'widowControl'; // no selection targets: the defaults
+    } else if (set.size > 1) {
+      out[flag] = 'mixed';
+    } else {
+      out[flag] = set.values().next().value!;
+    }
+  }
+  return out;
+}
+
+/**
+ * M6/M-FLOW — the ribbon's line-spacing reader: the selection's uniform
+ * EFFECTIVE multiplier, or null when the selection disagrees or any
+ * block carries a px spelling (a custom height is never a preset).
+ * Every paragraph ALWAYS has a value (the radio group's law): direct
+ * attr over the style tier over the 1.0 default — the same cascade
+ * flowSelectionState resolves, read by the popover's radio group. No
+ * selection targets → the default 1.0 ('Single' checks).
+ */
+export function lineSpacingSelectionState(
+  editor: Editor,
+  resolveStyle?: (node: { type: { name: string }; attrs?: Record<string, unknown> }) => StyleDefinition | null
+): number | null {
+  const { from, to } = editor.state.selection;
+  const values = new Set<number>();
+  let touched = 0;
+  let sawPx = false;
+  editor.state.doc.forEach((node, offset) => {
+    const name = node.type.name;
+    if (name !== 'paragraph' && name !== 'heading') return;
+    if (offset >= to || offset + node.nodeSize <= from) return;
+    touched += 1;
+    const attr = typeof node.attrs?.lineHeight === 'string' && node.attrs.lineHeight.trim()
+      ? node.attrs.lineHeight
+      : null;
+    if (attr?.trim().endsWith('px')) {
+      sawPx = true;
+      return;
+    }
+    const mult = attr
+      ? parseFloat(attr)
+      : ((resolveStyle?.(node)?.properties.lineHeight as number | undefined) ?? 1);
+    if (Number.isFinite(mult) && mult > 0) values.add(mult);
+  });
+  if (sawPx) return null;
+  if (touched === 0 || values.size === 0) return 1;
+  if (values.size > 1) return null;
+  return values.values().next().value!;
+}
+
 
 const lineHeightAttribute = {
   lineHeight: {
@@ -248,6 +442,7 @@ export const ParagraphWithExtras = Paragraph.extend({
       ...firstLineIndentAttribute,
       ...spacingAttributes,
       ...tabStopsAttribute,
+      ...flowAttributes,
       ...styleIdAttribute('normal'),
       ...refIdAttribute,
     };
@@ -264,6 +459,7 @@ export const HeadingWithExtras = Heading.extend({
     return {
       ...this.parent?.(),
       ...lineHeightAttribute,
+      ...flowAttributes,
       ...styleIdAttribute('heading-1'),
     };
   },
@@ -393,6 +589,39 @@ export const ParagraphExtraCommands = Extension.create({
           return changed;
         },
 
+      // M-FLOW — the pagination flags writer: the SAME targeting
+      // contract as clearFormatting (every top-level paragraph/heading
+      // overlapped by the selection; the caret's own block for an
+      // empty selection — Word's dialog semantics: a toggle applies to
+      // all of them). Partial writes merge over the current attrs, so
+      // the popover's checkboxes are independent; null = unset
+      // (inherit the style tier / the document default). No-op writes
+      // are skipped (idempotent gestures, one undo step per toggle).
+      setFlowAttrs:
+        (flow: ParagraphFlowAttrs) =>
+        ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
+          const { $from, $to } = tr.selection;
+          const targets: Array<{ pos: number; node: any }> = [];
+          state.doc.forEach((node: any, offset: number) => {
+            const name = node.type.name;
+            if (name !== 'paragraph' && name !== 'heading') return;
+            if (offset >= $to.pos || offset + node.nodeSize <= $from.pos) return;
+            targets.push({ pos: offset, node });
+          });
+          if (targets.length === 0) return false;
+          const keys = Object.keys(flow) as (keyof ParagraphFlowAttrs)[];
+          let changed = false;
+          for (const { pos, node } of targets) {
+            const differs = keys.some(
+              (key) => (node.attrs?.[key] ?? null) !== ((flow[key] ?? null) as unknown),
+            );
+            if (!differs) continue;
+            if (dispatch) tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...flow });
+            changed = true;
+          }
+          return changed;
+        },
+
       // INDENT COMMANDS (M6.2): ONE writer — the indentLeft attr, in
       // px, stepped by INDENT_STEP_PX (32, the historical step, now in
       // px on the px attr the ribbon input shows). The legacy `indent`
@@ -478,6 +707,14 @@ export const ParagraphExtraCommands = Extension.create({
                 indent: 0,
                 textAlign: null,
                 styleId: 'normal',
+                // M-FLOW: pagination flags are paragraph formatting —
+                // Clear Formatting resets them too (Word's rule).
+                keepNext: null,
+                keepLines: null,
+                keepPrevious: null,
+                widowControl: null,
+                breakBefore: null,
+                breakAfter: null,
               }
             );
           }
