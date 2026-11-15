@@ -168,6 +168,70 @@ describe('M-T3c: Table side panel', () => {
     expect(editor.state.doc.content.firstChild!.firstChild!.attrs.minHeight).toBeNull();
   });
 
+  it('M-FLOW: the row "break" switch — default splits the straddling row, off (cantSplit) moves it wholly', async () => {
+    // 52 filler lines = 832px; a 3-line row (56px) straddles page 0's
+    // 32px remainder. The switch ON (default, Word/GDocs) = the row
+    // splits at the cell line grid; OFF = cantSplit, the whole row
+    // opens page 1.
+    const filler = 'x'.repeat(52 * 62);
+    const cellText = 'x'.repeat(180); // 3 lines at 60 chars in the 608px lane
+    const { editor } = renderTensor(
+      `<p>${filler}</p><table><tr><td>${cellText}</td></tr></table>`
+    );
+    await settleLayout();
+    mountPanel();
+    act(() => {
+      useSidebarStore.getState().open('table', 'right');
+    });
+    caretIntoFirstCell(editor);
+    const splitSwitch = () => document.querySelector('[data-testid="tp-row-split-0"]') as HTMLElement;
+    // ON by default (null attrs — the Word/GDocs default is may-split).
+    expect(splitSwitch().getAttribute('aria-checked')).toBe('true');
+    let result = layoutOf(editor);
+    const cellLines = result.lines.filter((l) => l.tableCell);
+    expect(new Set(cellLines.map((l) => l.pageIndex)).size).toBe(2); // split
+    // OFF: the row attr becomes cantSplit, the row moves wholly.
+    act(() => {
+      fireEvent.click(splitSwitch());
+    });
+    expect(editor.state.doc.child(1).firstChild!.attrs.cantSplit).toBe(true);
+    result = layoutOf(editor);
+    expect(new Set(result.lines.filter((l) => l.tableCell).map((l) => l.pageIndex))).toEqual(
+      new Set([1])
+    );
+    expect(splitSwitch().getAttribute('aria-checked')).toBe('false');
+    // Back ON: the write normalizes to null (never a literal false).
+    act(() => {
+      fireEvent.click(splitSwitch());
+    });
+    expect(editor.state.doc.child(1).firstChild!.attrs.cantSplit).toBeNull();
+  });
+
+  it('M-FLOW: the table-level keep switches write the table attrs and reach the engine', async () => {
+    const { editor } = renderTensor(
+      '<table><tr><td>a</td></tr></table>',
+    );
+    await settleLayout();
+    mountPanel();
+    act(() => {
+      useSidebarStore.getState().open('table', 'right');
+    });
+    caretIntoFirstCell(editor);
+    const keepNext = () => document.querySelector('[data-testid="tp-table-keep-next"]') as HTMLElement;
+    expect(keepNext().getAttribute('aria-checked')).toBe('false');
+    act(() => {
+      fireEvent.click(keepNext());
+    });
+    expect(editor.state.doc.content.firstChild!.attrs.keepNext).toBe(true);
+    const adapted = pmDocToSemantic(editor.state.doc, resolveNormalBase('fake', 16, useStyleRegistryStore.getState().merged));
+    expect(adapted.doc.blocks[0].flow).toEqual({ keepNext: true });
+    // Off again: the write normalizes to null.
+    act(() => {
+      fireEvent.click(keepNext());
+    });
+    expect(editor.state.doc.content.firstChild!.attrs.keepNext).toBeNull();
+  });
+
   it('Distribute evenly clears every colwidth (the flexible equal share)', async () => {
     const { editor } = renderTensor(
       '<table><tr><td colspan="2" colwidth="[200,100]">wide</td></tr><tr><td>x</td><td>y</td></tr></table>',
