@@ -12,6 +12,7 @@ import type {
   PageGeometry,
   PlacedRect,
   Rect,
+  SectionGeometry,
   SemanticDoc,
   TableBandData,
   TableBandLine,
@@ -236,6 +237,14 @@ interface WalkCacheEntry {
    * kind-agnostic and predates images).
    */
   danced: boolean
+  /**
+   * #58 — the ACTIVE section index at this block's ENTRY. Pages the
+   * block touches (entry..exit) belong to it (a block never spans a
+   * boundary — the boundary closes before the block); the page→section
+   * map derives from these spans (prefix reuse replays them from the
+   * cached records).
+   */
+  section: number
 }
 
 // Line-level cache: a block's LineResults depend only on (runs, the
@@ -308,36 +317,84 @@ export function createLayoutEngine({
         invalidated: false,
       }
 
-      const size = Object.freeze({
-        x: 0,
-        y: 0,
-        width: opts.page.width,
-        height: opts.page.height,
-      })
-      // All pages share opts geometry. TODO(sections): per-section
-      // page descriptors.
+      // ── #58 SECTIONS: the per-section geometry table ──
+      // ONE section of the opts geometry when no boundaries ride
+      // (today's shape exactly — the additive law). Each boundary is
+      // a SECTION START: the walk crossing it closes a non-fresh page
+      // (the breakBefore law) and swaps the ACTIVE geometry (page
+      // dims, margins, band wrap width, contentBox). The ADAPTER
+      // resolved the COMPLETE table — break nodes carry the PRECEDING
+      // section's props (Word's sectPr spelling), so boundary 0 is the
+      // doc start (−1) and each following boundary the next section,
+      // INCLUDING the final one (the doc defaults — the adapter reads
+      // the store's pageSetup; the engine never parses node attrs nor
+      // holds doc-level defaults beyond opts).
+      const boundaries = (opts.sections ?? [])
+        .slice()
+        .sort((a, b) => a.afterBlock - b.afterBlock)
+      // The table IS the boundary list when one rides (the adapter's
+      // complete resolution — the final section included); with NO
+      // boundaries the single opts-geometry section stands (the
+      // additive law — never an empty table).
+      const sectionGeoms: SectionGeometry[] =
+        boundaries.length > 0
+          ? boundaries.map((b) => b.geometry)
+          : [
+              {
+                page: { width: opts.page.width, height: opts.page.height },
+                margins: {
+                  top: opts.margins.top,
+                  right: opts.margins.right,
+                  bottom: opts.margins.bottom,
+                  left: opts.margins.left,
+                },
+              },
+            ]
+      // The block index where each section begins: section 0 at block
+      // 0 (the adapter's −1 contract), section k ≥ 1 at boundary k's
+      // afterBlock + 1 — one entry per section, aligned with the
+      // table. Consecutive boundaries (equal afterBlock) make an EMPTY
+      // middle section: pages derive from placed lines, so it holds no
+      // pages — its geometry simply never renders.
+      const sectionStartBlock = [
+        0,
+        ...boundaries.slice(1).map((b) => b.afterBlock + 1),
+      ]
+
+      const bands = doc.bands ?? undefined
+      const anchorPx = bands?.anchorPx ?? BAND_ANCHOR_PX
+      const topClass = bands?.differentFirstPage ? 'first' : 'default'
+
+      interface BandEntry {
+        block: Block
+        results: LineResult[]
+      }
+
+      interface ActiveSection {
+        index: number
+        size: Rect
+        anchorTop: number
+        anchorBottom: number
+        contentBox: Rect
+        topBlocks: BandEntry[]
+        bottomBlocks: BandEntry[]
+        restTopBlocks: BandEntry[]
+        restBottomBlocks: BandEntry[]
+      }
+
+      const sumHeight = (entries: { results: LineResult[] }[]): number =>
+        entries.reduce((sum, e) => sum + e.results.reduce((s, r) => s + r.height, 0), 0)
+
       // M-HEADER-FOOTER: the BAND geometry — engine-issued facts, same
       // as the contentBox. Computed BEFORE the body contentBox so the
       // body shrinks by the band needs (Word: the body starts below
       // the header band, ends above the footer band). Band blocks are
       // paragraph/heading only (validated below), broken at the BAND
-      // wrap width (page width − side margins), never walked — they
-      // re-emit on every page as echoes (the table header-repeat
-      // precedent). Single shared contentBox (the walk's contract):
-      // the reservation takes the MAX across the page classes
-      // (first-page vs rest under differentFirstPage).
-      const bands = doc.bands ?? undefined
-      const anchorPx = bands?.anchorPx ?? BAND_ANCHOR_PX
-      // M-HEADER-FOOTER-3: the anchor CLAMPS to the user's margin — a
-      // margin dragged below the band distance (Word's "Header from
-      // Top" knob, which we don't expose) pulls the band up with it,
-      // so the band always lives INSIDE the margin area it scales
-      // with. Margins larger than the anchor leave it at the default
-      // distance (Word's behavior unchanged).
-      const anchorTop = Math.min(anchorPx, opts.margins.top)
-      const anchorBottom = Math.min(anchorPx, opts.margins.bottom)
-      const sideW = opts.page.width - opts.margins.left - opts.margins.right
-      const breakBand = (blocks: Block[] | undefined): { block: Block; results: LineResult[] }[] => {
+      // wrap width (the SECTION's page width − side margins), never
+      // walked — they re-emit on every page as echoes (the table
+      // header-repeat precedent). Band line cache keyed id|width: two
+      // sections of different widths must not thrash one entry.
+      const breakBand = (blocks: Block[] | undefined, sideW: number): BandEntry[] => {
         if (!blocks || blocks.length === 0) return []
         return blocks.map((block) => {
           if (block.kind !== 'paragraph' && block.kind !== 'heading') {
@@ -346,7 +403,8 @@ export function createLayoutEngine({
             )
           }
           const hash = hashBlock(block)
-          const cached = bandLineCache.get(block.id)
+          const cacheKey = `${block.id}|${sideW}`
+          const cached = bandLineCache.get(cacheKey)
           if (cached && cached.contentHash === hash && cached.maxWidth === sideW) {
             return { block, results: cached.lines }
           }
@@ -358,7 +416,7 @@ export function createLayoutEngine({
             sideW,
             { first: 0, rest: 0, stops: block.tabStops },
           )
-          bandLineCache.set(block.id, {
+          bandLineCache.set(cacheKey, {
             contentHash: hash,
             maxWidth: sideW,
             firstMaxWidth: sideW,
@@ -367,44 +425,81 @@ export function createLayoutEngine({
           return { block, results }
         })
       }
-      const topClass = bands?.differentFirstPage ? 'first' : 'default'
-      const topBlocks =
-        topClass === 'first'
-          ? breakBand(bands?.firstHeader)
-          : breakBand(bands?.header)
-      const bottomBlocks =
-        topClass === 'first'
-          ? breakBand(bands?.firstFooter)
-          : breakBand(bands?.footer)
-      // The REST pages' blocks: under differentFirstPage the default
-      // regions; otherwise the same as page 0 (shared objects).
-      const restTopBlocks =
-        topClass === 'first' ? breakBand(bands?.header) : topBlocks
-      const restBottomBlocks =
-        topClass === 'first' ? breakBand(bands?.footer) : bottomBlocks
-      const sumHeight = (entries: { results: LineResult[] }[]) =>
-        entries.reduce((sum, e) => sum + e.results.reduce((s, r) => s + r.height, 0), 0)
-      const topNeed = Math.max(
-        sumHeight(topBlocks),
-        sumHeight(restTopBlocks),
-      )
-      const bottomNeed = Math.max(
-        sumHeight(bottomBlocks),
-        sumHeight(restBottomBlocks),
-      )
-      // No band content → NO reservation (a margins-0 doc with no
-      // header must meet the sheet edge exactly — the anchor is not a
-      // floor, it is where band CONTENT anchors).
-      const bodyTop =
-        topNeed > 0 ? Math.max(opts.margins.top, anchorTop + topNeed) : opts.margins.top
-      const bodyBottom =
-        bottomNeed > 0 ? Math.max(opts.margins.bottom, anchorBottom + bottomNeed) : opts.margins.bottom
-      const contentBox: Rect = Object.freeze({
-        x: opts.margins.left,
-        y: bodyTop,
-        width: opts.page.width - opts.margins.left - opts.margins.right,
-        height: opts.page.height - bodyTop - bodyBottom,
+
+      // M-HEADER-FOOTER-3: the anchor CLAMPS to the user's margin — a
+      // margin dragged below the band distance (Word's "Header from
+      // Top" knob, which we don't expose) pulls the band up with it,
+      // so the band always lives INSIDE the margin area it scales
+      // with. Margins larger than the anchor leave it at the default
+      // distance (Word's behavior unchanged).
+      // #58 — the per-section BAND resolution (Word's "link to
+      // previous"): section s paints its override (BandSet.perSection),
+      // else the doc default. Section 0 alone can paint the first-page
+      // class (the doc's page 0 lives there); sections > 0 always the
+      // default class — their firstClass is set = restClass (a
+      // conservative reservation, never rendered).
+      const perSectionBands = bands?.perSection
+      const overrideOf = (
+        s: number,
+        region: 'header' | 'footer' | 'firstHeader' | 'firstFooter',
+      ): Block[] | undefined => perSectionBands?.find((p) => p.section === s)?.[region]
+      const sectionTable: ActiveSection[] = sectionGeoms.map((geom, index) => {
+        const anchorTop = Math.min(anchorPx, geom.margins.top)
+        const anchorBottom = Math.min(anchorPx, geom.margins.bottom)
+        const sideW = geom.page.width - geom.margins.left - geom.margins.right
+        const firstTop = overrideOf(index, 'firstHeader') ?? bands?.firstHeader
+        const firstBottom = overrideOf(index, 'firstFooter') ?? bands?.firstFooter
+        const defaultTop = overrideOf(index, 'header') ?? bands?.header
+        const defaultBottom = overrideOf(index, 'footer') ?? bands?.footer
+        const topBlocks =
+          topClass === 'first'
+            ? breakBand(firstTop, sideW)
+            : breakBand(defaultTop, sideW)
+        const bottomBlocks =
+          topClass === 'first'
+            ? breakBand(firstBottom, sideW)
+            : breakBand(defaultBottom, sideW)
+        // The REST pages' blocks: under differentFirstPage the default
+        // regions; otherwise the same as page 0 (shared objects).
+        const restTopBlocks =
+          topClass === 'first' ? breakBand(defaultTop, sideW) : topBlocks
+        const restBottomBlocks =
+          topClass === 'first' ? breakBand(defaultBottom, sideW) : bottomBlocks
+        const topNeed = Math.max(sumHeight(topBlocks), sumHeight(restTopBlocks))
+        const bottomNeed = Math.max(sumHeight(bottomBlocks), sumHeight(restBottomBlocks))
+        // No band content → NO reservation (a margins-0 doc with no
+        // header must meet the sheet edge exactly — the anchor is not a
+        // floor, it is where band CONTENT anchors).
+        const bodyTop =
+          topNeed > 0 ? Math.max(geom.margins.top, anchorTop + topNeed) : geom.margins.top
+        const bodyBottom =
+          bottomNeed > 0 ? Math.max(geom.margins.bottom, anchorBottom + bottomNeed) : geom.margins.bottom
+        return {
+          index,
+          size: Object.freeze({
+            x: 0,
+            y: 0,
+            width: geom.page.width,
+            height: geom.page.height,
+          }),
+          anchorTop,
+          anchorBottom,
+          contentBox: Object.freeze({
+            x: geom.margins.left,
+            y: bodyTop,
+            width: geom.page.width - geom.margins.left - geom.margins.right,
+            height: geom.page.height - bodyTop - bodyBottom,
+          }),
+          topBlocks,
+          bottomBlocks,
+          restTopBlocks,
+          restBottomBlocks,
+        }
       })
+      // The ACTIVE section the walk reads (mutated at boundaries; the
+      // helpers below close over this binding — every geometry read in
+      // the walk is the active section's).
+      let active: ActiveSection = sectionTable[0]!
 
       const hashes = doc.blocks.map(hashBlock)
       const optsHash = stableStringify(opts)
@@ -468,14 +563,34 @@ export function createLayoutEngine({
       // in lines[]; consumers merge the arrays by (pageIndex, rect.y).
       const placedOut: PlacedRect[] = []
       const newCache: WalkCacheEntry[] = []
+      // #58 — the page→section map: pageSections[p] = the section whose
+      // FRAME the page wears (size/contentBox/bands). FIRST-WRITE-WINS:
+      // the section active when the page's first content lands owns the
+      // page. A nextPage boundary's fresh page is written by its first
+      // block (the new section); an overflow page by the continuing
+      // block (the same section); a CONTINUOUS boundary's shared page
+      // keeps the OPENER's frame (the new section's blocks flow within
+      // it — later spans never overwrite). Holes (a boundary-closed
+      // page no block spans) cannot occur below maxPage — every
+      // materialized page holds a line from some block.
+      const pageSections: number[] = []
 
       // Lemma 1: unchanged blocks + identical entry states ⇒ identical
-      // outputs — the prefix is reused directly.
+      // outputs — the prefix is reused directly. (optsHash covers the
+      // sections table, so the prefix's geometry sequence is identical
+      // by construction.)
       for (let i = 0; i < resume; i++) {
-        lines.push(...oldCache[i].lineBoxes)
-        breaks.push(...oldCache[i].breaks)
-        placedOut.push(...oldCache[i].placedRects)
-        newCache.push(oldCache[i])
+        lines.push(...oldCache[i]!.lineBoxes)
+        breaks.push(...oldCache[i]!.breaks)
+        placedOut.push(...oldCache[i]!.placedRects)
+        newCache.push(oldCache[i]!)
+        for (
+          let p = oldCache[i]!.entryState.pageIndex;
+          p <= oldCache[i]!.exitState.pageIndex;
+          p++
+        ) {
+          if (pageSections[p] === undefined) pageSections[p] = oldCache[i]!.section
+        }
       }
 
       // The walk state entering block `resume`, reconstructed from the
@@ -491,6 +606,15 @@ export function createLayoutEngine({
       // predecessor's index) per call.
       const bondAttempts = new Set<number>()
 
+      // #58 — the ACTIVE section entering block `resume`: the last
+      // section whose start block index <= resume (section 0 starts at
+      // block 0; a boundary exactly at resume applies when the loop
+      // enters it).
+      let sectionCursor = 0
+      for (let k = 1; k < sectionTable.length; k++) {
+        if ((sectionStartBlock[k] ?? Number.MAX_SAFE_INTEGER) <= resume) sectionCursor = k
+      }
+
       const getLines = (index: number): LineResult[] => {
         const block = doc.blocks[index]
         // ATOMIC IMAGES (E-IMG-1): the image's single synthetic "line"
@@ -504,8 +628,8 @@ export function createLayoutEngine({
           const dims = imagePlacedSize(
             block.width,
             block.height,
-            contentBox.width,
-            contentBox.height,
+            active.contentBox.width,
+            active.contentBox.height,
           )
           return [
             { start: 0, end: 0, segments: [], width: dims.width, height: dims.height, baseline: dims.height },
@@ -533,10 +657,10 @@ export function createLayoutEngine({
             )
           }
           const dims = equationMetrics.measure(block.latex, block.fontSize)
-          if (dims.height > contentBox.height) {
+          if (dims.height > active.contentBox.height) {
             throw new EquationTooTallError(
               `block "${block.id}": equation renders ${dims.width}×${dims.height}px, taller than the ` +
-                `${contentBox.height}px content box — it can never fit any page. Equations are never ` +
+                `${active.contentBox.height}px content box — it can never fit any page. Equations are never ` +
                 'rescaled (the no-fit-down ruling); shorten the formula or reduce its font size',
             )
           }
@@ -559,23 +683,23 @@ export function createLayoutEngine({
           if (
             cached &&
             cached.contentHash === hash &&
-            cached.maxWidth === contentBox.width &&
-            cached.contentHeight === contentBox.height
+            cached.maxWidth === active.contentBox.width &&
+            cached.contentHeight === active.contentBox.height
           ) {
             return cached.lines
           }
           const layout = computeTableLayout(
             block,
-            contentBox.width,
-            contentBox.height,
+            active.contentBox.width,
+            active.contentBox.height,
             metrics,
             doc.baseStyle,
           )
           lineCache.set(block.id, {
             contentHash: hash,
-            maxWidth: contentBox.width,
-            firstMaxWidth: contentBox.width,
-            contentHeight: contentBox.height,
+            maxWidth: active.contentBox.width,
+            firstMaxWidth: active.contentBox.width,
+            contentHeight: active.contentBox.height,
             lines: layout.results,
           })
           stats.linesRebroken += 1
@@ -589,7 +713,7 @@ export function createLayoutEngine({
         // line content — text runs, the tab run, the page-number run —
         // so the ONE breaker + the ONE tab machinery break, wrap, and
         // right-align the number; the arm supplies the RIGHT tab stop
-        // at the shared text edge (content-frame: contentBox.width −
+        // at the shared text edge (content-frame: active.contentBox.width −
         // indentRight), which every entry's number aligns to whatever
         // its level. LOUD SEAM: an entry indent at/past its wrap width
         // is refused — a zero-width lane cannot break (the adapter
@@ -599,7 +723,7 @@ export function createLayoutEngine({
         // maxWidth for this kind.
         if (block.kind === 'referenceTable') {
           const maxWidth =
-            contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
+            active.contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
           const cached = lineCache.get(block.id)
           const hash = hashes[index]
           if (cached && cached.contentHash === hash && cached.maxWidth === maxWidth) {
@@ -628,7 +752,7 @@ export function createLayoutEngine({
               first: entryIndent,
               rest: entryIndent,
               stops: [
-                { position: contentBox.width - (block.indentRight ?? 0), alignment: 'right' },
+                { position: active.contentBox.width - (block.indentRight ?? 0), alignment: 'right' },
               ],
             })
             for (const line of lines) {
@@ -666,15 +790,15 @@ export function createLayoutEngine({
           return results
         }
         // INDENT FAMILY, effect 1 (line breaking): base lines wrap at
-        // contentBox.width − indentLeft − indentRight; ONLY line 0
-        // wraps at contentBox.width − (indentLeft + firstLineIndent) −
+        // active.contentBox.width − indentLeft − indentRight; ONLY line 0
+        // wraps at active.contentBox.width − (indentLeft + firstLineIndent) −
         // indentRight — a NEGATIVE firstLineIndent under a larger
         // indentLeft is the hanging style, so line 0 can wrap WIDER.
         // The cache key stores BOTH widths: a re-layout under different
         // indents (same content) must re-break even before the hash
         // misses.
         const maxWidth =
-          contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
+          active.contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
         const firstMaxWidth = maxWidth - (block.firstLineIndent ?? 0)
         const cached = lineCache.get(block.id)
         const hash = hashes[index]
@@ -739,6 +863,40 @@ export function createLayoutEngine({
       while (i < doc.blocks.length) {
         const block = doc.blocks[i]
 
+        // ── #58 SECTION TIER (precedence 0 — BEFORE breakBefore) ──
+        // The boundary closes a non-fresh page (the SAME law as a
+        // forced break) and swaps the active geometry. Consecutive
+        // boundaries (an empty middle section) apply in order — the
+        // closes are idempotent, the geometry swaps through.
+        // CONTINUOUS: a 'continuous' boundary does NOT close — the
+        // sections share the page — UNLESS the new section's geometry
+        // differs, which upgrades to a page start (Word's documented
+        // behavior; a page cannot hold two geometries — the
+        // one-geometry-per-page law; same-page sections simply share
+        // the frame, so only an IDENTICAL geometry flows on).
+        while (
+          sectionCursor + 1 < sectionTable.length &&
+          (sectionStartBlock[sectionCursor + 1] ?? Number.MAX_SAFE_INTEGER) <= i
+        ) {
+          const next = sectionTable[sectionCursor + 1]!
+          // The crossed boundary's type: boundaries[k] = section k's
+          // START (boundaries[0] = the doc start — never crossed here,
+          // the loop applies k ≥ 1).
+          const continuous =
+            (boundaries[sectionCursor + 1]?.type ?? 'nextPage') === 'continuous' &&
+            next.size.width === active.size.width &&
+            next.size.height === active.size.height &&
+            next.contentBox.x === active.contentBox.x &&
+            next.contentBox.y === active.contentBox.y &&
+            next.contentBox.width === active.contentBox.width &&
+            next.contentBox.height === active.contentBox.height
+          if (!continuous && state.y > 0) state = { pageIndex: state.pageIndex + 1, y: 0 }
+          sectionCursor += 1
+        }
+        // The OUTER binding — getLines/placeFloat close over it; an
+        // inner const would shadow and starve them of the swap.
+        active = sectionTable[sectionCursor]!
+
         // STRUCTURAL TIER (precedence 1): breakBefore closes a
         // non-fresh page; a fresh-page start is a no-op. Emits no
         // FragmentBreak (not a mid-block split).
@@ -770,17 +928,39 @@ export function createLayoutEngine({
           !floated &&
           next !== undefined &&
           (block.flow?.keepNext === true || next.flow?.keepPrevious === true)
+        // #58: a CLOSING section boundary between the bonded pair drops
+        // it at detection (the same law as a forced break — B's section
+        // starts a fresh page; A's last fragment cannot share it). A
+        // CONTINUOUS boundary with an identical geometry keeps the bond
+        // (the sections share the page).
+        const nextIsClosingBoundary =
+          sectionCursor + 1 < sectionTable.length &&
+          (sectionStartBlock[sectionCursor + 1] ?? Number.MAX_SAFE_INTEGER) === i + 1 &&
+          !(() => {
+            if ((boundaries[sectionCursor + 1]?.type ?? 'nextPage') !== 'continuous') return false
+            const next = sectionTable[sectionCursor + 1]!
+            return (
+              next.size.width === active.size.width &&
+              next.size.height === active.size.height &&
+              next.contentBox.x === active.contentBox.x &&
+              next.contentBox.y === active.contentBox.y &&
+              next.contentBox.width === active.contentBox.width &&
+              next.contentBox.height === active.contentBox.height
+            )
+          })()
         const structural =
           bondExists &&
-          (block.flow?.breakAfter === 'page' || next.flow?.breakBefore === 'page')
+          (block.flow?.breakAfter === 'page' ||
+            next.flow?.breakBefore === 'page' ||
+            nextIsClosingBoundary)
         const bonded = bondExists && !structural
 
         let currentEntry = entryState
         let placed =
           block.kind === 'image' && block.float != null
-            ? placeFloat(block, block.float, currentEntry, size, contentBox)
+            ? placeFloat(block, block.float, currentEntry, active.size, active.contentBox)
             : placeBlock(
-                block, results, currentEntry, contentBox.width, contentBox.height,
+                block, results, currentEntry, active.contentBox.width, active.contentBox.height,
                 control, bonded, false,
               )
         let movedViaShape1 = false
@@ -808,19 +988,19 @@ export function createLayoutEngine({
           // applies (see its comment for the full arm list).
           const nextLines = getLines(i + 1)
           const lands = firstLineLands(
-            next, nextLines, placed.exitState, contentBox.height,
+            next, nextLines, placed.exitState, active.contentBox.height,
             next.kind === 'table' ? false : controlOf(next),
           )
           if (!lands) {
             if (!bondAttempts.has(i)) {
               bondAttempts.add(i)
               const fitsFresh =
-                countFitting(results, 0, contentBox.height) === results.length
+                countFitting(results, 0, active.contentBox.height) === results.length
               if (fitsFresh && entryState.y > 0) {
                 // SHAPE 1 (R1 shape): move A's start to the fresh page.
                 currentEntry = { pageIndex: entryState.pageIndex + 1, y: 0 }
                 placed = placeBlock(
-                  block, results, currentEntry, contentBox.width, contentBox.height,
+                  block, results, currentEntry, active.contentBox.width, active.contentBox.height,
                   control, bonded, false,
                 )
                 movedViaShape1 = true
@@ -835,7 +1015,7 @@ export function createLayoutEngine({
                 // For an ATOMIC image A this shape is vacuous by
                 // construction (n == 1, never splits) → bounded drop.
                 placed = placeBlock(
-                  block, results, currentEntry, contentBox.width, contentBox.height,
+                  block, results, currentEntry, active.contentBox.width, active.contentBox.height,
                   control, bonded, true,
                 )
               }
@@ -868,7 +1048,14 @@ export function createLayoutEngine({
           exitState: placed.exitState,
           bonded,
           danced,
+          section: sectionCursor,
         })
+        // #58 — the block's page span belongs to its entry section;
+        // FIRST-WRITE-WINS (the page-frame law above — a continuous
+        // section's blocks flow inside the opener's frame).
+        for (let p = currentEntry.pageIndex; p <= placed.exitState.pageIndex; p++) {
+          if (pageSections[p] === undefined) pageSections[p] = sectionCursor
+        }
         if (!walked.has(i)) {
           walked.add(i)
           stats.blocksWalked += 1
@@ -904,7 +1091,7 @@ export function createLayoutEngine({
             if (!bondAttempts.has(i - 1)) {
               const prevResults = getLines(i - 1)
               const prevFitsFresh =
-                countFitting(prevResults, 0, contentBox.height) === prevResults.length
+                countFitting(prevResults, 0, active.contentBox.height) === prevResults.length
               const prevEntryState = prevEntry.entryState
               if (prevFitsFresh && prevEntryState.y > 0) {
                 bondAttempts.add(i - 1)
@@ -923,8 +1110,8 @@ export function createLayoutEngine({
                   prev,
                   prevResults,
                   prevEntryState,
-                  contentBox.width,
-                  contentBox.height,
+                  active.contentBox.width,
+                  active.contentBox.height,
                   // M-TABLES: same table-aware control the walk used —
                   // the re-placement must mirror the machine exactly.
                   prev.kind === 'table' ? false : controlOf(prev),
@@ -946,6 +1133,10 @@ export function createLayoutEngine({
                   // fresh attempts); only the spent-attempt drop is
                   // history-dependent.
                   danced: false,
+                  // The cascade re-placement lives in block i's
+                  // section (a boundary between them would have been
+                  // structural — no shape-1 move to cascade).
+                  section: sectionCursor,
                 })
                 state = prevPlaced.exitState
                 continue // the loop re-places block i from the new state
@@ -984,6 +1175,11 @@ export function createLayoutEngine({
           breaks.push(...oldCache[j].breaks)
           placedOut.push(...oldCache[j].placedRects)
           newCache.push(oldCache[j])
+          // #58 — the splice replays the page→section spans too (the
+          // sections table is hash-identical — same geometry sequence).
+          for (let p = oldCache[j].entryState.pageIndex; p <= oldCache[j].exitState.pageIndex; p++) {
+            if (pageSections[p] === undefined) pageSections[p] = oldCache[j].section
+          }
           // CURSOR RECONSTRUCTION: the cached exitState is the MACHINE
           // exit — a breakAfter close is a cursor transform applied by
           // the walk AFTER placement, not part of the record. Every
@@ -1041,31 +1237,58 @@ export function createLayoutEngine({
       for (const rect of placedOut) if (rect.pageIndex > maxPage) maxPage = rect.pageIndex
       const pages: PageGeometry[] = []
       for (let p = 0; p <= maxPage; p++) {
-        pages.push(Object.freeze({ index: p, size, contentBox }))
+        // #58 — per-page geometry: the page's OWN section's size and
+        // contentBox (uniform documents: every page is section 0).
+        // pageSections has no holes below maxPage (every materialized
+        // page holds a line from some block's span); the ?? guards a
+        // defensive gap anyway.
+        const sectionIndexOf = pageSections[p] ?? 0
+        const sec = sectionTable[sectionIndexOf] ?? sectionTable[0]!
+        pages.push(
+          Object.freeze({
+            index: p,
+            size: sec.size,
+            contentBox: sec.contentBox,
+            sectionIndex: sectionIndexOf,
+          }),
+        )
       }
 
       // M-HEADER-FOOTER: the BAND EMISSION — per page, the active
       // class's blocks re-emit as echoes on every page (same logical
       // lines, `band`-tagged, never flow units). Page-relative band
-      // tops: header anchors at anchorPx from the page top; footer
-      // BOTTOM-anchors at anchorPx from the page bottom (its top
-      // derives). rect stays CONTENT-BOX-RELATIVE (the LineBox
-      // contract): header rect.y = anchor − contentBox.y (negative —
-      // the float precedent made out-of-box coords legal), footer
-      // rect.y = (page.height − anchor − footerHeight) − contentBox.y.
-      // Consumers add contentBox.y themselves, uniformly.
-      if (bands && (topBlocks.length > 0 || bottomBlocks.length > 0 || restTopBlocks.length > 0 || restBottomBlocks.length > 0)) {
-        const bandOffsetY = (which: 'header' | 'footer', height: number): number =>
-          which === 'header'
-            ? anchorTop - contentBox.y
-            : opts.page.height - anchorBottom - height - contentBox.y
+      // tops: header anchors at the SECTION's anchorPx from the page
+      // top; footer BOTTOM-anchors at anchorPx from the page bottom
+      // (its top derives). rect stays CONTENT-BOX-RELATIVE (the
+      // LineBox contract): header rect.y = anchor − contentBox.y
+      // (negative — the float precedent made out-of-box coords
+      // legal), footer rect.y = (page.height − anchor − footerHeight)
+      // − contentBox.y. Consumers add contentBox.y themselves,
+      // uniformly. #58: EVERY offset reads the PAGE's section (its
+      // page height, anchor clamps, contentBox.y) — a mixed-geometry
+      // document's bands sit in each section's own margins.
+      if (
+        bands &&
+        sectionTable.some(
+          (s) =>
+            s.topBlocks.length > 0 ||
+            s.bottomBlocks.length > 0 ||
+            s.restTopBlocks.length > 0 ||
+            s.restBottomBlocks.length > 0,
+        )
+      ) {
         const emitBands = (
           which: 'header' | 'footer',
           entries: { block: Block; results: LineResult[] }[],
           pageIndex: number,
+          sec: ActiveSection,
         ): void => {
+          if (entries.length === 0) return
           const height = sumHeight(entries)
-          let y = bandOffsetY(which, height)
+          let y =
+            which === 'header'
+              ? sec.anchorTop - sec.contentBox.y
+              : sec.size.height - sec.anchorBottom - height - sec.contentBox.y
           for (const { block, results } of entries) {
             for (let li = 0; li < results.length; li++) {
               const result = results[li]
@@ -1087,9 +1310,10 @@ export function createLayoutEngine({
           }
         }
         for (let p = 0; p <= maxPage; p++) {
+          const sec = sectionTable[pageSections[p] ?? 0] ?? sectionTable[0]!
           const isFirst = p === 0
-          emitBands('header', isFirst ? topBlocks : restTopBlocks, p)
-          emitBands('footer', isFirst ? bottomBlocks : restBottomBlocks, p)
+          emitBands('header', isFirst ? sec.topBlocks : sec.restTopBlocks, p, sec)
+          emitBands('footer', isFirst ? sec.bottomBlocks : sec.restBottomBlocks, p, sec)
         }
       }
 
