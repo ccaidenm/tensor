@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { PageGeometry, TabStop } from '@tensor-editor/engine';
+import { pageTops } from '@/lib/paginated/pageStack';
+import { applyPageSetup } from '@/lib/editor/sections';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -398,13 +400,13 @@ export function Ruler({
   }
 
   // Word's convention: double-click the ruler OVER a margin region to
-  // open page setup — the commit-gated MarginsDialog (one writer, the
-  // same store path this drag commits through).
+  // open page setup — the ONE PageSetupDialog (the margins presets
+  // live in it; the drag here commits through the store as before).
   function handleBarDoubleClick(e: ReactMouseEvent<HTMLDivElement>) {
     const rectLeft = barRef.current?.getBoundingClientRect().left ?? 0;
     const x = (e.clientX - rectLeft - pageLeft) / zoom;
     if (x < contentX || x > contentR) {
-      useDocumentPropertiesStore.getState().openMargins();
+      useDocumentPropertiesStore.getState().openPageSetup();
     }
   }
 
@@ -1097,15 +1099,15 @@ export function Ruler({
  * documented coupling as the horizontal's flush mount.
  */
 export function VerticalRuler({
-  geometry,
+  pages,
   zoom,
   editor,
-  pageCount,
 }: {
-  geometry: PageGeometry;
+  /** #58 — the walk's per-page geometry (mixed sections make pages
+   *  differ; the ruler paints EACH page's own margins). */
+  pages: PageGeometry[];
   zoom: number;
   editor: Editor | null;
-  pageCount: number;
 }) {
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   const theme = useConfigStore((s) => s.config.theme);
@@ -1136,12 +1138,33 @@ export function VerticalRuler({
     },
   });
 
-  const pageH = geometry.size.height;
-  const pageHz = pageH * zoom;
-  const contentY = geometry.contentBox.y;
-  const contentH = geometry.contentBox.height;
-  const contentB = contentY + contentH;
-  const stride = (pageH + pageGap) * zoom;
+  // #58 — per-page geometry: the cumulative sheet tops (mixed page
+  // heights) and each page's own margins. The MARGIN HANDLES mount on
+  // EVERY page and their drag writes DOCUMENT-WIDE (the applyPageSetup
+  // 'document' scope — the ribbon quick controls' law: quick surfaces
+  // are doc-wide; the Page Setup dialog carries the scoped power).
+  // Mixed sections: each handle pair sits at ITS page's own edges; the
+  // drag derives the top/bottom pt from THAT page's frame and merges
+  // the result into every section.
+  const firstPage = pages[0];
+  const firstPageH = firstPage?.size.height ?? 0;
+  const firstContentY = firstPage?.contentBox.y ?? 0;
+  const firstContentB =
+    (firstPage ? firstPage.contentBox.y + firstPage.contentBox.height : 0);
+  const tops = useMemo(() => pageTops(pages, pageGap), [pages, pageGap]);
+  // The paint-window signature (the deps law — primitives only: a
+  // value-identical pages array must not repaint into the paint-ops
+  // window).
+  const geoKey = pages
+    .map(
+      (p) =>
+        `${p.size.width},${p.size.height},${p.contentBox.y},${p.contentBox.height}`,
+    )
+    .join('|');
+  const topsKey = tops.join(',');
+  // The handle set: EVERY page (the drag is document-wide — the
+  // Page Setup dialog is the scoped surface).
+  const handlePages = useMemo(() => pages.map((_, i) => i), [pages]);
   // The scale's screen origin: the desk's top padding (pt-8) minus the
   // scroll — page-attached ticks in a viewport-fixed column.
   const scaleTop = padTop - scrollTop;
@@ -1168,6 +1191,8 @@ export function VerticalRuler({
   // Deps are the PAINT INPUTS as primitives (the horizontal bar's law:
   // a value-identical PageGeometry must not repaint into the paint-ops
   // window) — plus scrollTop/padTop/containerH: the scale's frame.
+  // pages/tops ride THROUGH geoKey/topsKey (array identity must not
+  // gate the paint — only values).
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const bar = barRef.current;
@@ -1189,8 +1214,13 @@ export function VerticalRuler({
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    for (let p = 0; p < pageCount; p++) {
-      const pageTop = scaleTop + p * stride; // screen y of the page's top edge
+    for (let p = 0; p < pages.length; p++) {
+      const page = pages[p]!;
+      const pageH = page.size.height;
+      const pageHz = pageH * zoom;
+      const contentY = page.contentBox.y;
+      const contentB = contentY + page.contentBox.height;
+      const pageTop = scaleTop + tops[p]! * zoom; // screen y of the page's top edge
       // Off-viewport cull — only meaningful with a measured container
       // (jsdom's zero-height degenerate paints everything, keeping the
       // paint-ops assertions honest for every page).
@@ -1265,18 +1295,16 @@ export function VerticalRuler({
       ctx.fillRect(0, Math.round(botMs), RULER_WIDTH, 1);
     }
     ctx.globalAlpha = 1;
+    // The deps law: primitives only (geoKey/topsKey) — pages/tops ride
+    // THROUGH them (array identity must not gate the paint).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     containerH,
-    contentB,
-    contentH,
-    contentY,
+    geoKey,
+    topsKey,
     hfSurface,
-    pageCount,
-    pageH,
-    pageHz,
     padTop,
     scaleTop,
-    stride,
     theme,
     unit,
     zoom,
@@ -1298,10 +1326,15 @@ export function VerticalRuler({
   function commitMargin(d: VMarginDrag, px: number) {
     const ps = useDocumentStore.getState().pageSetup;
     const margins = { ...ps.margins };
+    // The drag page's own height (mixed sections — the dragged page's
+    // frame defines the bottom edge); the write is DOCUMENT-WIDE (the
+    // ribbon quick controls' law): every section + the store, no
+    // history (the store side isn't undoable; drag frames stay out).
+    const dragPageH = pages[d.page]?.size.height ?? firstPageH;
     if (d.side === 'top') margins.top = pxToPt(px);
-    else margins.bottom = pxToPt(pageH - px);
+    else margins.bottom = pxToPt(dragPageH - px);
     if (margins.top === ps.margins.top && margins.bottom === ps.margins.bottom) return;
-    useDocumentStore.getState().setPageSetup({ ...ps, margins });
+    applyPageSetup('document', { ...ps, margins }, { margins });
   }
 
   function startDrag(side: 'top' | 'bottom', page: number) {
@@ -1309,7 +1342,12 @@ export function VerticalRuler({
       if (e.button !== 0 || !editor) return;
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-      const startEdgePx = side === 'top' ? contentY : contentB;
+      // The drag page's OWN edges (mixed sections — the handles sit
+      // at each page's real margins).
+      const dragPage = pages[page];
+      const startEdgePx = side === 'top'
+        ? (dragPage?.contentBox.y ?? firstContentY)
+        : ((dragPage ? dragPage.contentBox.y + dragPage.contentBox.height : 0) || firstContentB);
       const d: VMarginDrag = {
         side,
         page,
@@ -1325,12 +1363,16 @@ export function VerticalRuler({
   function moveDrag(e: ReactPointerEvent<HTMLDivElement>) {
     const d = dragRef.current;
     if (!d) return;
+    const dragPageH = pages[d.page]?.size.height ?? firstPageH;
+    const dragPage = pages[d.page];
+    const pageContentY = dragPage?.contentBox.y ?? firstContentY;
+    const pageContentB = dragPage ? dragPage.contentBox.y + dragPage.contentBox.height : 0;
     const raw = d.startEdgePx + (e.clientY - d.startClientY) / zoom;
     const snapped = e.altKey ? raw : snapToMinor(raw, unit);
     const [top, bottom] = clampMarginSpan(
-      d.side === 'top' ? snapped : contentY,
-      d.side === 'bottom' ? snapped : contentB,
-      pageH,
+      d.side === 'top' ? snapped : pageContentY,
+      d.side === 'bottom' ? snapped : pageContentB,
+      dragPageH,
     );
     const draftPx = d.side === 'top' ? top : bottom;
     if (draftPx === d.draftPx) return;
@@ -1364,9 +1406,10 @@ export function VerticalRuler({
   }
 
   // The handle/badge screen-y law: the scale's origin + the page's
-  // stack offset + the edge (all × zoom), in the wrapper frame.
+  // CUMULATIVE stack offset + the edge (all × zoom), in the wrapper
+  // frame (#58 — pages differ; the table carries the offsets).
   const handleY = (page: number, edgePx: number): number =>
-    scaleTop + page * stride + edgePx * zoom;
+    scaleTop + tops[page]! * zoom + edgePx * zoom;
 
   const fmt = (px: number, what: string): string =>
     `${what}: ${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
@@ -1379,7 +1422,7 @@ export function VerticalRuler({
         text:
           drag.side === 'top'
             ? fmtVal(drag.draftPx)
-            : fmtVal(pageH - drag.draftPx),
+            : fmtVal((pages[drag.page]?.size.height ?? firstPageH) - drag.draftPx),
       }
     : null;
 
@@ -1412,17 +1455,27 @@ export function VerticalRuler({
           className="pointer-events-none absolute left-0 top-0"
           style={{ width: `${RULER_WIDTH}px`, height: `${containerH}px` }}
         />
-        {/* Per-page margin handles: full-width columns at each page's
-            content-box edges (the horizontal's full-height law,
-            rotated). Every pair drives the SAME store margins. */}
-        {Array.from({ length: pageCount }, (_, p) => {
-          const topY = handleY(p, drag?.side === 'top' && drag.page === p ? drag.draftPx : contentY);
-          const botY = handleY(p, drag?.side === 'bottom' && drag.page === p ? drag.draftPx : contentB);
+        {/* Per-page margin handles (#58): full-width columns at each
+            HANDLE-SET page's content-box edges (the horizontal's
+            full-height law, rotated). The set = the FINAL section's
+            pages — the store margins those drags write are exactly
+            these edges; uniform docs mount every page (unchanged).
+            TODO(#58 Phase 2): per-section handle targeting. */}
+        {handlePages.map((p) => {
+          const pageEdges = (() => {
+            const pg = pages[p];
+            const y = pg?.contentBox.y ?? firstContentY;
+            const b = pg ? pg.contentBox.y + pg.contentBox.height : 0;
+            const h = pg?.size.height ?? firstPageH;
+            return { y, b, h };
+          })();
+          const topY = handleY(p, drag?.side === 'top' && drag.page === p ? drag.draftPx : pageEdges.y);
+          const botY = handleY(p, drag?.side === 'bottom' && drag.page === p ? drag.draftPx : pageEdges.b);
           return (
             <div key={p}>
               <div
                 data-testid={p === 0 ? 'ruler-vertical-top' : undefined}
-                aria-label={fmt(contentY, 'Top margin')}
+                aria-label={fmt(pageEdges.y, 'Top margin')}
                 className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
                 style={{ top: `${topY}px` }}
                 onPointerDown={startDrag('top', p)}
@@ -1432,13 +1485,13 @@ export function VerticalRuler({
               >
                 <Tooltip>
                   <TooltipTrigger render={<span className="absolute inset-0 block" />} />
-                  <TooltipContent side="right">{fmt(contentY, 'Top margin')}</TooltipContent>
+                  <TooltipContent side="right">{fmt(pageEdges.y, 'Top margin')}</TooltipContent>
                 </Tooltip>
                 <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
               </div>
               <div
                 data-testid={p === 0 ? 'ruler-vertical-bottom' : undefined}
-                aria-label={fmt(pageH - contentB, 'Bottom margin')}
+                aria-label={fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}
                 className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
                 style={{ top: `${botY}px` }}
                 onPointerDown={startDrag('bottom', p)}
@@ -1448,7 +1501,7 @@ export function VerticalRuler({
               >
                 <Tooltip>
                   <TooltipTrigger render={<span className="absolute inset-0 block" />} />
-                  <TooltipContent side="right">{fmt(pageH - contentB, 'Bottom margin')}</TooltipContent>
+                  <TooltipContent side="right">{fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}</TooltipContent>
                 </Tooltip>
                 <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
               </div>
