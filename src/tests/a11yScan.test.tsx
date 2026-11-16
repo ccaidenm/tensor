@@ -329,3 +329,52 @@ describe('M-A11Y: result shape and memoization', () => {
     expect(c.issues).toHaveLength(1); // black on #101010 fails
   });
 });
+
+describe('M-A11Y: decorative marking (the alt exemption)', () => {
+  it('DECORATIVE images are exempt from the alt rule — block and inline; untoggling flags again', async () => {
+    const { editor } = renderTensor('<p>one</p>');
+    await settleLayout();
+    const { schema } = editor.state;
+    insertNode(
+      editor,
+      schema.nodes.image.create({ src: 'media://d', width: 10, height: 10, alt: '', decorative: true }),
+      0,
+    );
+    insertNode(
+      editor,
+      schema.nodes.inlineImage.create({ src: 'media://di', width: 10, height: 10, alt: '', decorative: true }),
+      3,
+    );
+    expect(scan(editor).issues).toHaveLength(0);
+
+    // The marking is the user's decision, not a permanent pass —
+    // untoggle and the checker asks again.
+    act(() => {
+      editor.view.dispatch(editor.state.tr.setNodeAttribute(0, 'decorative', false));
+    });
+    const result = scan(editor);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]!.kind).toBe('altText');
+    expect(result.issues[0]!.pos).toBe(0);
+  });
+
+  it('DECORATIVE carries into the render surfaces (placeholder aria-hidden — the skip semantics)', async () => {
+    const { editor } = renderTensor('<p>one</p>');
+    await settleLayout();
+    const { schema } = editor.state;
+    // An UNRESOLVED media ref renders the placeholder branch — the
+    // decorative image must be hidden from the accessibility tree
+    // there (alt="" carries it on the resolved <img> path).
+    insertNode(
+      editor,
+      schema.nodes.image.create({ src: 'media://missing', width: 10, height: 10, alt: '', decorative: true }),
+      0,
+    );
+    // Node views re-render on the PM update flush (the Orca-mirror
+    // receipt's own rhythm) — settle before querying the DOM.
+    await settleLayout();
+    const placeholder = document.querySelector('[data-testid="image-placeholder"]') as HTMLElement;
+    expect(placeholder).not.toBeNull();
+    expect(placeholder.getAttribute('aria-hidden')).toBe('true');
+  });
+});

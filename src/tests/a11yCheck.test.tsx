@@ -3,7 +3,7 @@ import { act, fireEvent, render } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { useAltTextStore } from '@/components/dialogs/ImageDialogs';
+import { AltTextDialog, useAltTextStore } from '@/components/dialogs/ImageDialogs';
 import { AccessibilityCheckPanel } from '@/components/editor/AccessibilityCheckPanel';
 import { AccessibilityGroup } from '@/components/layout/ribbon/review/groups/AccessibilityGroup';
 import { SidebarHost } from '@/lib/layout/sidebar/SidebarHost';
@@ -133,6 +133,38 @@ describe('M-A11Y: the Accessibility Check panel', () => {
     expect(altStore.src).toBe('media://img');
   });
 
+
+  it('marking an image DECORATIVE from the dialog clears its issue (assisted fixing + live re-scan)', async () => {
+    const { editor } = renderTensor('<p>one</p>');
+    await settleLayout();
+    insertNode(editor, blockImage(editor, ''), 0);
+    mountPanel(editor);
+    // The dialog is App-mounted in production; mount it here too.
+    render(<AltTextDialog />);
+    expect(document.querySelector('[data-testid="a11y-row-altText-0"]')).not.toBeNull();
+
+    // The row action opens the alt dialog at the image — the toggle
+    // starts off (flagged images are never decorative).
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="a11y-alt-action-0"]')!);
+    });
+    expect(useAltTextStore.getState().decorative).toBe(false);
+    // Toggle decorative → the description greys out (decorative and
+    // described are mutually exclusive) → Save.
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="alt-text-decorative"]')!);
+    });
+    expect(
+      (document.querySelector('[data-testid="alt-text-input"]') as HTMLInputElement).disabled,
+    ).toBe(true);
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="alt-text-save"]')!);
+    });
+    // The marking lands on the node and the LIVE list drops the issue.
+    expect(editor.state.doc.child(0).attrs.decorative).toBe(true);
+    expect(document.querySelector('[data-testid="a11y-row-altText-0"]')).toBeNull();
+    expect(document.querySelector('[data-testid="a11y-empty"]')).not.toBeNull();
+  });
 
   it('a clean document shows the EMPTY state', async () => {
     const { editor } = renderTensor('<p>plain and readable</p>');

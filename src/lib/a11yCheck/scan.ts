@@ -183,11 +183,14 @@ function computeScan(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
   doc.descendants((node, pos) => {
     const name = node.type.name;
     if (name === 'image' || name === 'inlineImage') {
-      // MISSING ALT: the attr is a plain string defaulting to '' —
-      // unwritten (a decorative marking, landing with the schema in
-      // the follow-up commit, will exempt presentational ink).
+      // MISSING ALT (unless DECORATIVE — the explicit intent
+      // spelling): '' alone is "not yet written" and flags; a
+      // decorative image is presentational ink, exempt by design
+      // (the marking lives on the node attr; the checker honors it
+      // before it asks).
       const alt = node.attrs?.alt;
-      if (typeof alt !== 'string' || alt.trim() === '') {
+      const decorative = node.attrs?.decorative === true;
+      if (!decorative && (typeof alt !== 'string' || alt.trim() === '')) {
         altIssues.push({
           kind: 'altText',
           severity: 'error',

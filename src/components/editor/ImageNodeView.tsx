@@ -18,12 +18,13 @@ import { useMediaStore } from '@/lib/media/store';
 type ImageNodeViewProps = ReactNodeViewProps;
 
 export function ImageNodeView({ node }: ImageNodeViewProps) {
-  const { src, width, height, alt, radius } = node.attrs as {
+  const { src, width, height, alt, radius, decorative } = node.attrs as {
     src: string | null;
     width: number | null;
     height: number | null;
     alt: string;
     radius?: number;
+    decorative?: boolean;
   };
   const id = src?.startsWith('media://') ? src.slice('media://'.length) : null;
   const entry = useMediaStore((s) => (id ? s.entries.get(id) : undefined));
@@ -45,11 +46,14 @@ export function ImageNodeView({ node }: ImageNodeViewProps) {
         {/* Unresolved ref (media not in the store — e.g. an external
             doc opened without its container): the tinted placeholder,
             never a broken-image glyph. Decode-failure state lives in
-            the failed branch below (shared with the <img> path). */}
+            the failed branch below (shared with the <img> path).
+            M-A11Y: DECORATIVE images are hidden from the tree (the
+            alt="" <img> spelling carries it on the resolved path). */}
         <div
           data-testid="image-placeholder"
           aria-label={alt || 'image'}
           role="img"
+          aria-hidden={decorative === true || undefined}
           style={{
             width: width ? `${width}px` : '96px',
             height: height ? `${height}px` : '64px',
@@ -68,6 +72,7 @@ export function ImageNodeView({ node }: ImageNodeViewProps) {
           data-testid="image-failed"
           aria-label={alt || 'image'}
           role="img"
+          aria-hidden={decorative === true || undefined}
           style={{
             width: width ? `${width}px` : '96px',
             height: height ? `${height}px` : '64px',

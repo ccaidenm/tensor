@@ -36,6 +36,16 @@ export interface ImageAttrs {
    *  radius); never a layout fact, so attr writes splice without
    * relayout geometry changes. Clamped to half the min placed dim. */
   radius: number;
+  /**
+   * M-A11Y — DECORATIVE: the image is presentational, content-free
+   * ink (a divider, a mood shot). The a11y checker exempts it from
+   * the alt-text rule, and the render surfaces carry the HTML
+   * semantics (alt="" / aria-hidden on the placeholder paths —
+   * screen readers skip it BY DESIGN). The user's explicit intent
+   * spelling: '' alt alone is "not yet written", decorative is "no
+   * description needed".
+   */
+  decorative: boolean;
 }
 
 export const ImageNode = Node.create({
@@ -54,6 +64,7 @@ export const ImageNode = Node.create({
       keepNext: { default: false },
       radius: { default: 0 },
       float: { default: null },
+      decorative: { default: false },
     };
   },
 
@@ -96,6 +107,7 @@ export const ImageNode = Node.create({
             keepNext: attrs.keepNext === 'true',
             radius: attrs.radius ? Number(attrs.radius) : 0,
             float,
+            decorative: attrs.decorative === 'true',
           };
         },
       },
@@ -116,6 +128,7 @@ export const ImageNode = Node.create({
         ...(a.keepNext === true ? { 'data-keep-next': 'true' } : {}),
         ...(a.radius ? { 'data-radius': String(a.radius) } : {}),
         ...(a.float != null ? { 'data-float': JSON.stringify(a.float) } : {}),
+        ...(a.decorative === true ? { 'data-decorative': 'true' } : {}),
       },
     ];
   },

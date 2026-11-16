@@ -47,6 +47,9 @@ export const InlineImageNode = Node.create({
       // inline: the adapter's InlineImageRun ignores it, and in-flow
       // objects have no float placement of their own.
       float: { default: null },
+      // M-A11Y — DECORATIVE (the block image's twin): presentational,
+      // content-free ink; exempt from the alt-text rule.
+      decorative: { default: false },
     };
   },
 
@@ -78,6 +81,7 @@ export const InlineImageNode = Node.create({
             keepNext: attrs.keepNext === 'true',
             radius: attrs.radius ? Number(attrs.radius) : 0,
             float,
+            decorative: attrs.decorative === 'true',
           };
         },
       },
@@ -98,6 +102,7 @@ export const InlineImageNode = Node.create({
         ...(a.keepNext === true ? { 'data-keep-next': 'true' } : {}),
         ...(a.radius ? { 'data-radius': String(a.radius) } : {}),
         ...(a.float != null ? { 'data-float': JSON.stringify(a.float) } : {}),
+        ...(a.decorative === true ? { 'data-decorative': 'true' } : {}),
       },
     ];
   },

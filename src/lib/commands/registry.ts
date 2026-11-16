@@ -803,7 +803,12 @@ export const COMMANDS: CommandAction[] = [
           if (sel) {
             useAltTextStore
               .getState()
-              .open(sel.pos, String(sel.attrs.alt ?? ''), (sel.attrs.src as string | null) ?? null);
+              .open(
+                sel.pos,
+                String(sel.attrs.alt ?? ''),
+                (sel.attrs.src as string | null) ?? null,
+                sel.attrs.decorative === true,
+              );
           }
         },
       },
