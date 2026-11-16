@@ -50,6 +50,9 @@ function carryAttrs(attrs: Attrs): Attrs {
     align: attrs.align ?? 'left',
     keepNext: attrs.keepNext === true,
     radius: attrs.radius ?? 0,
+    // M-A11Y — the decorative marking survives mode switches (the
+    // alt/keepNext carrier law: everything the user decided rides).
+    decorative: attrs.decorative === true,
     // The float offset rides BOTH directions (inert on the inline
     // node — the adapter never reads it inline): float → inline →
     // float returns the EXACT offset (mode switches never move the

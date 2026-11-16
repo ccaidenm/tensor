@@ -18,12 +18,13 @@ import { useMediaStore } from '@/lib/media/store';
 type InlineImageNodeViewProps = ReactNodeViewProps;
 
 export function InlineImageNodeView({ node }: InlineImageNodeViewProps) {
-  const { src, alt, width, height, radius } = node.attrs as {
+  const { src, alt, width, height, radius, decorative } = node.attrs as {
     src: string | null;
     alt: string;
     width: number | null;
     height: number | null;
     radius?: number;
+    decorative?: boolean;
   };
   const id = src?.startsWith('media://') ? src.slice('media://'.length) : null;
   const entry = useMediaStore((s) => (id ? s.entries.get(id) : undefined));
@@ -37,6 +38,7 @@ export function InlineImageNodeView({ node }: InlineImageNodeViewProps) {
           data-testid="inline-image-placeholder"
           role="img"
           aria-label={alt || 'image'}
+          aria-hidden={decorative === true || undefined}
           style={{
             display: 'inline-block',
             width: width ? `${width}px` : '48px',
@@ -56,6 +58,7 @@ export function InlineImageNodeView({ node }: InlineImageNodeViewProps) {
           data-testid="inline-image-failed"
           role="img"
           aria-label={alt || 'image'}
+          aria-hidden={decorative === true || undefined}
           style={{
             display: 'inline-block',
             width: width ? `${width}px` : '48px',

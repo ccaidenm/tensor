@@ -47,6 +47,7 @@ import {
   Squircle,
   Table,
   TableProperties,
+  PersonStanding,
   BookmarkMinus,
   BookmarkPlus,
   BookOpen,
@@ -542,6 +543,20 @@ export const COMMANDS: CommandAction[] = [
     enablement: () => !!doc().editor,
     run: () => useSidebarStore.getState().open('table', 'right'),
   },
+  {
+    // M-A11Y — the Accessibility Check panel: the document-content
+    // checker (missing alt text, heading hierarchy, color contrast),
+    // on-demand from the Review tab or the palette. Palette-only — no
+    // menuEventId, zero Rust surface (the tableSidebar precedent).
+    id: 'accessibilityCheck',
+    title: 'Check Accessibility',
+    icon: PersonStanding,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['accessibility', 'a11y', 'check', 'checker', 'issues', 'alt text', 'headings', 'contrast', 'review'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('accessibilityCheck', 'right'),
+  },
 
   // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
   // PRESENCE (the band containers in the one PM doc) — the same fact the
@@ -788,7 +803,12 @@ export const COMMANDS: CommandAction[] = [
           if (sel) {
             useAltTextStore
               .getState()
-              .open(sel.pos, String(sel.attrs.alt ?? ''), (sel.attrs.src as string | null) ?? null);
+              .open(
+                sel.pos,
+                String(sel.attrs.alt ?? ''),
+                (sel.attrs.src as string | null) ?? null,
+                sel.attrs.decorative === true,
+              );
           }
         },
       },
