@@ -2,7 +2,7 @@ import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { useDocumentStore } from '@/lib/document/store';
 import { pushPageSetupUndo, PAGE_SETUP_MARKER } from '@/lib/editor/pageSetupHistory';
-import type { PageSetup } from '@/lib/document/pageSetup';
+import type { PageSetup, PageStyles } from '@/lib/document/pageSetup';
 
 /**
  * #58 SECTIONS — the section RESOLUTION helpers (the dialog's and the
@@ -151,10 +151,15 @@ export function sectionAfterCaret(editor: Editor | null, storeSetup: PageSetup):
  *    holder (the next break's attrs, or the store). The inserted
  *    break's `type` = `startType` (how the new section starts). Word's
  *    "this point forward".
+ *  - 'page' (#48): writes ONE PAGE STYLE (the positional map — a page
+ *    owns DECOR, never geometry; the engine's law). `options.page`
+ *    names the 0-based index and the background (null = CLEAR the
+ *    entry, back to the section/doc chain). Store-only: the marker tr
+ *    + co-undo carry it; one Ctrl+Z reverts it.
  *  - `startType`: when given, ALSO writes the section-start type (the
  *    target's startBreakPos attrs — the break BEFORE the section).
  */
-export type PageSetupScope = 'document' | 'section' | 'sections' | 'forward';
+export type PageSetupScope = 'document' | 'section' | 'sections' | 'forward' | 'page';
 
 /** The break ordinals' positions (one walk). */
 function breakPositions(editor: Editor): number[] {
@@ -173,6 +178,9 @@ export function applyPageSetup(
   options?: {
     sectionSet?: number[];
     startType?: 'nextPage' | 'continuous';
+    /** #48 — the 'page' scope's target: the 0-based page index + the
+     * background (null = clear the entry). */
+    page?: { index: number; background: string | null };
     /** #58 — the store write joins the co-undo (default true): the
      *  RULER's per-frame writes pass false and commit once at drag
      *  end (undoPrev carries the pre-drag setup). */
@@ -214,6 +222,38 @@ export function applyPageSetup(
     }
     store.setPageSetup(next);
   };
+  if (scope === 'page') {
+    // #48 — ONE PAGE STYLE (the positional map). Geometry is never
+    // page-owned (the engine's law); the dialog disables everything
+    // but the background under this scope. Store-only write: the
+    // marker-only tr + the co-undo entry carry it (one Ctrl+Z), the
+    // same writeStore law — mirrored inline because the payload is
+    // the pageStyles map, not the setup.
+    const target = options?.page;
+    if (!target) return;
+    const prevStyles = store.pageStyles;
+    const next: PageStyles = target.background
+      ? { ...prevStyles, [target.index]: { ...(prevStyles[target.index] ?? {}), background: target.background } }
+      : Object.fromEntries(Object.entries(prevStyles).filter(([k]) => Number(k) !== target.index));
+    // No-op guard: an Apply that changes nothing writes nothing.
+    if (
+      Object.keys(next).length === Object.keys(prevStyles).length &&
+      Object.entries(next).every(([k, v]) => prevStyles[Number(k)]?.background === v.background)
+    ) {
+      return;
+    }
+    if (editor && pushUndo) {
+      const tr = editor.state.tr;
+      tr.setMeta(PAGE_SETUP_MARKER, true);
+      markerDispatched = true;
+      editor.view.dispatch(tr);
+    }
+    if (pushUndo) {
+      pushPageSetupUndo(store.pageSetup, editor?.state.doc ?? null, docBefore, prevStyles);
+    }
+    store.setPageStyles(next);
+    return;
+  }
   if (scope === 'document') {
     if (editor) {
       const tr = editor.state.tr;

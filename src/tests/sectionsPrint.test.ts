@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { PDFDocument } from 'pdf-lib';
+import { describe, it, expect, vi } from 'vitest';
+import { PDFDocument, PDFPage, rgb } from 'pdf-lib';
 import { renderPrintDocument } from '@/lib/print/render';
 import { exportPdf } from '@/lib/print/pdfExport';
 import type { TextMetricsPort } from '@/lib/print/metricsPort';
@@ -216,5 +216,41 @@ describe('sections × pdf — mixed page sizes synthesize natively', () => {
     const s1 = doc.getPage(1).getSize();
     expect(Math.round(s1.width)).toBe(Math.round(LETTER.width * 0.75));
     expect(Math.round(s1.height)).toBe(Math.round(LETTER.height * 0.75));
+  });
+});
+
+// ─── #48 — page backgrounds through the PDF ──────────────────────────────
+
+describe('#48 — page backgrounds through print + PDF', () => {
+  it('a PrintPage background becomes a full-page PDF fill UNDER the content (drawn first)', async () => {
+    const spy = vi.spyOn(PDFPage.prototype, 'drawRectangle');
+    const pages: PrintPage[] = [
+      { index: 0, width: LETTER.width, height: LETTER.height, background: '#b91c1c', elements: [] },
+      { index: 1, width: LETTER.width, height: LETTER.height, elements: [] },
+    ];
+    const result = await exportPdf({ pages, info: {}, mediaBytes: () => undefined });
+    // ONE fill — on the backgrounded page only, full-page sized.
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        x: 0,
+        y: 0,
+        width: LETTER.width * 0.75,
+        height: LETTER.height * 0.75,
+        color: rgb(185 / 255, 28 / 255, 28 / 255),
+      }),
+    );
+    spy.mockRestore();
+    expect(result.bytes.length).toBeGreaterThan(0);
+  });
+
+  it('an unparseable background skips (never a guess, never a failed export)', async () => {
+    const spy = vi.spyOn(PDFPage.prototype, 'drawRectangle');
+    const pages: PrintPage[] = [
+      { index: 0, width: LETTER.width, height: LETTER.height, background: 'var(--paper)', elements: [] },
+    ];
+    await exportPdf({ pages, info: {}, mediaBytes: () => undefined });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

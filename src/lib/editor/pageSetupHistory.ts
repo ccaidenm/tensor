@@ -1,6 +1,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { useDocumentStore } from '@/lib/document/store';
 import type { PageSetup } from '@/lib/document/pageSetup';
+import type { PageStyles } from '@/lib/document/pageSetup';
 
 /**
  * #58 — the PAGE-SETUP co-undo. The store's pageSetup (the FINAL
@@ -27,6 +28,21 @@ import type { PageSetup } from '@/lib/document/pageSetup';
 /** The marker on OUR page-setup transactions (the history-joined ones;
  *  the ruler's preview frames stay out entirely). */
 export const PAGE_SETUP_MARKER = 'pageSetupOurs';
+
+/**
+ * #48 — the SYNTHETIC pending transitions. A STORE-ONLY write (a page
+ * style; a doc-scope change on an unsectioned doc) dispatches a
+ * marker-only EMPTY tr: PM history records nothing (no steps), so
+ * pmUndo/pmRedo dispatch NOTHING for it and the pending state would
+ * never flip — undo worked once, redo was dead (a pre-existing gap
+ * the store-only per-page writes make load-bearing). The ours-branches
+ * dispatch these marker metas after the restore; the plugin treats
+ * them as the history movement they stand in for. Idempotent for
+ * doc-touching actions (their real history tr already flipped the
+ * state; the case arms return the same value on re-application).
+ */
+export const PAGE_SETUP_SYNTH_UNDO = 'pageSetupSyntheticUndo';
+export const PAGE_SETUP_SYNTH_REDO = 'pageSetupSyntheticRedo';
 
 export type PageSetupPending = 'undo' | 'redo' | null;
 
@@ -59,10 +75,19 @@ export interface PageSetupUndoEntry {
   prev: PageSetup;
   docAfter: PMNode;
   docBefore: PMNode;
+  /**
+   * #48 — the pageStyles the action replaced. undefined = the action
+   * never touched the map (a plain setup write): the co-restore leaves
+   * pageStyles alone. Present = one Ctrl+Z reverts the setup AND the
+   * map together (the never-half law, extended).
+   */
+  prevPageStyles?: PageStyles;
 }
 
 export interface PageSetupRedoEntry {
   next: PageSetup;
+  /** #48 — the map the redo restores (captured at undo time). */
+  nextPageStyles?: PageStyles;
   /** The original action's post/pre documents (the redo re-creates the
    *  same states — captured at write time, immune to dispatch timing). */
   docAfter: PMNode;
@@ -81,9 +106,10 @@ export function pushPageSetupUndo(
   prev: PageSetup,
   docAfter: PMNode | null,
   docBefore: PMNode | null,
+  prevPageStyles?: PageStyles,
 ): void {
   if (!docAfter || !docBefore) return;
-  undoStack.push({ prev, docAfter, docBefore });
+  undoStack.push({ prev, docAfter, docBefore, prevPageStyles });
   redoStack.length = 0;
 }
 
@@ -111,6 +137,15 @@ export function currentPageSetup(): PageSetup {
   return useDocumentStore.getState().pageSetup;
 }
 
-export function restorePageSetup(setup: PageSetup): void {
-  useDocumentStore.getState().setPageSetup(setup);
+/** #48 — the live map, for the redo entries' nextPageStyles capture. */
+export function currentPageStyles(): PageStyles {
+  return useDocumentStore.getState().pageStyles;
+}
+
+/** The co-restore. `pageStyles` undefined = the action never touched
+ * the map — leave it standing (the never-half law). */
+export function restorePageSetup(setup: PageSetup, pageStyles?: PageStyles): void {
+  const store = useDocumentStore.getState();
+  store.setPageSetup(setup);
+  if (pageStyles !== undefined) store.setPageStyles(pageStyles);
 }

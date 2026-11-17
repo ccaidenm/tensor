@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, PaintBucket } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from 'cn';
 import { RibbonIconInput } from '@/components/layout/ribbon/RibbonIconInput';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
@@ -77,6 +78,10 @@ const SCOPES: Array<{ value: PageSetupScope; label: string }> = [
   { value: 'document', label: 'Whole document' },
   { value: 'section', label: 'Specific section' },
   { value: 'forward', label: 'This point forward' },
+  // #48 — the page-scoped DECOR layer: a page owns its background,
+  // never its geometry (the engine's law) — under this scope only
+  // the bucket stays live.
+  { value: 'page', label: 'This page' },
 ];
 
 /** The margin fields' IDENTITY: a letter prefix (T/B/L/R) — no icons
@@ -160,6 +165,11 @@ export function PageSetupDialog() {
   const closePageSetup = useDocumentPropertiesStore((s) => s.closePageSetup);
   const pageSetup = useDocumentStore((s) => s.pageSetup);
   const editor = useDocumentStore((s) => s.editor);
+  // #48 — the page-style layer's target: the caret's page (the
+  // status bar's fact, 1-based) + the live map.
+  const currentPage = useDocumentStore((s) => s.currentPage);
+  const pageStyles = useDocumentStore((s) => s.pageStyles);
+  const pageIndex = Math.max(0, currentPage - 1);
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
 
   const [scope, setScope] = useState<PageSetupScope>('document');
@@ -172,6 +182,13 @@ export function PageSetupDialog() {
   // The section-START type (Word's "Section start") — how the target
   // section begins. Seeds from the target's boundary on re-scope.
   const [startType, setStartType] = useState<'nextPage' | 'continuous'>('nextPage');
+  // #48 — the page-scoped DECOR layer (derived; the geometry controls
+  // gate on it, the bucket never does).
+  const pageScope = scope === 'page';
+  // The geometry sections GATE on it (never hide — the dialog holds
+  // its size; pointer-events + opacity, the section-scope's disabled
+  // buttons' treatment).
+  const geometryGate = pageScope ? 'pointer-events-none opacity-50' : undefined;
 
   // OPEN: reset the scope + the chip set (the dialog's fresh start;
   // a previous session's chip selection must not leak in).
@@ -196,7 +213,19 @@ export function PageSetupDialog() {
           : caretFacts;
     setFacts(caretFacts);
     setTarget(targetFacts);
-    setDraft(snapshot(targetFacts.setup, unit, pageSetup.pageColor ?? ''));
+    // #48 — 'page' seeds the bucket from the PAGE's own override
+    // ('' = inherit the section/doc chain); the modal dialog holds
+    // focus, so the caret can't move while open — seeding once per
+    // scope entry is the whole story.
+    setDraft(
+      snapshot(
+        targetFacts.setup,
+        unit,
+        scope === 'page'
+          ? (pageStyles[pageIndex]?.background ?? '')
+          : (pageSetup.pageColor ?? ''),
+      ),
+    );
     // Entering 'section' unhides the chips and AUTO-SELECTS the
     // section the caret sits in (the user's flow); the other scopes
     // carry no chip selection.
@@ -246,6 +275,15 @@ export function PageSetupDialog() {
   /** ONE commit per Apply (the scope's writer — applyPageSetup). */
   function apply() {
     const full = draftToSetup(draft!, target!.setup, unit);
+    // #48 — ONE PAGE STYLE: the bucket alone is live under this
+    // scope; '' = CLEAR the entry (back to the section/doc chain).
+    if (pageScope) {
+      applyPageSetup('page', full, {}, {
+        page: { index: pageIndex, background: draft!.pageColor || null },
+      });
+      closePageSetup();
+      return;
+    }
     const partial: Partial<PageSetup> = {
       pageSize: full.pageSize,
       orientation: full.orientation,
@@ -285,11 +323,13 @@ export function PageSetupDialog() {
             <div className="flex flex-col gap-1">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium text-muted-foreground">Apply to</span>
-                {sectioned && (
+                {pageScope ? (
+                  <span className="text-xs text-muted-foreground">Page {currentPage}</span>
+                ) : sectioned ? (
                   <span className="text-xs text-muted-foreground">
                     Section {facts.index + 1} of {facts.total}
                   </span>
-                )}
+                ) : null}
               </div>
               {/* Stacked full-width: three long labels never fit a
                   half-column on one line — the wrap/clip came free with
@@ -368,8 +408,8 @@ export function PageSetupDialog() {
                 one. The type lives on the boundary break BEFORE the
                 section; section 0 starts at the doc start — disabled.
                 'forward' inserts the boundary, so the choice applies
-                to it. */}
-            <div className="flex flex-col gap-1">
+                to it. #48: gated under the page scope. */}
+            <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Section start</span>
               <span className="text-xs text-muted-foreground">
                 How this section begins — a fresh page, or flowing on the same one.
@@ -398,20 +438,29 @@ export function PageSetupDialog() {
                   );
                 })}
               </div>
+              {pageScope && (
+                <span className="text-xs text-muted-foreground">
+                  A page owns its background — paper and margins belong to its section.
+                </span>
+              )}
             </div>
           </div>
 
           {/* RIGHT — the setup itself. */}
           <div className="flex flex-col gap-4">
-            {/* Paper + Background — TWO labeled columns filling the
-                row (the dialog's rhythm: caption above each control).
-                The bucket edits the DRAFT; Done applies it per the
-                scope. */}
-            <div className="flex items-end gap-3">
-              <div className="flex w-2/3 flex-col gap-1">
+            {/* #48 — PAPER, one section: the size dropdown SPANS the
+                row, the background bucket stands alone at the far
+                right (tooltips on both; the old two-column "Background"
+                heading retired). The bucket edits the DRAFT; Done
+                applies it per the scope — the PAGE scope keeps ONLY
+                the bucket live (a page owns its background, never its
+                geometry — the engine's law). */}
+            <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Paper</span>
+              <div className="flex items-center gap-2">
               <Select
                 value={draft.pageSize}
+                disabled={pageScope}
                 onValueChange={(value) => {
                   if (value == null) return;
                   if (value === 'custom') {
@@ -442,13 +491,20 @@ export function PageSetupDialog() {
                   setDraft((d) => (d ? { ...d, pageSize: value } : d));
                 }}
               >
-                <SelectTrigger aria-label="Paper size" className="h-8 w-2/3 text-sm">
-                  <SelectValue>
-                    {draft.pageSize === 'custom'
-                      ? 'Custom…'
-                      : `${draft.pageSize} (${PAGE_SIZES[draft.pageSize]?.inches ?? ''})`}
-                  </SelectValue>
-                </SelectTrigger>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <SelectTrigger aria-label="Paper size" className="h-8 w-full flex-1 text-sm">
+                        <SelectValue>
+                          {draft.pageSize === 'custom'
+                            ? 'Custom…'
+                            : `${draft.pageSize} (${PAGE_SIZES[draft.pageSize]?.inches ?? ''})`}
+                        </SelectValue>
+                      </SelectTrigger>
+                    }
+                  />
+                  <TooltipContent>Paper size</TooltipContent>
+                </Tooltip>
                 <SelectContent>
                   {/* w-(--anchor-width) — the popup matches the trigger
                       (the w-64 override read as an 80%-wide box). */}
@@ -460,25 +516,24 @@ export function PageSetupDialog() {
                   <SelectItem value="custom">Custom…</SelectItem>
                 </SelectContent>
               </Select>
-              </div>
-              <div className="flex flex-1 flex-col gap-1">
-                <span className="text-xs font-medium text-muted-foreground">Background</span>
-                <ColorPickerButton
-                  label="Page background"
-                  icon={<PaintBucket size={16} />}
-                  resetLabel="White"
-                  resetColor="#ffffff"
-                  defaultColor={draft.pageColor || '#ffffff'}
-                  onChange={(color) =>
-                    setDraft((d) => (d ? { ...d, pageColor: color ?? '' } : d))
-                  }
-                />
+              <ColorPickerButton
+                label="Page background"
+                icon={<PaintBucket size={16} />}
+                resetLabel={pageScope ? 'Remove page style' : 'White'}
+                resetColor="#ffffff"
+                defaultColor={draft.pageColor || '#ffffff'}
+                onChange={(color) =>
+                  setDraft((d) => (d ? { ...d, pageColor: color ?? '' } : d))
+                }
+              />
               </div>
             </div>
 
             {/* Orientation — a heading with the options below (the
-                dialog's own rhythm), the page glyphs aiding the scan. */}
-            <div className="flex flex-col gap-1">
+                dialog's own rhythm), the page glyphs aiding the scan.
+                #48: gated under the page scope (geometry is the
+                section's). */}
+            <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Orientation</span>
               <div className="flex gap-1">
                 {(['portrait', 'landscape'] as const).map((o) => (
@@ -500,8 +555,9 @@ export function PageSetupDialog() {
 
             {/* M-FLOW — the document-level widow/orphan default (Word's
                 layout option; off = natural splits everywhere a
-                paragraph doesn't carry its own override). */}
-            <div className="flex items-center justify-between gap-2">
+                paragraph doesn't carry its own override). #48: gated
+                under the page scope. */}
+            <div className={cn('flex items-center justify-between gap-2', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Widow/orphan control</span>
               <Switch
                 size="sm"
@@ -515,8 +571,9 @@ export function PageSetupDialog() {
 
             {/* Margins — the CUSTOM row first (one ticker per edge,
                 icon + unit inside), the presets under it as human
-                one-liners ("1\" vertical, 0.75\" horizontal"). */}
-            <div className="flex flex-col gap-1">
+                one-liners ("1\" vertical, 0.75\" horizontal"). #48:
+                gated under the page scope. */}
+            <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Margins</span>
               {/* ONE TooltipProvider for the ROW — base-ui's grouping
                   shows the ADJACENT field's tooltip instantly (the

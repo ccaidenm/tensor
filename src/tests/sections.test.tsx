@@ -8,6 +8,8 @@ import { useDocumentStore } from '@/lib/document/store';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { deleteSectionBreakNear, enableRegion, relinkBand } from '@/lib/editor/headerFooterCommands';
 import { applyPageSetup } from '@/lib/editor/sections';
+import { assembleDocumentFile } from '@/lib/document/fileOperations';
+import { normalizePageStyles } from '@/lib/document/pageSetup';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
 import { fireEvent, render } from '@testing-library/react';
@@ -1241,5 +1243,202 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
       editor.commands.undo();
     });
     expect(countTagged()).toBe(1);
+  });
+});
+
+describe('Phase 8 — per-page styles (#48)', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentStore.getState().setPageStyles({});
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('the paint chain: per-page → per-section → doc → white', async () => {
+    // A long two-section doc (two sheets per section — ~57 lines
+    // each at FakeMetrics): the doc default wears one tint, section 0
+    // another, and ONE page override beats them all — each sheet
+    // proves its own layer.
+    const longText = '<p>' + 'word '.repeat(700) + '</p>';
+    const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
+    setBreakSetup(editor, {
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+      pageColor: '#ffeedd',
+    });
+    act(() => {
+      useDocumentStore.getState().setPageSetup({
+        ...useDocumentStore.getState().pageSetup,
+        pageColor: '#ddeeff',
+      });
+      useDocumentStore.getState().setPageStyles({ 1: { background: '#123456' } });
+    });
+    await settleLayout();
+    const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
+    expect(sheets.length).toBeGreaterThanOrEqual(4);
+    // Page 1 wears the per-page override; page 0 wears section 0's
+    // tint; the final section's sheets wear the doc default.
+    expect(sheets[0]!.style.backgroundColor).toBe('rgb(255, 238, 221)');
+    expect(sheets[1]!.style.backgroundColor).toBe('rgb(18, 52, 86)');
+    expect(sheets[sheets.length - 1]!.style.backgroundColor).toBe('rgb(221, 238, 255)');
+  });
+
+  it("applyPageSetup('page') writes one entry; a null background CLEARS it; a no-op Apply writes nothing", () => {
+    const { editor } = renderTensor('<p>body</p>');
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 2, background: '#101010' },
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({ 2: { background: '#101010' } });
+
+    // Clear: back to the section/doc chain.
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 2, background: null },
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({});
+
+    // No-op: an Apply of the same value writes NOTHING (no undo
+    // entry, no dirty flip beyond what already is).
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 0, background: null },
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({});
+    void editor;
+  });
+
+  it('one Ctrl+Z reverts the map (the co-undo law); redo restores it', () => {
+    const { editor } = renderTensor('<p>body</p>');
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 0, background: '#abcdef' },
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({ 0: { background: '#abcdef' } });
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({});
+    act(() => {
+      editor.commands.redo();
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({ 0: { background: '#abcdef' } });
+  });
+
+  it('an entry for a page that no longer exists is INERT (the chain falls through)', async () => {
+    const { editor } = renderTensor('<p>one page only</p>');
+    act(() => {
+      useDocumentStore.getState().setPageStyles({ 7: { background: '#123123' } });
+    });
+    await settleLayout();
+    const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
+    expect(sheets).toHaveLength(1);
+    // Page 7 doesn't exist — page 0 paints the doc default (white),
+    // and nothing crashes on the dangling entry.
+    expect(sheets[0]!.style.backgroundColor).toBe('');
+    void editor;
+  });
+
+  it('the .wpdoc surface: assembleDocumentFile carries the map (string keys); normalizePageStyles reads it back', () => {
+    const { editor } = renderTensor('<p>body</p>');
+    act(() => {
+      useDocumentStore.getState().setPageStyles({ 0: { background: '#101010' }, 3: { background: '#f4f4f5' } });
+    });
+    const file = assembleDocumentFile(editor, {
+      pageSetup: useDocumentStore.getState().pageSetup,
+      pageStyles: useDocumentStore.getState().pageStyles,
+    });
+    // JSON object keys serialize as STRINGS — the file's spelling.
+    expect(file.metadata.pageStyles).toEqual({
+      '0': { background: '#101010' },
+      '3': { background: '#f4f4f5' },
+    });
+    // The open-side normalizer: numeric keys, garbage dropped.
+    expect(normalizePageStyles({ '0': { background: '#101010' }, x: { background: 'nope' }, '3': {} }))
+      .toEqual({ 0: { background: '#101010' } });
+  });
+});
+
+describe('Phase 8b — the Page Setup dialog\'s "This page" scope (#48)', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentStore.getState().setPageStyles({});
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('This page: geometry gates, the bucket sets ONE page\'s style end-to-end through the real popover', async () => {
+    const longText = '<p>' + 'word '.repeat(1500) + '</p>';
+    renderTensor(longText);
+    await settleLayout();
+    // The dialog targets the status bar's page fact: page 3 → index 2.
+    // (1500 words ≈ 121 lines ≈ 3 sheets — the target page EXISTS.)
+    act(() => {
+      useDocumentStore.getState().setPageInfo(3, 3);
+    });
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'This page')!);
+    });
+    // The geometry gates: the paper select disabled (a page owns its
+    // background, never its geometry) + the hint line.
+    expect((document.querySelector('button[aria-label="Paper size"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).toContain('paper and margins belong to its section');
+    // The caption names the target page.
+    expect(document.body.textContent).toContain('Page 3');
+    // The bucket: the swatch through the real popover (hex-default
+    // display → the swatch's aria-label IS its hex).
+    act(() => {
+      fireEvent.click(document.querySelector('button[aria-label="Page background options"]')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('[aria-label="#b91c1c"]')!);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({ 2: { background: '#b91c1c' } });
+    await settleLayout();
+    const sheet = document.querySelector('[data-page-index="2"]') as HTMLElement;
+    expect(sheet).not.toBeNull();
+    expect(sheet.style.backgroundColor).toBe('rgb(185, 28, 28)');
+    // The other pages keep the white default — ONE page, not the doc.
+    const other = document.querySelector('[data-page-index="1"]') as HTMLElement;
+    expect(other.style.backgroundColor).toBe('');
+  });
+
+  it('This page reset: "Remove page style" clears the entry (inherit the chain)', async () => {
+    renderTensor('<p>body</p>');
+    await settleLayout();
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 0, background: '#123123' },
+    });
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'This page')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('button[aria-label="Page background options"]')!);
+    });
+    // The page-scope reset spells REMOVE (inherit), not "White".
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Remove page style')!);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({});
   });
 });

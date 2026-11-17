@@ -295,6 +295,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // read fresh at call time (L4) — these selectors never feed options
   // directly.
   const pageSetup = useDocumentStore((s) => s.pageSetup);
+  // #48 — the per-page styles (the positional map): paint-only ink,
+  // so a map change re-renders without a relayout (the pageSetup
+  // subscription's twin).
+  const pageStyles = useDocumentStore((s) => s.pageStyles);
   // M-HEADER-FOOTER-2: the active-band signal (muted band ink + the
   // ruler's active-region accent) — selection-driven, one PM doc.
   const inBand = useEditorState({
@@ -2013,8 +2017,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   };
   // #58 — the per-section PAGE BACKGROUND: each break's setup carries
   // its section's color; UNSET inherits the doc default (the store's
-  // pageColor — the two-level band model). View-only ink (the print
-  // walk paints white paper, unchanged).
+  // pageColor — the two-level band model).
+  // #48 — the PER-PAGE LAYER rides on top: the positional pageStyles
+  // map (page number → background; the PageSetup comment block in
+  // pageSetup.ts is the ruling — an entry for a page that no longer
+  // exists is inert, the chain just falls through). Print/PDF honor
+  // the SAME chain (buildDocument resolves it per printed page).
   const sectionColors: (string | undefined)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -2022,8 +2030,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       sectionColors.push(typeof color === 'string' && color ? color : undefined);
     }
   });
-  const backgroundForPage = (sectionIndex: number): string | undefined =>
-    sectionColors[sectionIndex] ?? (pageSetup.pageColor || undefined);
+  const backgroundForPage = (pageIndex: number, sectionIndex: number): string | undefined =>
+    pageStyles[pageIndex]?.background ??
+    sectionColors[sectionIndex] ??
+    (pageSetup.pageColor || undefined);
 
   // Fallback: the strict-adapter throw surfaces as a pageless render of
   // the SAME EditorContent — never a crash. The input-view container
@@ -2190,7 +2200,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 geometry={page}
                 top={pageTopTable[page.index]!}
                 observeRef={observeSheet}
-                background={backgroundForPage(page.sectionIndex)}
+                background={backgroundForPage(page.index, page.sectionIndex)}
               >
                 {/* M-IMAGES-2 PAINT ORDER: 'behind' floats mount (and
                     paint) BEFORE the text tracks; 'front' + in-flow

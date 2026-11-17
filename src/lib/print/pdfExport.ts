@@ -214,6 +214,16 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
     const H = printPage.height * PT_PER_PX;
     const page = doc.addPage([W, H]);
 
+    // #48 — the page background: a full-page fill UNDER the content
+    // (drawn first = painted first — the element order law). Unset =
+    // the PDF's own white paper.
+    if (printPage.background) {
+      const bg = parseColor(printPage.background);
+      if (bg) {
+        page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(bg.r, bg.g, bg.b) });
+      }
+    }
+
     for (const el of printPage.elements) {
       switch (el.kind) {
         case 'text': {

@@ -3,6 +3,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { undo as pmUndo, redo as pmRedo } from '@tiptap/pm/history';
 import {
   currentPageSetup,
+  currentPageStyles,
   nextPending,
   peekPageSetupRedo,
   peekPageSetupUndo,
@@ -12,6 +13,8 @@ import {
   pushPageSetupUndo,
   restorePageSetup,
   PAGE_SETUP_MARKER,
+  PAGE_SETUP_SYNTH_UNDO,
+  PAGE_SETUP_SYNTH_REDO,
   type PageSetupPendingState,
 } from '@/lib/editor/pageSetupHistory';
 
@@ -44,6 +47,14 @@ export const PageSetupHistoryExtension = Extension.create({
             // carry the marker) — a new action also clears PM's redo.
             if (tr.getMeta(PAGE_SETUP_MARKER)) {
               return { pending: nextPending(prev.pending, 'ours'), redoNonEmpty: false };
+            }
+            // #48 — the synthetic movements (store-only writes stand
+            // in for the history trs that never dispatch for them).
+            if (tr.getMeta(PAGE_SETUP_SYNTH_UNDO)) {
+              return { pending: nextPending(prev.pending, 'history-undo'), redoNonEmpty: prev.redoNonEmpty };
+            }
+            if (tr.getMeta(PAGE_SETUP_SYNTH_REDO)) {
+              return { pending: nextPending(prev.pending, 'history-redo'), redoNonEmpty: prev.redoNonEmpty };
             }
             // A PM undo/redo movement: prosemirror-history's own
             // undo/redo transactions carry its plugin meta ({ redo,
@@ -97,14 +108,38 @@ export const PageSetupHistoryExtension = Extension.create({
           const recovered = pending === null && redoNonEmpty;
           if (top && (precise || recovered) && state.doc.eq(top.docAfter)) {
             // OURS — one Ctrl+Z reverts the PM part and the store part.
+            // #48 — STORE-ONLY entries (a page style; a doc-scope
+            // write on an unsectioned doc) recorded NOTHING in PM
+            // (an empty tr has no steps) — pmUndo would pop SOMEONE
+            // ELSE'S last item instead (reverting the user's typing
+            // with the store write — a pre-existing hole the map makes
+            // load-bearing). Content-equal before/after docs are the
+            // store-only signature: PM must not move; the synthetic
+            // transition below stands in for the history movement.
+            const storeOnly = top.docAfter.eq(top.docBefore);
             popPageSetupUndo();
             const nextSetup = currentPageSetup();
-            pmUndo(state, dispatch, view);
+            if (!storeOnly) pmUndo(state, dispatch, view);
             // The REDO entry: next = the setup the undo replaced; the
             // docs are the ORIGINAL action's snapshots (captured at
-            // write time — immune to the deferred dispatch).
-            pushPageSetupRedo({ next: nextSetup, docAfter: top.docAfter, docBefore: top.docBefore });
-            restorePageSetup(top.prev);
+            // write time — immune to the deferred dispatch). #48: the
+            // map rides the same entry — an action that never touched
+            // it captured undefined, and undefined RESTORES nothing.
+            pushPageSetupRedo({
+              next: nextSetup,
+              nextPageStyles: top.prevPageStyles !== undefined ? currentPageStyles() : undefined,
+              docAfter: top.docAfter,
+              docBefore: top.docBefore,
+            });
+            restorePageSetup(top.prev, top.prevPageStyles);
+            // #48 — the synthetic movement: a store-only write's pmUndo
+            // dispatched nothing; flip the pending state so REDO can
+            // fire (idempotent when a real history tr did it first).
+            if (dispatch) {
+              const tr = state.tr;
+              tr.setMeta(PAGE_SETUP_SYNTH_UNDO, true);
+              dispatch(tr);
+            }
             return true;
           }
           return pmUndo(state, dispatch, view) ?? true;
@@ -118,11 +153,25 @@ export const PageSetupHistoryExtension = Extension.create({
             // OURS — one Ctrl+Y re-applies the PM part and the store part.
             popPageSetupRedo();
             const prev = currentPageSetup();
-            pmRedo(state, dispatch, view);
+            // #48 — the store-only mirror: PM recorded nothing for this
+            // write; pmRedo would re-apply an UNRELATED undone item.
+            if (!top.docAfter.eq(top.docBefore)) pmRedo(state, dispatch, view);
             // The undo entry: the ORIGINAL action's snapshots (prev =
-            // the undone setup as its previous value).
-            pushPageSetupUndo(prev, top.docAfter, top.docBefore);
-            restorePageSetup(top.next);
+            // the undone setup as its previous value). #48: the map
+            // mirrors — captured only when the redo restores one.
+            pushPageSetupUndo(
+              prev,
+              top.docAfter,
+              top.docBefore,
+              top.nextPageStyles !== undefined ? currentPageStyles() : undefined,
+            );
+            restorePageSetup(top.next, top.nextPageStyles);
+            // #48 — the synthetic movement, redo-side mirror.
+            if (dispatch) {
+              const tr = state.tr;
+              tr.setMeta(PAGE_SETUP_SYNTH_REDO, true);
+              dispatch(tr);
+            }
             return true;
           }
           return pmRedo(state, dispatch, view) ?? true;

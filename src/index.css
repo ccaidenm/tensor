@@ -588,4 +588,11 @@ body {
   [data-testid="print-container"] {
     display: block !important;
   }
+  /* #48 — a page's own background fill is CONTENT, not chrome:
+     browsers strip backgrounds at print time by default; force the
+     sheet fills onto paper (both spellings — WebKit + standard). */
+  .print-page-sheet {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
