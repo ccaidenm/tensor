@@ -78,6 +78,40 @@ export async function insertImageBytes(
     .run();
 }
 
+/** #WATERMARK — the register-only variant: bytes → sha → MediaStore →
+ * natural dims, NO node insert. The watermark settings carry the ref
+ * + the dims (the image law: document data, never fetched at render
+ * time). Returns null on a decode failure — no fabricated dims; the
+ * panel toasts. */
+export async function registerImageBytes(
+  bytes: Uint8Array,
+  ext: string,
+): Promise<{ src: string; width: number; height: number } | null> {
+  const id = await sha256Hex(bytes);
+  useMediaStore.getState().add(id, ext, bytes);
+  try {
+    const { width, height } = await decodeImageSize(bytes, ext);
+    return { src: `media://${id}`, width, height };
+  } catch {
+    return null;
+  }
+}
+
+/** #WATERMARK — the Insert > Image path's twin for watermarks: OS
+ * picker → binary read → registerImageBytes (no node insert). */
+export async function registerImageFromPicker(): Promise<
+  { src: string; width: number; height: number } | null
+> {
+  const path = await openDialog({
+    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+    multiple: false,
+  });
+  if (!path || Array.isArray(path)) return null;
+  const ext = (path.split('.').pop() ?? 'png').toLowerCase();
+  const bytes = await readFile(path);
+  return registerImageBytes(bytes, ext === 'jpeg' ? 'jpeg' : ext);
+}
+
 /** The Insert > Image path: OS picker → binary read (the fs
  *  capability fonts-A opened) → the pipeline. */
 export async function insertImageFromPicker(editor: Editor | null): Promise<boolean> {

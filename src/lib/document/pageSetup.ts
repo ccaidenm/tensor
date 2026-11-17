@@ -33,6 +33,61 @@ export interface PageSetup {
    * everywhere a paragraph doesn't override via its own flow.
    */
   widowControl?: boolean;
+  /**
+   * #WATERMARK — the decorative page overlay ("DRAFT",
+   * "CONFIDENTIAL", an image), painted BEHIND all content on every
+   * page. PAINT-ONLY ink (the pageColor law): it never enters
+   * toLayoutOptions — the engine never knows. Deliberately INSIDE
+   * PageSetup (unlike #48's positional pageStyles): per-SECTION
+   * watermarks ride the sectionBreak setup-riding mechanism verbatim
+   * (the pageColor precedent) — the per-page chain is section
+   * override → doc default, resolved paint-side. null = none (the
+   * PM JSON round-trip convention).
+   */
+  watermark?: WatermarkSettings | null;
+}
+
+/**
+ * #WATERMARK — the watermark's two spellings. Every field carries an
+ * ABSENT = DEFAULT reading (defaults live at the edges; the paint
+ * sites resolve via resolveWatermark — one derivation, all
+ * consumers): text defaults to Word's own look (silver, −45°
+ * diagonal, 50% opacity); image defaults to horizontal (Word's
+ * picture-watermark posture) at half the page width.
+ */
+export interface WatermarkSettings {
+  kind: 'text' | 'image';
+  // ── the text spelling ──
+  /** The words ("DRAFT"). kind === 'text'; blank = nothing paints. */
+  text?: string;
+  /**
+   * px. ABSENT = AUTO: the text spans ~70% of the page diagonal
+   * (Word's auto-scale look), measured through the ONE-ruler metrics
+   * at render time — never a second ruler.
+   */
+  fontSize?: number;
+  /** hex; default silver #c0c0c0 (Word's default watermark gray). */
+  color?: string;
+  /** Degrees, CSS sign (−45 = Word's diagonal). Text default −45;
+   *  image default 0. */
+  rotation?: number;
+  /** 0..1; default 0.5 (Word's "semTransparent"). */
+  opacity?: number;
+  // ── the image spelling ──
+  /** 'media://<sha>' — the existing image infrastructure (the node
+   *  path's content-address contract; registerImageBytes is the
+   *  no-insert variant). */
+  src?: string;
+  /**
+   * Natural px — REQUIRED DOCUMENT DATA for kind === 'image' (the
+   * image law: dims are data, never fetched at render time). An
+   * image watermark without valid dims paints nothing (the resolver
+   * declines, never guesses).
+   */
+  width?: number;
+  height?: number;
+  /** Fraction of the page width the watermark spans; default 0.5. */
+  scale?: number;
 }
 
 /**
