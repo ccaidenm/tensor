@@ -331,9 +331,12 @@ export interface BlockBase {
    */
   firstLineIndent?: number
   /**
-   * TAB STOPS (M-RULER Phase 3/3.5; px, measured from the CONTENT-BOX
+   * TAB STOPS (M-RULER Phase 3/3.5; px, measured from the COLUMN's
    * LEFT EDGE — Word's margin-relative convention: indent edits never
-   * move tab stops). Ascending by position, deduped — the adapter
+   * move tab stops. COLUMNS (#74) made the frame literal: in a
+   * multi-column section each column re-anchors the stop grid
+   * (column left ≡ content-box left in single-column documents, so
+   * existing docs parse identically — the additive law). Ascending by position, deduped — the adapter
    * normalizes on the way in. INERT until the Phase 4 breaker consumes
    * them (the \t advance rule): hashBlock deliberately does NOT cover
    * this field yet, so a tabStops edit splices the cached lines instead
@@ -353,7 +356,7 @@ export interface BlockBase {
  * and the BREAKER (Phase 4) computes each kind's advance differently.
  */
 export interface TabStop {
-  /** px from the content box's left edge. */
+  /** px from the COLUMN's left edge (≡ the content box's, single-column). */
   position: number
   alignment: 'left' | 'center' | 'right'
 }
@@ -742,6 +745,19 @@ export interface LayoutOptions {
   page: { width: number; height: number }
   margins: { top: number; right: number; bottom: number; left: number }
   /**
+   * #74 COLUMNS — the DOCUMENT-LEVEL DEFAULT column spec
+   * (newsletter-style multi-column flow). Absent/undefined ≡ ONE
+   * column ≡ today's shape exactly — the additive law: existing docs
+   * and every existing test parse bit-identically. The single-section
+   * fallback (no `sections` boundaries) folds this default in; with
+   * boundaries, each SectionGeometry carries its own spec (the
+   * adapter resolves the complete table — the #58 law).
+   *
+   * RIDES THE CONTEXT HASH: stableStringify(opts) covers this, so a
+   * columns change invalidates the walk caches wholesale.
+   */
+  columns?: ColumnsSpec
+  /**
    * DOCUMENT-LEVEL DEFAULT for widow/orphan protection. Default true
    * when omitted; per-block flow.widowControl overrides this.
    */
@@ -773,7 +789,56 @@ export interface LayoutOptions {
 export interface SectionGeometry {
   page: { width: number; height: number }
   margins: { top: number; right: number; bottom: number; left: number }
+  /**
+   * #74 COLUMNS — this section's column spec. Absent ≡ one column
+   * (the additive law). Resolved into per-column slots against the
+   * section's content box (see ColumnSlot); rides the geometry swap
+   * verbatim (page dims, margins — and now the column grid — switch
+   * with the active section).
+   */
+  columns?: ColumnsSpec
 }
+
+/**
+ * #74 COLUMNS — one section's newsletter-style column spec. `count`
+ * columns with `gap` px between neighbors (default Word's 0.5" =
+ * DEFAULT_COLUMN_GAP), each wrapping text independently: flow fills
+ * column 0 top-down, wraps to column 1, and only wraps to a new PAGE
+ * when every column on the page is full. `widths` (optional) makes
+ * the columns UNEQUAL: relative weights (any positive numbers —
+ * fractions of the shared width, NOT px), normalized to the
+ * post-gap space; absent ≡ equal columns. `balanced` (default true)
+ * equalizes the heights of the columns on the section's LAST page
+   * (Word's balance law — the walk balances at the section-end
+   * decision point, so the cache stores the balanced form and
+   * splice/prefix reuse stays exact).
+ */
+export interface ColumnsSpec {
+  /** Column count, integer >= 1. 1 ≡ single column (the additive law). */
+  count: number
+  /** px between neighboring columns. Default DEFAULT_COLUMN_GAP. */
+  gap?: number
+  /** Relative per-column weights (unequal columns). Absent ≡ equal. */
+  widths?: number[]
+  /** Balance the section's last-page column heights. Default true. */
+  balanced?: boolean
+}
+
+/**
+ * #74 COLUMNS — one resolved column slot (engine-issued fact, the
+ * contentBox law applied to columns): the column's left edge `x` and
+ * `width`, both CONTENT-BOX-relative — the shell adds contentBox.x
+ * exactly as it does for every LineBox.rect. PageGeometry carries one
+ * array per page (its section's grid) so consumers never derive the
+ * geometry; LineBox.column indexes into it.
+ */
+export interface ColumnSlot {
+  x: number
+  width: number
+}
+
+/** Word's default column spacing: 0.5" at 96dpi. */
+export const DEFAULT_COLUMN_GAP = 48
 
 export interface SectionBoundary {
   /**
@@ -810,6 +875,15 @@ export interface PageGeometry {
    * documents (no sections option) are all 0.
    */
   sectionIndex: number
+  /**
+   * #74 COLUMNS — the page's column grid (its section's resolved
+   * slots, frozen). Present IFF the section carries MORE THAN ONE
+   * column (the additive law: single-column pages omit the field —
+   * existing snapshots are pinned on it). LineBox.column indexes
+   * into this array; consumers (ruler, hit-test, canvas grouping)
+   * read the facts, never re-derive.
+   */
+  columns?: ColumnSlot[]
 }
 
 export interface LineBox {
@@ -862,6 +936,17 @@ export interface LineBox {
    * contiguity assert, line counting) must skip them.
    */
   band?: 'header' | 'footer'
+  /**
+   * #74 COLUMNS: present IFF this line's page's section carries more
+   * than one column — the 0-based column index this line flows in
+   * (an index into PageGeometry.columns). rect.x is COLUMN-offset
+   * (colLeft + indent already folded in by the engine), so every
+   * rect-consuming consumer is column-blind; only lane-bounded
+   * consumers (hit-test, selection stripe clamps, canvas grouping)
+   * read this. Absent on single-column docs (the additive law) and
+   * on band lines (margins never flow).
+   */
+  column?: number
 }
 
 export interface FragmentBreak {
@@ -869,12 +954,16 @@ export interface FragmentBreak {
   /**
    * Edit survival: a positional line ordinal, recomputed on every layout.
    * Pin: emitted ONLY when a block splits mid-block. atLine = the
-   * lineIndex of the block's first line on pageIndex (the line that
-   * begins the new page); atLine >= 1 always. A block pushed wholly to
-   * a new page emits NO FragmentBreak.
+   * lineIndex of the block's first line in the NEW FLOW SLOT (the line
+   * that begins it); atLine >= 1 always. #74 COLUMNS: a slot may be a
+   * COLUMN of the same pageIndex (a column continuation — the walk
+   * fills column 0, then column 1, before wrapping the page), so
+   * "the line that begins the new page" reads "the new slot" now; a
+   * block pushed wholly to a new slot by a START move emits NO
+   * FragmentBreak.
    */
   atLine: number
-  /** Index of the page the continuation begins on. */
+  /** Index of the PAGE the continuation begins on (a column continuation keeps the page). */
   pageIndex: number
 }
 
