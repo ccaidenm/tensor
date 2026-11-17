@@ -57,7 +57,7 @@ import { getScrollParent } from '@/lib/editor/domUtils';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
 import { useEditorState } from '@tiptap/react';
-import { toLayoutOptions } from '@/lib/document/pageSetup';
+import { toLayoutOptions, type WatermarkSettings } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
 import { selectionInBand } from '@/lib/editor/headerFooterCommands';
 import { HeaderFooterSlots } from './paginated/HeaderFooterSlots';
@@ -71,6 +71,7 @@ import { pageIndexAtY, pageTops, stackSize } from '@/lib/paginated/pageStack';
 import { enableRegion, findBandContainer, type BandWhich } from '@/lib/editor/headerFooterCommands';
 import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import { PageSheet } from './paginated/PageSheet';
+import { WatermarkLayer } from './paginated/WatermarkLayer';
 import { BlockCanvas } from './paginated/BlockCanvas';
 import { LineNumberGutter } from './paginated/LineNumberGutter';
 import { ImageLayer } from './paginated/ImageLayer';
@@ -324,6 +325,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // granular show/hide; the ribbon button toggles both).
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
+  // #WATERMARK — the display toggle (the captions NPC precedent):
+  // INK-ONLY — a hidden watermark gives back no space and triggers no
+  // relayout (unlike showHeadersFooters below, which rides layout).
+  const showWatermark = useConfigStore((s) => s.config.editor.showWatermark);
   // M-HEADER-FOOTER-2: the band display toggle (rides the layout —
   // a hidden band gives back its reservation; see relayout).
   const showHeadersFooters = useConfigStore((s) => s.config.editor.showHeadersFooters);
@@ -2035,6 +2040,23 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     sectionColors[sectionIndex] ??
     (pageSetup.pageColor || undefined);
 
+  // #WATERMARK — the per-section → doc chain (the pageColor twin, no
+  // positional layer — watermarks are section/doc-level by the AC).
+  // Each break's setup carries its section's watermark wholesale
+  // (PageSetup-riding); UNSET inherits the doc default (the store's).
+  // Print/PDF honor the SAME chain (buildDocument resolves it per
+  // printed page).
+  const sectionWatermarks: (WatermarkSettings | undefined)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const wm = (node.attrs.setup as { watermark?: WatermarkSettings | null } | undefined)
+        ?.watermark;
+      sectionWatermarks.push(wm ?? undefined);
+    }
+  });
+  const watermarkForPage = (sectionIndex: number): WatermarkSettings | null | undefined =>
+    sectionWatermarks[sectionIndex] ?? pageSetup.watermark ?? undefined;
+
   // Fallback: the strict-adapter throw surfaces as a pageless render of
   // the SAME EditorContent — never a crash. The input-view container
   // flips from hidden-input to visible pageless in place.
@@ -2202,6 +2224,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 observeRef={observeSheet}
                 background={backgroundForPage(page.index, page.sectionIndex)}
               >
+                {/* #WATERMARK — FIRST child of the sheet: behind all
+                    content by mount order (above the sheet's own
+                    background, below behind-floats and the text
+                    canvases). Paint-only ink: the toggle hides
+                    without a relayout; pointer-events never see it. */}
+                {showWatermark &&
+                  (visiblePages === null || visiblePages.has(page.index)) && (
+                    <WatermarkLayer
+                      geometry={page}
+                      watermark={watermarkForPage(page.sectionIndex)}
+                      metrics={metricsRef.current!}
+                      baseFontFamily={defaultFontFamily}
+                    />
+                  )}
                 {/* M-IMAGES-2 PAINT ORDER: 'behind' floats mount (and
                     paint) BEFORE the text tracks; 'front' + in-flow
                     mount AFTER (z is PAINT ORDER — the engine's

@@ -29,9 +29,10 @@ import {
   VerticalMergeType,
   WidthType,
 } from 'docx';
+import { TextWatermark, ImageWatermark } from 'docx/watermarks';
 import { Math as DocxMath, latexToMath } from 'docx/math';
 import type { DocxCoreProperties } from '@/lib/document/coreProperties';
-import { PAGE_SIZES, type PageSetup } from '@/lib/document/pageSetup';
+import { PAGE_SIZES, type PageSetup, type WatermarkSettings } from '@/lib/document/pageSetup';
 import type { HeaderFooterSettings } from '@/lib/document/headerFooter';
 import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
@@ -160,6 +161,8 @@ export function docxReportLines(report: DocxExportReport): string[] {
 interface WalkState {
   report: DocxExportReport;
   media: Map<string, DocxExportMedia>;
+  /** #WATERMARK — the doc-default family (the text watermark's font). */
+  baseFontFamily: string;
   defs: Map<string, StyleDefinition>;
   /** Per-reference instance counters — each top-level list restarts. */
   instances: { next: (reference: string) => number };
@@ -847,6 +850,13 @@ interface Bands {
 
 // ─── #58 SECTIONS — the multi-section split ──────────────────────────────
 
+/**
+ * #WATERMARK — the section's effective watermark setting, resolved at
+ * split time: the break's setup (the section it ends), else the
+ * store's doc default. The RESOLVED spec arrives later (exportPdf's
+ * anchor math has no place here — Word's own watermark is native
+ * VML; we only MAP the settings).
+ */
 interface SectionChunk {
   /** The section's OWN page setup (break attrs; null = the final
    *  section — the store's pageSetup governs it). */
@@ -857,6 +867,9 @@ interface SectionChunk {
   startType: 'nextPage' | 'continuous';
   /** The section's TAGGED band containers (its overrides). */
   bands: Bands;
+  /** #WATERMARK — the section's effective watermark (its break's,
+   *  else the doc default); null = none. */
+  watermark: WatermarkSettings | null;
   /** The body content between this section's start and its break. */
   children: JSONContent[];
 }
@@ -869,16 +882,23 @@ const EMPTY_BANDS = (): Bands => ({ headerDefault: [], headerFirst: [], footerDe
  *  (the store's). Band containers route OUT of the chunks: untagged →
  *  the doc default; tagged → their section's overrides — resolved in
  *  a SECOND pass (containers may precede their break in doc order). */
-function splitSections(nodes: JSONContent[]): {
+function splitSections(
+  nodes: JSONContent[],
+  docWatermark: WatermarkSettings | null | undefined,
+): {
   chunks: SectionChunk[];
   docDefault: Bands;
   anyBands: boolean;
+  anyWatermark: boolean;
 } {
-  const chunks: SectionChunk[] = [{ setup: null, startType: 'nextPage', bands: EMPTY_BANDS(), children: [] }];
+  const chunks: SectionChunk[] = [{ setup: null, startType: 'nextPage', bands: EMPTY_BANDS(), children: [], watermark: null }];
   const docDefault: Bands = EMPTY_BANDS();
   const bandIndex = new Map<string, Bands>(); // sectionId → tagged bands
   const breakTags: (string | null)[] = [];
   let anyBands = false;
+  // #WATERMARK — each break's watermark (the section it ENDS); the
+  // final chunk inherits the doc default below.
+  const breakWatermarks: (WatermarkSettings | null | undefined)[] = [];
 
   for (const node of nodes) {
     if (node.type === 'headerBlock' || node.type === 'footerBlock') {
@@ -899,8 +919,9 @@ function splitSections(nodes: JSONContent[]): {
     }
     if (node.type === 'sectionBreak') {
       const tag = (node.attrs as { sectionId?: string } | null)?.sectionId ?? null;
-      chunks[chunks.length - 1]!.setup =
-        (node.attrs as { setup?: PageSetup } | null)?.setup ?? null;
+      const breakSetup = (node.attrs as { setup?: PageSetup } | null)?.setup ?? null;
+      chunks[chunks.length - 1]!.setup = breakSetup;
+      breakWatermarks.push(breakSetup?.watermark ?? undefined);
       // The break's `type` = how the FOLLOWING section starts — it
       // rides the NEXT chunk's sectPr (Word's spelling).
       chunks.push({
@@ -910,6 +931,7 @@ function splitSections(nodes: JSONContent[]): {
           : 'nextPage',
         bands: EMPTY_BANDS(),
         children: [],
+        watermark: null,
       });
       breakTags.push(tag);
       continue;
@@ -923,7 +945,66 @@ function splitSections(nodes: JSONContent[]): {
     chunks[ordinal]!.bands = (tag && bandIndex.get(tag)) || EMPTY_BANDS();
   });
   chunks[chunks.length - 1]!.bands = bandIndex.get(FINAL_SECTION_ID) ?? EMPTY_BANDS();
-  return { chunks, docDefault, anyBands };
+  // #WATERMARK — each chunk's EFFECTIVE setting: its break's, else the
+  // doc default (the final chunk = the doc default by construction).
+  const anyWatermark = breakWatermarks.some((wm) => wm != null) || docWatermark != null;
+  chunks.forEach((chunk, i) => {
+    chunk.watermark = i < breakWatermarks.length ? (breakWatermarks[i] ?? null) : null;
+    if (chunk.watermark == null) chunk.watermark = docWatermark ?? null;
+  });
+  return { chunks, docDefault, anyBands, anyWatermark };
+}
+
+/**
+ * #WATERMARK — the section's watermark as Word spells it: a Run
+ * inside a Paragraph inside the section's HEADER (the lib's
+ * first-party watermarks emit Word's native VML WordArt — the
+ * `PowerPlusWaterMarkObject` shape id Word's own remove/replace
+ * command searches for). Word has no per-section watermark UI, but
+ * its per-section headers ARE the mechanism — each section's header
+ * carries that section's watermark, exactly our per-section model.
+ */
+function watermarkParagraph(wm: WatermarkSettings | null, state: WalkState): Paragraph | null {
+  if (!wm) return null;
+  if (wm.kind === 'text') {
+    const text = (wm.text ?? '').trim();
+    if (!text) return null;
+    return new Paragraph({
+      children: [
+        new TextWatermark({
+          text,
+          font: state.baseFontFamily,
+          // px → pt at the 96dpi boundary; ABSENT = AUTO (Word
+          // stretches to fill — our auto-size look's own spelling).
+          ...(typeof wm.fontSize === 'number' && wm.fontSize > 0
+            ? { fontSize: wm.fontSize * 0.75 }
+            : {}),
+          color: wm.color ?? '#c0c0c0',
+          opacity: wm.opacity ?? 0.5,
+          // CSS sign → Word's clockwise degrees (identical numbers:
+          // CSS rotate(-45deg) = 45° CCW = Word rotation -45 CW).
+          rotation: wm.rotation ?? -45,
+        }),
+      ],
+    });
+  }
+  const sha = wm.src?.startsWith('media://') ? wm.src.slice('media://'.length) : '';
+  const media = sha ? state.media.get(sha) : undefined;
+  if (!media) return null; // unresolvable ref: skip (counted below)
+  const width = typeof wm.width === 'number' ? wm.width : 0;
+  const height = typeof wm.height === 'number' ? wm.height : 0;
+  if (width <= 0 || height <= 0) return null;
+  const type = media.ext === 'jpg' || media.ext === 'jpeg' ? 'jpg' : media.ext === 'png' ? 'png' : null;
+  if (!type) return null;
+  return new Paragraph({
+    children: [
+      new ImageWatermark({
+        type,
+        data: media.bytes,
+        transformation: { width, height },
+      }),
+    ],
+  });
 }
 
 function bandToPart(children: JSONContent[], kind: 'header' | 'footer', state: WalkState): Header | Footer | undefined {
@@ -1059,6 +1140,7 @@ function pageDims(pageSetup: PageSetup): { width: number; height: number; orient
 
 export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8Array; report: DocxExportReport }> {
   const state: WalkState = {
+    baseFontFamily: input.baseStyle.fontFamily,
     report: { equationsAsText: 0, missingImages: 0, unsupportedImages: 0, unknownListStyles: 0, unknownNodes: {} },
     media: input.media,
     defs: new Map(input.styleDefinitions.map((d) => [d.id, d])),
@@ -1078,7 +1160,14 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
   // A doc with NO band content at all exports header-free (today's
   // shape). The first-class parts ride SECTION 0 only (the doc's page
   // 0 is its first page — the differentFirstPage model).
-  const { chunks, docDefault, anyBands } = splitSections(input.json.content ?? []);
+  // #WATERMARK — the doc default (the FINAL section's) rides the
+  // split; per-section watermarks live on the breaks' setups. The
+  // per-chunk resolution happens in the split; the assembly reads
+  // chunk.watermark directly.
+  const { chunks, docDefault, anyBands } = splitSections(
+    input.json.content ?? [],
+    input.pageSetup.watermark,
+  );
   const differentFirst = input.headerFooter?.differentFirstPage === true;
 
   const sectionProps = (setup: PageSetup): {
@@ -1102,14 +1191,38 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     };
     const headers: Record<string, Header | Footer> = {};
     const footers: Record<string, Header | Footer> = {};
-    if (anyBands) {
-      headers.default = build('header', 'Default');
-      footers.default = build('footer', 'Default');
-      // The first class: SECTION 0 alone (the doc's page 0), under the
-      // doc-level differentFirstPage flag.
-      if (isSection0 && differentFirst) {
-        headers.first = build('header', 'First');
-        footers.first = build('footer', 'First');
+    // #WATERMARK — the section's own watermark paragraph: Word's
+    // native spelling rides the section's header (the VML shape
+    // lives in a header part). Band content FIRST, the watermark
+    // LAST (the watermark is position-independent VML — order within
+    // the header is cosmetic).
+    const wmRun = watermarkParagraph(chunk.watermark, state);
+    if (anyBands || wmRun) {
+      if (anyBands) {
+        headers.default = build('header', 'Default');
+        footers.default = build('footer', 'Default');
+        // The first class: SECTION 0 alone (the doc's page 0), under the
+        // doc-level differentFirstPage flag.
+        if (isSection0 && differentFirst) {
+          headers.first = build('header', 'First');
+          footers.first = build('footer', 'First');
+        }
+      } else {
+        // A watermark-only doc still emits its header part (the
+        // watermark LIVES there; without a part Word shows nothing —
+        // the export used to go header-free when no band content).
+        headers.default = new Header({ children: [] });
+      }
+      if (wmRun) {
+        // Merge into the DEFAULT header, and the FIRST part when it
+        // exists (a differentFirstPage doc's page 0 covers the FIRST
+        // part — without the merge page 0 would go bare).
+        const merge = (existing: Header | Footer | undefined): Header =>
+          existing instanceof Header
+            ? new Header({ children: [...existing.options.children, wmRun] })
+            : new Header({ children: [wmRun] });
+        headers.default = merge(headers.default);
+        if (headers.first) headers.first = merge(headers.first);
       }
     }
     return {

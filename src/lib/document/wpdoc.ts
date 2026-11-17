@@ -119,7 +119,12 @@ export function collectReferencedMediaIds(value: unknown, into: Set<string> = ne
 
 /** The v2 save path: document JSON + REFERENCED media only. */
 export async function saveWpdoc(path: string, file: DocumentFile): Promise<void> {
-  const referenced = collectReferencedMediaIds(file.docJSON);
+  // #WATERMARK — walk the WHOLE file, not just docJSON: a doc-level
+  // watermark's image ref lives in metadata.pageSetup (per-section
+  // refs ride sectionBreak attrs inside docJSON and were always
+  // safe); the walker handles arbitrary shapes and skips non-media
+  // strings, so the whole-file walk only ever ADDS refs.
+  const referenced = collectReferencedMediaIds(file);
   const entries = useMediaStore.getState().entries;
   const media: WireMediaFile[] = [...entries]
     .filter(([id]) => referenced.has(id))

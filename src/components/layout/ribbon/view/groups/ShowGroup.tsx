@@ -16,6 +16,9 @@ export function ShowGroup() {
   // regardless). Pages mode only (no page geometry to band otherwise).
   const showHeadersFooters = useConfigStore((s) => s.config.editor.showHeadersFooters);
   const setShowHeadersFooters = useConfigStore((s) => s.setShowHeadersFooters);
+  // #WATERMARK: the display toggle (the captions NPC precedent).
+  const showWatermark = useConfigStore((s) => s.config.editor.showWatermark);
+  const setShowWatermark = useConfigStore((s) => s.setShowWatermark);
   // M-RULER: the ruler is a PAGINATED-mode surface (it rules real page
   // geometry) — like the page-setup controls, it disables (never
   // disappears) in pageless mode. The single button toggles BOTH bars
@@ -54,11 +57,15 @@ export function ShowGroup() {
         onClick={() => setShowHeadersFooters(!showHeadersFooters)}
         disabled={isPageless}
       />
+      {/* #WATERMARK — the display toggle (the captions NPC precedent):
+          view-only ink; the document's watermark setting never moves.
+          Pages mode only — pageless has no sheets to paint. */}
       <IconButton
-        label="Show Watermark"
+        label="Show Watermarks"
         icon={<Droplet size={16} />}
-        onClick={() => {}}
-        disabled
+        active={showWatermark}
+        onClick={() => setShowWatermark(!showWatermark)}
+        disabled={isPageless}
       />
       <IconButton
         label="Show Footnotes & Endnotes"

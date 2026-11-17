@@ -24,6 +24,7 @@ interface ConfigStore {
   setShowBreakMarks: (value: boolean) => void;
   setShowCaptions: (value: boolean) => void;
   setShowHeadersFooters: (value: boolean) => void;
+  setShowWatermark: (value: boolean) => void;
   setShowHorizontalRuler: (value: boolean) => void;
   setShowVerticalRuler: (value: boolean) => void;
   setBothRulers: (value: boolean) => void;
@@ -208,6 +209,16 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         editor: { ...state.config.editor, showHeadersFooters: value },
+      },
+    })),
+
+  // #WATERMARK: the display toggle (the captions NPC precedent —
+  // view-only; the document's watermark setting never moves).
+  setShowWatermark: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, showWatermark: value },
       },
     })),
 

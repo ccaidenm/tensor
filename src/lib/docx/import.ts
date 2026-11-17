@@ -134,6 +134,8 @@ export interface DocxImportReport {
    *  no v1 model; the doc flag governs page 0 = section 0's first). */
   perSectionFirstPage: number;
   textboxes: number;
+  /** #WATERMARK — Word-native watermark VML detected (not imported). */
+  watermarks: number;
   footnotes: number;
   unknownNodes: number;
   unknownNumbering: number;
@@ -144,7 +146,7 @@ function emptyReport(): DocxImportReport {
     trackedChanges: 0, comments: 0, tocFields: 0, pageFields: 0, otherFields: 0,
     inlineEquations: 0, degradedEquations: 0, refusedImages: 0, wrapAroundFloats: 0,
     vertAligns: 0, evenOddHeaders: 0, internalLinks: 0, sectionBreaks: 0, perSectionFirstPage: 0,
-    textboxes: 0, footnotes: 0, unknownNodes: 0, unknownNumbering: 0,
+    textboxes: 0, watermarks: 0, footnotes: 0, unknownNodes: 0, unknownNumbering: 0,
   };
 }
 
@@ -182,6 +184,10 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
     lines.push(`Sub/superscripts dropped (${report.vertAligns}) — the feature lands in a later update`);
   }
   if (report.textboxes > 0) lines.push(`Text boxes/shapes skipped (${report.textboxes})`);
+  // #WATERMARK — the known-gap spelling (the convention's law).
+  if (report.watermarks > 0) {
+    lines.push(`Watermark skipped (${report.watermarks}) — watermark import lands in a later update`);
+  }
   if (report.evenOddHeaders > 0) {
     lines.push(`Even-page headers/footers collapsed (${report.evenOddHeaders})`);
   }
@@ -658,10 +664,18 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
         ctx.report.footnotes += 1;
         break;
       case 'pict':
-      case 'object':
+      case 'object': {
         flushText();
-        ctx.report.textboxes += 1;
+        // #WATERMARK — Word's native watermarks are VML WordArt picts
+        // whose shape id starts with 'PowerPlusWaterMarkObject' (the
+        // token Word's own remove command greps for). Detect them and
+        // count SEPARATELY: the notice names the real loss ("watermark
+        // import lands later"), not a generic shape skip.
+        const isWatermark = JSON.stringify(kid).includes('PowerPlusWaterMarkObject');
+        if (isWatermark) ctx.report.watermarks += 1;
+        else ctx.report.textboxes += 1;
         break;
+      }
       case 'fldChar': {
         // THE FIELD MACHINE (spans paragraphs via ctx): begin pushes an
         // instr accumulator; separate counts the field's kind; end pops.
@@ -867,6 +881,24 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
   let contentAtLastBreak = -1;
   for (const kid of p.kids) {
     switch (kid.tag) {
+      case 'pict':
+      case 'object': {
+        // #WATERMARK — Word's native watermarks are VML WordArt picts
+        // whose shape id contains 'PowerPlusWaterMarkObject' (the
+        // token Word's own remove command greps for). A pict sits
+        // BOTH as a run's kid (below, mapRunChildren) and as a DIRECT
+        // paragraph child (Word's watermark spelling — no run
+        // wrapper); this arm owns the paragraph-level spelling.
+        // Detection: the shape id rides the :@ attr bag, which
+        // stringify includes; a v:textpath string is the second token.
+        const dump = JSON.stringify(kid);
+        if (dump.includes('PowerPlusWaterMarkObject')) {
+          ctx.report.watermarks += 1;
+        } else {
+          ctx.report.textboxes += 1;
+        }
+        break;
+      }
       case 'r': {
         const format = runFormatFromRPr(oSub(kid, 'rPr'), ctx);
         const mapped = mapRunChildren(kid, format, ctx, rels);

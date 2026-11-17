@@ -34,6 +34,12 @@ export const ConfigSchema = z.object({
      *  untouched and saves round-trip regardless). Default: bands
      *  visible, matching Word/GDocs. Pages mode only. */
     showHeadersFooters: z.boolean().default(true),
+    /** #WATERMARK — the watermark DISPLAY toggle (the captions NPC
+     *  precedent — presentation-only ink; the document's watermark
+     *  setting is untouched and saves round-trip regardless; this is
+     *  the VIEW's "am I showing watermarks today" switch, Word's own
+     *  view-level affordance). Default: visible. Pages mode only. */
+    showWatermark: z.boolean().default(true),
     /** #58 — the BREAK MARKS toggle (distinct from the character-level
      *  NPCs): the page/section-break badges in the paginated view —
      *  STRUCTURAL ink (a section boundary is meaningful, unlike a
@@ -70,6 +76,7 @@ export const ConfigSchema = z.object({
     showBreakMarks: true,
     showCaptions: true,
     showHeadersFooters: true,
+    showWatermark: true,
     showHorizontalRuler: true,
     showVerticalRuler: true,
     zoomLevel: 100,

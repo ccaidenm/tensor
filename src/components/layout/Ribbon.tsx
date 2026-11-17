@@ -20,6 +20,7 @@ import { StylesGroup } from "./ribbon/home/groups/StylesGroup";
 import { ActionsGroup } from "./ribbon/home/groups/ActionsGroup";
 import { PagesGroup } from "./ribbon/insert/groups/PagesGroup";
 import { IllustrationsGroup } from "./ribbon/insert/groups/IllustrationsGroup";
+import { WatermarkGroup } from "./ribbon/insert/groups/WatermarkGroup";
 import { ReferenceTablesGroup } from "./ribbon/insert/groups/ReferenceTablesGroup";
 import { TextGroup } from "./ribbon/insert/groups/TextGroup";
 import { PageSetupGroup } from "./ribbon/layout/groups/PageSetupGroup";
@@ -180,6 +181,7 @@ export function Ribbon() {
           <div className="flex h-full items-center">
             <PagesGroup />
             <IllustrationsGroup editor={editor} />
+            <WatermarkGroup />
             <ReferenceTablesGroup editor={editor} />
             <BreaksGroup editor={editor} />
             <TextGroup editor={editor} />

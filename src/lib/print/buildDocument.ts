@@ -10,6 +10,8 @@ import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { toLayoutOptions } from '@/lib/document/pageSetup';
 import { getBitmap } from '@/lib/media/bitmapCache';
+import { resolveWatermark } from '@/lib/paginated/watermark';
+import type { WatermarkSettings } from '@/lib/document/pageSetup';
 import { renderPrintDocument } from './render';
 import type { PrintPage } from './types';
 
@@ -109,6 +111,45 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
     const background =
       doc.pageStyles[page.index]?.background ?? sectionColors[sectionIndex] ?? docPageColor;
     if (background) page.background = background;
+  });
+
+  // #WATERMARK — the same chain, one resolution per printed page:
+  // section override → doc default (the on-screen watermarkForPage's
+  // twin). resolveWatermark is the ONE derivation (font/size/rotation/
+  // opacity all resolved HERE — the consumers never re-derive); the
+  // image spelling carries the dual handle (src = the bitmap URL the
+  // view paints, sha = the bytes key the PDF embeds).
+  const sectionWatermarks: (WatermarkSettings | undefined)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const wm = (node.attrs.setup as { watermark?: WatermarkSettings | null } | undefined)
+        ?.watermark;
+      sectionWatermarks.push(wm ?? undefined);
+    }
+  });
+  pages.forEach((page, i) => {
+    const sectionIndex = layout.pages[i]?.sectionIndex ?? 0;
+    const wm = sectionWatermarks[sectionIndex] ?? doc.pageSetup.watermark;
+    if (!wm) return;
+    const spec = resolveWatermark(
+      wm,
+      { width: page.width, height: page.height },
+      metrics.measure,
+      baseStyle.fontFamily,
+    );
+    if (!spec) return;
+    page.watermark =
+      spec.kind === 'text'
+        ? spec
+        : {
+            kind: 'image',
+            sha: spec.src.slice('media://'.length),
+            src: getBitmap(spec.src.slice('media://'.length))?.src ?? '',
+            width: spec.width,
+            height: spec.height,
+            rotation: spec.rotation,
+            opacity: spec.opacity,
+          };
   });
 
   return { pages, layout, blocks: adapted.blocks, total };

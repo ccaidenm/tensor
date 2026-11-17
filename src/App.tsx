@@ -4,6 +4,7 @@ import { SearchPanel } from './components/editor/SearchPanel';
 import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
 import { AccessibilityCheckPanel } from './components/editor/AccessibilityCheckPanel';
+import { WatermarkPanel } from './components/editor/WatermarkPanel';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
 import { PageSetupDialog } from './components/dialogs/PageSetupDialog';
@@ -187,6 +188,12 @@ function App() {
               twin; scan runs live while open, never in the background). */}
           <SidebarHost id="accessibilityCheck" anchor="right">
             <AccessibilityCheckPanel />
+          </SidebarHost>
+          {/* #WATERMARK — the watermark panel: the decorative overlay's
+              LIVE editor (paint-only commits — the page behind the open
+              panel is the preview). */}
+          <SidebarHost id="watermark" anchor="right">
+            <WatermarkPanel />
           </SidebarHost>
         </div>
         <StatusBar />

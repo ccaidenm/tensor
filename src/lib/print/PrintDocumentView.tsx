@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { parseEquation, renderEquation } from '@/lib/equations/render';
-import type { PrintElement, PrintPage } from './types';
+import type { PrintElement, PrintPage, PrintWatermark } from './types';
 
 /**
  * M-PRINT (#43) — THE PRINT DOCUMENT VIEW: one component renders the
@@ -17,6 +17,48 @@ import type { PrintElement, PrintPage } from './types';
 
 function elementKey(el: PrintElement, i: number): string {
   return `${el.kind}-${i}-${'text' in el ? el.x : 0}-${'top' in el ? el.top : 0}`;
+}
+
+/**
+ * #WATERMARK — the page's overlay, painted BEFORE the elements (the
+ * mount order = the paint order law). Centered, rotated,
+ * translucent — the same transform math as the on-screen
+ * WatermarkLayer; resolveWatermark resolved everything at build
+ * time, this only positions.
+ */
+function PrintWatermarkView({ wm }: { wm: PrintWatermark }) {
+  const centered: React.CSSProperties = {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    transform: `translate(-50%, -50%) rotate(${wm.rotation}deg)`,
+    opacity: wm.opacity,
+  };
+  if (wm.kind === 'text') {
+    return (
+      <div
+        data-testid="print-watermark"
+        style={{
+          ...centered,
+          fontFamily: wm.fontFamily,
+          fontSize: `${wm.fontSize}px`,
+          fontWeight: 'bold',
+          color: wm.color,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {wm.text}
+      </div>
+    );
+  }
+  return (
+    <img
+      data-testid="print-watermark"
+      src={wm.src}
+      alt=""
+      style={{ ...centered, width: `${wm.width}px`, height: `${wm.height}px` }}
+    />
+  );
 }
 
 function PrintElementView({ el }: { el: PrintElement }) {
@@ -187,6 +229,7 @@ export const PrintDocumentView = memo(function PrintDocumentView({
               flex: 'none',
             }}
           >
+            {page.watermark && <PrintWatermarkView wm={page.watermark} />}
             {page.elements.map((el, i) => (
               <PrintElementView key={elementKey(el, i)} el={el} />
             ))}

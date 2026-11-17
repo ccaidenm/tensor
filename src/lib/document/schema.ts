@@ -21,6 +21,22 @@ const PageSetupSchema = z.object({
   customHeight: z.number().optional(),
   /** M-FLOW — the document-level widow/orphan default; absent = ON. */
   widowControl: z.boolean().optional(),
+  /** #WATERMARK — the decorative page overlay; absent/null = none. */
+  watermark: z
+    .object({
+      kind: z.enum(['text', 'image']),
+      text: z.string().optional(),
+      fontSize: z.number().positive().optional(),
+      color: z.string().optional(),
+      rotation: z.number().optional(),
+      opacity: z.number().min(0).max(1).optional(),
+      src: z.string().optional(),
+      width: z.number().positive().optional(),
+      height: z.number().positive().optional(),
+      scale: z.number().positive().optional(),
+    })
+    .nullable()
+    .optional(),
 }) satisfies z.ZodType<PageSetup>;
 
 /**
