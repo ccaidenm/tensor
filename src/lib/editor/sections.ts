@@ -270,7 +270,14 @@ export function applyPageSetup(
       for (const pos of breakPositions(editor)) {
         const node = editor.state.doc.nodeAt(pos);
         if (!node) continue;
-        const merged = { ...(node.attrs.setup as PageSetup | undefined), ...partial };
+        // #WATERMARK — a break with NO setup inherits the doc defaults
+        // (the two-level model); a PARTIAL merge onto that null base
+        // would mint a margins-less setup (the adapter's section
+        // geometry reads margins and THROWS). Seed from the store's
+        // effective setup when the break carries none — a partial
+        // can never strip a required field this way.
+        const base = (node.attrs.setup as PageSetup | undefined) ?? store.pageSetup;
+        const merged = { ...base, ...partial };
         tr.setNodeMarkup(pos, undefined, { ...node.attrs, setup: merged });
       }
       editor.view.dispatch(tr);

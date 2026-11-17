@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { act, fireEvent, render } from '@testing-library/react';
 
 
 
@@ -20,6 +20,10 @@ import {
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
 import { useMediaStore } from '@/lib/media/store';
+import { useSidebarStore } from '@/lib/layout/sidebarStore';
+import { SidebarHost } from '@/lib/layout/sidebar/SidebarHost';
+import { WatermarkPanel } from '@/components/editor/WatermarkPanel';
+import { getCommand } from '@/lib/commands/registry';
 
 import { renderTensor, settleLayout } from './harness';
 import { FakeMetrics } from './fakeMetrics';
@@ -260,5 +264,194 @@ describe('#WATERMARK: the on-screen layer', () => {
       useConfigStore.getState().setShowWatermark(true);
     });
     expect(layers()).toHaveLength(1);
+  });
+});
+
+// ─── The panel (M2) ──────────────────────────────────────────────────────
+
+vi.mock('@/lib/media/insert', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/media/insert')>();
+  return {
+    ...actual,
+    registerImageFromPicker: vi.fn(async () => {
+      // The jsdom stand-in for the OS picker: register + return (the
+      // image infra's own contract, no node insert).
+      useMediaStore.getState().add('panel-img', 'png', new Uint8Array([2]));
+      return { src: 'media://panel-img', width: 300, height: 100 };
+    }),
+  };
+});
+
+describe('#WATERMARK: the panel', () => {
+  beforeEach(() => {
+    useSidebarStore.getState().close();
+    // The document store is file-global — reset to a clean baseline
+    // (the earlier suites' watermarks must not leak in).
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+      watermark: null,
+    });
+  });
+
+  function mountPanel() {
+    render(
+      <div className="relative">
+        <SidebarHost id="watermark" anchor="right">
+          <WatermarkPanel />
+        </SidebarHost>
+      </div>,
+    );
+    act(() => {
+      void getCommand('watermarkPanel')?.run();
+    });
+    expect(useSidebarStore.getState().active?.id).toBe('watermark');
+  }
+
+  it('the command opens the panel; the Text tab LIVE-writes the default DRAFT', async () => {
+    renderTensor('<p>body</p>');
+    await settleLayout();
+    mountPanel();
+    expect(useDocumentStore.getState().pageSetup.watermark).toBeNull();
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-text"]')!);
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toEqual({ kind: 'text', text: 'DRAFT' });
+    // Live: the layer paints behind the open panel.
+    await settleLayout();
+    expect(document.querySelectorAll('[data-testid="watermark-layer"]')).toHaveLength(1);
+  });
+
+  it('preset chips + the text input + rotation commit immediately (each one undo step)', async () => {
+    const { editor } = renderTensor('<p>body</p>');
+    await settleLayout();
+    mountPanel();
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-text"]')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-preset-confidential"]')!);
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({
+      kind: 'text',
+      text: 'CONFIDENTIAL',
+    });
+    // The rotation knob (an explicit commit → co-undo entry).
+    const rotation = document.querySelector('input[aria-label="Watermark rotation"]') as HTMLInputElement;
+    act(() => {
+      fireEvent.change(rotation, { target: { value: '-90' } });
+    });
+    act(() => {
+      fireEvent.keyDown(rotation, { key: 'Enter' });
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({ rotation: -90 });
+    // ONE Ctrl+Z reverts the rotation (the store-only co-undo path —
+    // the #48 synthetic machinery carries watermark writes too).
+    act(() => {
+      editor.commands.undo();
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({
+      kind: 'text',
+      text: 'CONFIDENTIAL',
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).not.toHaveProperty('rotation');
+    void editor;
+  });
+
+  it('the text input accepts CUSTOM typing (the controlled-value law: the draft leads, commit on blur/Enter)', async () => {
+    renderTensor('<p>body</p>');
+    await settleLayout();
+    mountPanel();
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-text"]')!);
+    });
+    // The tab commit seeded DRAFT — the field shows it.
+    const input = document.querySelector('[data-testid="watermark-text-input"]') as HTMLInputElement;
+    expect(input.value).toBe('DRAFT');
+    // Typing REPLACES it live (the store must not freeze the field).
+    act(() => {
+      input.focus();
+      fireEvent.change(input, { target: { value: 'DO NOT SHIP' } });
+    });
+    expect((document.querySelector('[data-testid="watermark-text-input"]') as HTMLInputElement).value).toBe('DO NOT SHIP');
+    // Nothing commits mid-typing...
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({ text: 'DRAFT' });
+    // ...the blur commits the draft.
+    act(() => {
+      fireEvent.blur(input);
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({ text: 'DO NOT SHIP' });
+    // And the field re-shows the STORE value (the draft cleared).
+    expect((document.querySelector('[data-testid="watermark-text-input"]') as HTMLInputElement).value).toBe('DO NOT SHIP');
+    await settleLayout();
+    expect(
+      (document.querySelector('[data-testid="watermark-layer"] div') as HTMLElement).textContent,
+    ).toBe('DO NOT SHIP');
+  });
+
+  it('the None tab clears; the Image tab registers + sets an image watermark', async () => {
+    renderTensor('<p>body</p>');
+    await settleLayout();
+    mountPanel();
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-text"]')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-none"]')!);
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toBeNull();
+
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-image"]')!);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({
+      kind: 'image',
+      src: 'media://panel-img',
+      width: 300,
+      height: 100,
+    });
+    await settleLayout();
+    const img = document.querySelector('[data-testid="watermark-layer"] img') as HTMLImageElement;
+    expect(img).not.toBeNull();
+  });
+
+  it('the SECTION scope writes the caret\'s section\'s holder (the break\'s setup)', async () => {
+    const longText = '<p>' + 'word '.repeat(700) + '</p>';
+    const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
+    await settleLayout();
+    mountPanel();
+    // Park the caret in the FIRST section (TipTap's initial caret sits
+    // at the doc END — the final section, whose holder IS the store).
+    act(() => {
+      editor.commands.setTextSelection(1);
+    });
+    // Doc-wide first (the default scope): every page shows it.
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-tab-text"]')!);
+    });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({ text: 'DRAFT' });
+
+    // This section: the caption names it; the commit lands on the
+    // caret's section's holder (the break's setup), the doc default
+    // stays untouched.
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-scope-section"]')!);
+    });
+    expect(document.body.textContent).toContain('Section 1 of 2');
+    act(() => {
+      fireEvent.click(document.querySelector('[data-testid="watermark-preset-confidential"]')!);
+    });
+    let breakWatermark: unknown;
+    editor.state.doc.forEach((node: PMNode) => {
+      if (node.type.name === 'sectionBreak') {
+        breakWatermark = (node.attrs.setup as { watermark?: unknown }).watermark;
+      }
+    });
+    expect(breakWatermark).toMatchObject({ kind: 'text', text: 'CONFIDENTIAL' });
+    expect(useDocumentStore.getState().pageSetup.watermark).toMatchObject({ text: 'DRAFT' });
   });
 });

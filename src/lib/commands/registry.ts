@@ -48,6 +48,7 @@ import {
   Table,
   TableProperties,
   PersonStanding,
+  Droplet,
   BookmarkMinus,
   BookmarkPlus,
   BookOpen,
@@ -556,6 +557,20 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['accessibility', 'a11y', 'check', 'checker', 'issues', 'alt text', 'headings', 'contrast', 'review'],
     enablement: () => !!doc().editor,
     run: () => useSidebarStore.getState().open('accessibilityCheck', 'right'),
+  },
+  {
+    // #WATERMARK — the watermark panel: the decorative page overlay's
+    // editor (text/image, rotation/opacity, whole document or one
+    // section), docked beside Find/Table/Accessibility. Palette-only —
+    // zero Rust surface (the tableSidebar precedent).
+    id: 'watermarkPanel',
+    title: 'Watermark',
+    icon: Droplet,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['watermark', 'draft', 'confidential', 'background', 'overlay', 'insert'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('watermark', 'right'),
   },
 
   // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
