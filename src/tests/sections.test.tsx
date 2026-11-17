@@ -1360,3 +1360,85 @@ describe('Phase 8 — per-page styles (#48)', () => {
       .toEqual({ 0: { background: '#101010' } });
   });
 });
+
+describe('Phase 8b — the Page Setup dialog\'s "This page" scope (#48)', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({
+      pageSize: 'Letter',
+      orientation: 'portrait',
+      margins: DEFAULT_MARGINS,
+      pageGap: PAGE_GAP,
+    });
+    useDocumentStore.getState().setPageStyles({});
+    useDocumentPropertiesStore.getState().closePageSetup();
+  });
+
+  it('This page: geometry gates, the bucket sets ONE page\'s style end-to-end through the real popover', async () => {
+    const longText = '<p>' + 'word '.repeat(1500) + '</p>';
+    renderTensor(longText);
+    await settleLayout();
+    // The dialog targets the status bar's page fact: page 3 → index 2.
+    // (1500 words ≈ 121 lines ≈ 3 sheets — the target page EXISTS.)
+    act(() => {
+      useDocumentStore.getState().setPageInfo(3, 3);
+    });
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'This page')!);
+    });
+    // The geometry gates: the paper select disabled (a page owns its
+    // background, never its geometry) + the hint line.
+    expect((document.querySelector('button[aria-label="Paper size"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).toContain('paper and margins belong to its section');
+    // The caption names the target page.
+    expect(document.body.textContent).toContain('Page 3');
+    // The bucket: the swatch through the real popover (hex-default
+    // display → the swatch's aria-label IS its hex).
+    act(() => {
+      fireEvent.click(document.querySelector('button[aria-label="Page background options"]')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('[aria-label="#b91c1c"]')!);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({ 2: { background: '#b91c1c' } });
+    await settleLayout();
+    const sheet = document.querySelector('[data-page-index="2"]') as HTMLElement;
+    expect(sheet).not.toBeNull();
+    expect(sheet.style.backgroundColor).toBe('rgb(185, 28, 28)');
+    // The other pages keep the white default — ONE page, not the doc.
+    const other = document.querySelector('[data-page-index="1"]') as HTMLElement;
+    expect(other.style.backgroundColor).toBe('');
+  });
+
+  it('This page reset: "Remove page style" clears the entry (inherit the chain)', async () => {
+    renderTensor('<p>body</p>');
+    await settleLayout();
+    applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
+      page: { index: 0, background: '#123123' },
+    });
+    renderSectionDialog();
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'This page')!);
+    });
+    act(() => {
+      fireEvent.click(document.querySelector('button[aria-label="Page background options"]')!);
+    });
+    // The page-scope reset spells REMOVE (inherit), not "White".
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Remove page style')!);
+    });
+    act(() => {
+      fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
+    });
+    expect(useDocumentStore.getState().pageStyles).toEqual({});
+  });
+});
