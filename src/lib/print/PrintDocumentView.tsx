@@ -178,7 +178,11 @@ export const PrintDocumentView = memo(function PrintDocumentView({
               height: `${page.height}px`,
               // One shadow ring per sheet — the gutter reads as pages.
               boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-              backgroundColor: '#fff',
+              // #48 — the page's own background fill (unset = white).
+              // The print-time color-adjust lives on the .print-page-
+              // sheet CSS (index.css's @media print — browsers strip
+              // inline-adjust spellings at snapshot time).
+              backgroundColor: page.background ?? '#fff',
               overflow: 'hidden',
               flex: 'none',
             }}

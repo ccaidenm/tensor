@@ -91,6 +91,26 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
     fieldTotal: total,
   });
 
+  // #48 — the PAGE BACKGROUND chain, resolved once per printed page:
+  // the positional per-page map → the section break's color → the
+  // doc default — the SAME chain the on-screen view paints
+  // (backgroundForPage), so what previews is what prints (the
+  // one-walk law). White stays UNSET (the sheet/PDF default).
+  const sectionColors: (string | undefined)[] = [];
+  editor.state.doc.forEach((node) => {
+    if (node.type.name === 'sectionBreak') {
+      const color = (node.attrs.setup as { pageColor?: string } | undefined)?.pageColor;
+      sectionColors.push(typeof color === 'string' && color ? color : undefined);
+    }
+  });
+  const docPageColor = doc.pageSetup.pageColor || undefined;
+  pages.forEach((page, i) => {
+    const sectionIndex = layout.pages[i]?.sectionIndex ?? 0;
+    const background =
+      doc.pageStyles[page.index]?.background ?? sectionColors[sectionIndex] ?? docPageColor;
+    if (background) page.background = background;
+  });
+
   return { pages, layout, blocks: adapted.blocks, total };
 }
 

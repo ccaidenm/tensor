@@ -108,5 +108,9 @@ export interface PrintPage {
   index: number;
   width: number;
   height: number;
+  /** #48 — the page's background fill: the per-page → per-section →
+   *  doc chain resolved at BUILD time (the same chain the on-screen
+   * view paints). Unset = white paper (the sheet/PDF default). */
+  background?: string;
   elements: PrintElement[];
 }

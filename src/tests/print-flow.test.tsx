@@ -137,3 +137,48 @@ describe('the print flow (arm → print → disarm)', () => {
     void editor;
   });
 });
+describe('#48 — page backgrounds through the print walk (the one-build law)', () => {
+  const bgPrintSpy = vi.fn();
+  beforeEach(() => {
+    usePrintStore.getState().disarm();
+    usePrintPreviewStore.getState().close();
+    bgPrintSpy.mockClear();
+    vi.stubGlobal('print', bgPrintSpy);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('buildPrintDocument resolves per-page → doc on the SAME chain the view paints; the print sheet carries the fill', async () => {
+    // Two pages: the doc default tints both, one per-page override
+    // beats it — build once, assert the data AND the print DOM.
+    const longText = '<p>' + 'word '.repeat(1500) + '</p>';
+    const { editor } = renderTensor(longText);
+    await settleLayout();
+    act(() => {
+      useDocumentStore.getState().setPageSetup({
+        ...useDocumentStore.getState().pageSetup,
+        pageColor: '#ddeeff',
+      });
+      useDocumentStore.getState().setPageStyles({ 1: { background: '#123123' } });
+    });
+    const build = buildPrintDocument(editor);
+    expect(build.pages.length).toBeGreaterThanOrEqual(3);
+    expect(build.pages[0]!.background).toBe('#ddeeff');
+    expect(build.pages[1]!.background).toBe('#123123');
+    expect(build.pages[2]!.background).toBe('#ddeeff');
+
+    // The print DOM (what window.print hands the OS): each sheet
+    // wears its own fill — the page's background is content, not
+    // chrome (print-color-adjust: exact keeps it on paper).
+    render(<PrintContainer />);
+    await act(async () => {
+      await printFromPreview(build.pages, useDocumentStore.getState().pageSetup);
+    });
+    const sheet0 = document.querySelector('[data-page-index="0"]') as HTMLElement;
+    const sheet1 = document.querySelector('[data-page-index="1"]') as HTMLElement;
+    expect(sheet0.style.backgroundColor).toBe('rgb(221, 238, 255)');
+    expect(sheet1.style.backgroundColor).toBe('rgb(18, 49, 35)');
+    expect(bgPrintSpy).toHaveBeenCalled();
+  });
+});
