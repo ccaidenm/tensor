@@ -225,7 +225,14 @@ describe('lossy classification', () => {
     const report = analyzeMarkdownLossy(
       doc(para('hello'), { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'H' }] }),
     );
-    expect(report).toEqual({ headerFooterRegions: 0, referenceTables: 0, pageBreaks: 0, sectionBreaks: 0, customFormatting: false });
+    expect(report).toEqual({
+      headerFooterRegions: 0,
+      referenceTables: 0,
+      pageBreaks: 0,
+      sectionBreaks: 0,
+      customFormatting: false,
+      watermark: false,
+    });
     expect(hasLossyContent(report)).toBe(false);
   });
 
@@ -321,6 +328,7 @@ describe('lossy classification', () => {
       pageBreaks: 1,
       sectionBreaks: 0,
       customFormatting: true,
+      watermark: false,
     });
     expect(warning).toContain('Header/footer content (2 regions)');
     expect(warning).toContain('Page breaks (1)');

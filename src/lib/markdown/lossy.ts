@@ -39,6 +39,10 @@ export interface MarkdownLossyReport {
   /** Any dropped formatting at all (marks, style ids, alignment,
    *  spacing, indents, tab stops, image sizing, table decoration). */
   customFormatting: boolean;
+  /** #WATERMARK — the document-level watermark (a store fact, not
+   *  docJSON — the exporter threads it in). Markdown has no page
+   *  concept to paint it on. */
+  watermark: boolean;
 }
 
 /**
@@ -59,13 +63,17 @@ const KEPT_MARKS = new Set([
   'refLeader',
 ]);
 
-export function analyzeMarkdownLossy(doc: JSONContent): MarkdownLossyReport {
+export function analyzeMarkdownLossy(
+  doc: JSONContent,
+  hasWatermark = false,
+): MarkdownLossyReport {
   const report: MarkdownLossyReport = {
     headerFooterRegions: 0,
     referenceTables: 0,
     pageBreaks: 0,
     sectionBreaks: 0,
     customFormatting: false,
+    watermark: hasWatermark,
   };
   walk(doc, report);
   return report;
@@ -78,7 +86,8 @@ export function hasLossyContent(report: MarkdownLossyReport): boolean {
     report.referenceTables > 0 ||
     report.pageBreaks > 0 ||
     report.sectionBreaks > 0 ||
-    report.customFormatting
+    report.customFormatting ||
+    report.watermark
   );
 }
 
@@ -106,6 +115,9 @@ export function markdownLossyLines(report: MarkdownLossyReport): string[] {
     lines.push(
       'Custom formatting (fonts, colors, sizes, alignment, spacing, indents, custom styles)',
     );
+  }
+  if (report.watermark) {
+    lines.push('Watermark (1)');
   }
   return lines;
 }

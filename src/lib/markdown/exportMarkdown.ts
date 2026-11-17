@@ -37,12 +37,17 @@ export function markdownDefaultPath(filePath: string | null): string {
 
 export async function exportMarkdownFile(
   json: JSONContent,
-  options: { defaultPath: string },
+  options: {
+    defaultPath: string;
+    /** #WATERMARK — the doc-level watermark flag (a store fact; the
+     *  docJSON the classifier walks cannot see it). */
+    hasWatermark?: boolean;
+  },
 ): Promise<ExportMarkdownOutcome> {
   // THE GATE (ruling 2): classify BEFORE the dialog; the in-app shadcn
   // confirm parks the report and the dialog's buttons settle the
   // promise. Cancel = no save dialog, no file, no partial state.
-  const report = analyzeMarkdownLossy(json);
+  const report = analyzeMarkdownLossy(json, options.hasWatermark === true);
   if (hasLossyContent(report)) {
     const proceed = await useExportConfirmDialogStore.getState().requestConfirm({
       title: 'Export Markdown?',

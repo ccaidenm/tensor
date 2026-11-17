@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, type PDFImage } from 'pdf-lib';
+import { PDFDocument, degrees, rgb, type PDFImage } from 'pdf-lib';
 import katex from 'katex';
 import type { PdfInfo } from '@/lib/document/coreProperties';
 import { createWarmableFontBook, type WarmableFontBook } from './pdfFonts';
@@ -179,6 +179,16 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
     }
   }
 
+  // #WATERMARK — the text overlay's fonts ride the SAME warmup (the
+  // overlay is bold; unwarmed families would resolve to a substitute
+  // or skip).
+  for (const page of pages) {
+    const wm = page.watermark;
+    if (wm?.kind === 'text') {
+      await book.warm(wm.fontFamily, true, false);
+    }
+  }
+
   // Image embedding: sha → PDFImage, deduped (content-addressed ids).
   const imageCache = new Map<string, PDFImage | null>();
   const embedImage = async (sha: string): Promise<PDFImage | null> => {
@@ -221,6 +231,60 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
       const bg = parseColor(printPage.background);
       if (bg) {
         page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(bg.r, bg.g, bg.b) });
+      }
+    }
+
+    // #WATERMARK — the overlay, drawn SECOND (over the paper fill,
+    // under every element — the paint-order law). Both spellings
+    // rotate about their (x, y) ANCHOR (pdf-lib: the text baseline
+    // origin / the image's lower-left), so centering solves the
+    // anchor: place it so the rotated center lands at page-center.
+    // The sign flip (degrees(−θ)) is the y-up/y-down convention: CSS
+    // rotate(−45deg) is 45° counterclockwise; PDF degrees() is
+    // counterclockwise-positive in y-up space, so −45 CSS = +45 PDF.
+    const wm = printPage.watermark;
+    if (wm?.kind === 'text') {
+      const font = book.resolve(wm.fontFamily, true, false);
+      if (font) {
+        const sizePt = wm.fontSize * PT_PER_PX;
+        const textWidthPt = font.widthOfTextAtSize(wm.text, sizePt);
+        const textHeightPt = font.heightAtSize(sizePt);
+        const theta = (-wm.rotation * Math.PI) / 180;
+        const cx = (Math.cos(theta) * textWidthPt) / 2 - (Math.sin(theta) * textHeightPt) / 2;
+        const cy = (Math.sin(theta) * textWidthPt) / 2 + (Math.cos(theta) * textHeightPt) / 2;
+        const color = parseColor(wm.color) ?? { r: 0.75, g: 0.75, b: 0.75 };
+        try {
+          page.drawText(wm.text, {
+            x: W / 2 - cx,
+            y: H / 2 - cy,
+            size: sizePt,
+            font,
+            color: rgb(color.r, color.g, color.b),
+            rotate: degrees(-wm.rotation),
+            opacity: wm.opacity,
+          });
+        } catch {
+          // WinAnsi-standard fonts reject exotic glyphs — the watermark
+          // skips (never fails the export); the on-screen/print-DOM
+          // renderings keep the full text.
+        }
+      }
+    } else if (wm?.kind === 'image') {
+      const img = await embedImage(wm.sha);
+      if (img) {
+        const wPt = wm.width * PT_PER_PX;
+        const hPt = wm.height * PT_PER_PX;
+        const theta = (-wm.rotation * Math.PI) / 180;
+        const cx = (Math.cos(theta) * wPt) / 2 - (Math.sin(theta) * hPt) / 2;
+        const cy = (Math.sin(theta) * wPt) / 2 + (Math.cos(theta) * hPt) / 2;
+        page.drawImage(img, {
+          x: W / 2 - cx,
+          y: H / 2 - cy,
+          width: wPt,
+          height: hPt,
+          rotate: degrees(-wm.rotation),
+          opacity: wm.opacity,
+        });
       }
     }
 

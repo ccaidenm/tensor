@@ -112,5 +112,39 @@ export interface PrintPage {
    *  doc chain resolved at BUILD time (the same chain the on-screen
    * view paints). Unset = white paper (the sheet/PDF default). */
   background?: string;
+  /**
+   * #WATERMARK — the page's overlay, RESOLVED at build time (the
+   * resolveWatermark spec — self-contained: font, size, rotation,
+   * opacity; the same section → doc chain as the background). Unset
+   * = none. Painted FIRST — before the elements — by every consumer
+   * (the preview sheet, window.print, the PDF synthesizer).
+   */
+  watermark?: PrintWatermark;
   elements: PrintElement[];
 }
+
+/** #WATERMARK — the resolved text overlay (the PDF's font book keys
+ * off fontFamily; the anchor math keys off fontSize). */
+export interface PrintWatermarkText {
+  kind: 'text';
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+  rotation: number;
+  opacity: number;
+}
+
+/** #WATERMARK — the resolved image overlay: the dual handle of
+ * PrintImage (src = the view's URL; sha = the export's bytes key). */
+export interface PrintWatermarkImage {
+  kind: 'image';
+  sha: string;
+  src: string;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+}
+
+export type PrintWatermark = PrintWatermarkText | PrintWatermarkImage;

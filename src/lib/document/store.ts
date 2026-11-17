@@ -193,7 +193,11 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     const { editor, filePath } = get();
     if (!editor) return;
     try {
-      await exportMarkdownFile(editor.getJSON(), { defaultPath: markdownDefaultPath(filePath) });
+      const { watermark } = get().pageSetup;
+      await exportMarkdownFile(editor.getJSON(), {
+        defaultPath: markdownDefaultPath(filePath),
+        hasWatermark: watermark != null && watermark.kind != null,
+      });
     } catch (err) {
       await message(err instanceof Error ? err.message : 'Failed to export Markdown', {
         title: 'Error',
