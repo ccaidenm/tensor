@@ -36,6 +36,17 @@ const DocStylesSchema = z.object({
 });
 
 /**
+ * #48 — the per-page styles. File-side spelling: JSON keys are
+ * STRINGS (page indexes serialize as strings); normalizePageStyles
+ * converts to numeric keys on open. Absent = no per-page styles (the
+ * lineNumbers/optional-field precedent — old files open unchanged).
+ */
+export const PageStylesSchema = z.record(
+  z.string(),
+  z.object({ background: z.string().optional() }),
+);
+
+/**
  * M-LINENUMS: the document's line-number gutter setting. Optional —
  * old files predate it and open with the gutter off (the styles
  * precedent). countBy is metadata-only in v1 (no ribbon UI): the
@@ -132,6 +143,7 @@ export const DocumentFileSchema = z.object({
     modifiedAt: z.string().optional(),
     originalPath: z.string().optional(),
     pageSetup: PageSetupSchema.optional(),
+    pageStyles: PageStylesSchema.optional(),
     styles: DocStylesSchema.optional(),
     lineNumbers: LineNumbersSchema.optional(),
     headerFooter: z.union([LegacyHeaderFooterSchema, HeaderFooterSchema]).optional(),

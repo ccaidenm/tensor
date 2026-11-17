@@ -15,12 +15,13 @@ export function useAutosave() {
 
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } =
+      const { editor, filePath, pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter } =
         useDocumentStore.getState();
       if (!editor) return;
 
       await saveRecoveryCopy(editor, filePath, {
         pageSetup,
+        pageStyles,
         lineNumbers,
         coreProperties,
         headerFooter,
@@ -32,7 +33,7 @@ export function useAutosave() {
       // recovery snapshots (above) between explicit Saves; .wpdoc
       // documents keep the transparent timed save.
       if (filePath && filePath.toLowerCase().endsWith('.wpdoc')) {
-        await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
+        await saveDocument(editor, filePath, { pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter });
         await clearRecoveryCopy(filePath);
         useDocumentStore.setState({ isDirty: false });
       }

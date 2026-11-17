@@ -2,6 +2,7 @@ import { save, open } from '@tauri-apps/plugin-dialog';
 import type { Editor } from '@tiptap/core';
 import { CURRENT_DOCUMENT_VERSION, type DocumentFile, type LineNumbersSetting } from './schema';
 import type { PageSetup } from './pageSetup';
+import { normalizePageStyles, type PageStyles } from './pageSetup';
 import { useStyleRegistryStore } from '@/lib/styles/registry';
 import type { StyleDefinition } from '@/lib/styles/types';
 import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
@@ -24,6 +25,8 @@ const FILE_FILTERS = [
  */
 export interface SaveDocumentOptions {
   pageSetup: PageSetup;
+  /** #48 — the per-page styles (the positional map); {} = none. */
+  pageStyles?: PageStyles;
   /** M-LINENUMS: absent/null = never set (old docs / gutter off). */
   lineNumbers?: LineNumbersSetting | null;
   /** M-HEADER-FOOTER: absent/null = never enabled (old docs). */
@@ -38,13 +41,17 @@ export interface SaveDocumentOptions {
 
 /** THE metadata assembly (single source — see SaveDocumentOptions). */
 export function assembleDocumentFile(editor: Editor, options: SaveDocumentOptions): DocumentFile {
-  const { pageSetup, lineNumbers, headerFooter, coreProperties, originalPath } = options;
+  const { pageSetup, pageStyles, lineNumbers, headerFooter, coreProperties, originalPath } = options;
   return {
     version: CURRENT_DOCUMENT_VERSION,
     docJSON: editor.getJSON(),
     metadata: {
       modifiedAt: new Date().toISOString(),
       pageSetup,
+      // #48 — per-page styles: absent when the map is empty (the
+      // optional-field precedent). The numeric keys serialize as JSON
+      // strings; normalizePageStyles converts them back on open.
+      ...(pageStyles && Object.keys(pageStyles).length > 0 ? { pageStyles } : {}),
       // M-STYLES: the doc layer round-trips verbatim — definitions
       // the file carried (or that were applied to it on open) travel
       // with it; global-layer edits live in styles.json, not here.
@@ -101,6 +108,9 @@ export interface OpenDocumentResult {
    *  changes accepted, refused images...). One notice on open. */
   importNotices?: string[];
   pageSetup: PageSetup | null;
+  /** #48 — the file's per-page styles (numeric keys, normalized);
+   * {} = the file predates them or carries none. */
+  pageStyles: PageStyles;
   /** M-STYLES: the file's doc-layer style definitions (may be empty —
    *  pre-styles files). The document store applies them to the
    *  registry (doc overrides global by id). */
@@ -163,6 +173,7 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
   return {
     path,
     pageSetup: file.metadata.pageSetup ?? null,
+    pageStyles: normalizePageStyles(file.metadata.pageStyles as Record<string, unknown> | undefined),
     styleDefinitions: file.metadata.styles?.definitions ?? [],
     lineNumbers: file.metadata.lineNumbers ?? null,
     coreProperties: normalizeCoreProperties({ title, author, subject, keywords, comments }),
@@ -216,6 +227,8 @@ async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocum
   return {
     path,
     pageSetup: result.pageSetup,
+    // DOCX has no per-page style spelling — the map opens empty.
+    pageStyles: {},
     styleDefinitions: result.styleDefinitions,
     lineNumbers: result.lineNumbers,
     coreProperties: normalizeCoreProperties({ ...result.coreProperties, title: result.title }),
@@ -237,6 +250,8 @@ async function openMarkdownDocument(editor: Editor, path: string): Promise<OpenD
   return {
     path: null,
     pageSetup: null,
+    // Markdown carries no document setup at all — page styles open empty.
+    pageStyles: {},
     styleDefinitions: [],
     lineNumbers: null,
     coreProperties: { title: name.replace(/\.(md|markdown)$/i, '') },

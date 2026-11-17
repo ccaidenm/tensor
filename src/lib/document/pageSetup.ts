@@ -35,6 +35,51 @@ export interface PageSetup {
   widowControl?: boolean;
 }
 
+/**
+ * #48 — PAGE STYLES: the per-page presentation layer. A page's
+ * geometry can never be its own (the engine's one-geometry-per-page
+ * law — a page IS its section's), but its DECOR can be: background
+ * colors ride the POSITIONAL map below.
+ *
+ * THE POSITIONAL RULING (spec of record, the session's locked
+ * decision): styles key PAGE NUMBERS, not content — "make page 1 a
+ * dark cover" is literal, the paint chain resolves
+ * per-page → per-section → document → white, and a style for a page
+ * index that no longer exists (content deleted) is simply INERT (the
+ * chain falls through to the section/doc layers; the map entry rides
+ * until the user clears it). Page numbers are 0-based in the model;
+ * the dialog speaks 1-based to the user.
+ */
+export interface PageStyle {
+  /** Full-page background color; unset = inherit the chain. */
+  background?: string;
+}
+
+/** 0-based page index → its style. Sparse; {} = no per-page styles. */
+export type PageStyles = Record<number, PageStyle>;
+
+/**
+ * The file-side spelling: JSON object keys are strings, so the .wpdoc
+ * metadata carries `Record<string, PageStyle>` and this converts to the
+ * model's numeric keys (garbage keys drop loudly-quietly — a corrupted
+ * index never crashes a file open).
+ */
+export function normalizePageStyles(
+  raw: Record<string, unknown> | null | undefined
+): PageStyles {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: PageStyles = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || value == null || typeof value !== 'object') continue;
+    const background = (value as { background?: unknown }).background;
+    if (typeof background === 'string' && background) {
+      out[index] = { background };
+    }
+  }
+  return out;
+}
+
 // ─── Unit system ─────────────────────────────────────────────────────────────
 // All persisted measurements (PAGE_SIZES, DEFAULT_MARGINS, customWidth/
 // customHeight) are stored in POINTS (1 pt = 1/72 inch). The engine
@@ -94,7 +139,7 @@ export function summarizeMarginPreset(margins: Margins, unit: MeasurementUnit): 
     const side = formatPtWithUnit(margins.left, unit);
     return margins.top === margins.left
       ? `${top} margins`
-      : `${top} vertical, ${side} horizontal`;
+      : `${top} bands, ${side} sides`;
   }
   // An all-different shape: spell the four edges.
   return (

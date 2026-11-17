@@ -12,7 +12,7 @@ import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDia
 import { clearRecoveryCopy } from './recovery';
 import { useConfigStore } from '../config/store';
 import { useStyleRegistryStore } from '../styles/registry';
-import type { PageSetup } from './pageSetup';
+import type { PageSetup, PageStyles } from './pageSetup';
 import type { LineNumbersSetting } from './schema';
 import type { HeaderFooterSettings } from './headerFooter';
 import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
@@ -64,6 +64,15 @@ interface DocumentStore {
   setEditor: (editor: Editor | null) => void;
   markDirty: () => void;
   setPageSetup: (pageSetup: PageSetup) => void;
+  /**
+   * #48 — the per-page styles (the positional map; the PageSetup
+   * comment block in pageSetup.ts is the ruling). {} = none. Writing
+   * marks the doc dirty — travels in .wpdoc metadata like pageSetup.
+   * NOT inside PageSetup on purpose: setups serialize onto section
+   * breaks wholesale, and a page-index map must never ride one.
+   */
+  pageStyles: PageStyles;
+  setPageStyles: (pageStyles: PageStyles) => void;
   /** M-LINENUMS: the document's gutter setting; null = never set
    *  (old files) = gutter off. Writing it marks the doc dirty —
    *  it travels in .wpdoc metadata like pageSetup. */
@@ -109,6 +118,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   setEditor: (editor) => set({ editor }),
   markDirty: () => set((state) => ({ isDirty: true, revision: state.revision + 1 })),
   setPageSetup: (pageSetup) => set({ pageSetup, isDirty: true }),
+  pageStyles: {},
+  setPageStyles: (pageStyles) => set({ pageStyles, isDirty: true }),
   lineNumbers: null,
   setLineNumbers: (setting) => set((state) => ({ lineNumbers: setting, isDirty: true, revision: state.revision + 1 })),
 
@@ -129,7 +140,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     })),
 
   save: async () => {
-    const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } = get();
+    const { editor, filePath, pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter } = get();
     if (!editor) return;
     if (!filePath) {
       await get().saveAs();
@@ -148,13 +159,13 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       }
       return;
     }
-    await saveDocument(editor, filePath, { pageSetup, lineNumbers, coreProperties, headerFooter });
+    await saveDocument(editor, filePath, { pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter });
     await clearRecoveryCopy(filePath);
     set({ isDirty: false });
   },
 
   saveAs: async () => {
-    const { editor, filePath, pageSetup, lineNumbers, coreProperties, headerFooter } = get();
+    const { editor, filePath, pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter } = get();
     if (!editor) return;
     const path = await chooseSavePath(saveAsDefaultName(filePath));
     if (!path) return;
@@ -173,7 +184,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       }
       return;
     }
-    await saveDocument(editor, path, { pageSetup, lineNumbers, coreProperties, headerFooter });
+    await saveDocument(editor, path, { pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter });
     await clearRecoveryCopy(filePath);
     set({ filePath: path, isDirty: false });
   },
@@ -224,6 +235,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           // .wpdoc or .docx open is clean: the file IS the document.
           isDirty: result.path === null,
           pageSetup: result.pageSetup ?? defaultPageSetup(),
+          // #48 — absent = no per-page styles (old files open clean).
+          pageStyles: result.pageStyles ?? {},
           lineNumbers: result.lineNumbers ?? null,
           // M-META: normalized in openDocument — {} for old files.
           coreProperties: result.coreProperties,
