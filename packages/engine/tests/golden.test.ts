@@ -130,6 +130,46 @@ describe('golden: natural-size image + walk flow (FakeMetrics)', () => {
   })
 })
 
+describe('golden: two-column newsletter flagship (FakeMetrics)', () => {
+  it('2 columns, gap 24: wrap 300px, slot cap 7, balance on the last page', () => {
+    // #74 flagship: filler (5 lines), heading (2 lines, keepNext
+    // bonded to the paragraph), paragraph (10 lines) under TWO columns
+    // (gap 24 → 300px slots → 6 tokens/line; slot cap 7 at 110px
+    // lines). The flow fills col 0, wraps to col 1, wraps the page
+    // only when BOTH columns are full; the section's last page (the
+    // document's only page) balances to the min-max assignment.
+    const doc: SemanticDoc = {
+      baseStyle: { fontFamily: 'sans-serif', fontSize: 16 },
+      blocks: [
+        {
+          id: 'filler',
+          kind: 'paragraph',
+          runs: [{ text: 'aaaa '.repeat(30), style: { fontFamily: 'sans-serif', fontSize: 100 } }],
+        },
+        {
+          id: 'heading',
+          kind: 'heading',
+          level: 1,
+          runs: [{ text: 'aaaa '.repeat(12), style: { fontFamily: 'sans-serif', fontSize: 100 } }],
+          flow: { keepNext: true },
+        },
+        {
+          id: 'para',
+          kind: 'paragraph',
+          runs: [{ text: 'aaaa '.repeat(60), style: { fontFamily: 'sans-serif', fontSize: 100 } }],
+        },
+      ],
+    }
+
+    const { layout } = createLayoutEngine({ metrics: FakeMetrics })
+    const result = layout(doc, {
+      ...opts,
+      columns: { count: 2, gap: 24 },
+    })
+    expect(round(result)).toMatchSnapshot()
+  })
+})
+
 describe('golden: fit-down landscape image (FakeMetrics)', () => {
   it('scales to contentWidth preserving aspect; the following block accounts for the scaled height', () => {
     // 1248×300 → scale 0.5 → 624×150: the two numbers every future

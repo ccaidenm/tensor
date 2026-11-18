@@ -909,6 +909,459 @@ export function createLayoutEngine({
         placedOut.push(...entry.placedRects)
       }
 
+      // ── #74 BALANCED COLUMNS — the section-end balance, an OUTPUT
+      // TRANSFORM ──
+      // Word equalizes the column heights on the LAST page of a section
+      // (and at the document end). The balance runs at the two decision
+      // points where a page is known to be section-final — the SECTION
+      // TIER at a flow-terminating boundary, and the DOC END — and
+      // re-flows that page's flow units into equal-height columns.
+      //
+      // THE CACHE KEEPS THE MACHINE FORM. The balance NEVER writes the
+      // walk cache: the cached records are the unbalanced machine
+      // outputs — exactly the Markov form the splice gate's state
+      // equality proves — so prefix/splice reuse stays exact and a page
+      // that STOPS being section-final (content inserted after it)
+      // serves its honest naive fill on the next call. The transform
+      // re-applies to whatever the current last page is, every call.
+      // (An in-cache balance broke parity here: warm prefix-served a
+      // previously-balanced page while cold re-walked it unbalanced —
+      // the fuzzer caught it, seed 1004.) Parity is then structural:
+      // warm and cold machine outputs are deep-equal (the pre-columns
+      // law), and the transform is a pure function of (the output
+      // records, the doc's block metadata, the page's section grid) —
+      // the same pure function both paths apply.
+      //
+      // THE MODEL: the page's flow units (prose/reference lines, table
+      // bands, atomic images/equations — in doc order, which IS flow
+      // order) are re-assigned to the columns by a MIN-MAX partition:
+      // the smallest gap-aware column target T such that the units
+      // pack into ≤ C columns. A column's y accumulates the machine's
+      // own gap arithmetic (lead = spaceBefore at a block's true entry;
+      // inner = spaceAfter(prev) + spaceBefore across blocks within a
+      // column; a fresh column consumes ONLY the lead — spaceAfter
+      // stays behind), and a forced 'column' break (breakAfter on the
+      // previous block's last unit / breakBefore on the next block's
+      // true entry) pins a column start. THE PACK IS THE FEASIBILITY
+      // TEST — one sequential accumulation drives both, so the search's
+      // witness and the final assignment agree bitwise (a prefix-sum
+      // feasibility float-associates differently and could admit a
+      // target the machine-order pack overflows by an ulp — the fuzzer
+      // caught that too, seed 1003). The machine's own fill is a
+      // witness at T = its max column y, so the minimum T never
+      // worsens the overflow. Boundary minimums (R2/R3) are NOT
+      // re-applied at balance-created column boundaries (v1 ruling:
+      // the balance redistributes already-placed units; bonds hold by
+      // PAGE co-membership — every unit stays on the page).
+      //
+      // The pass is IDEMPOTENT over its own output (the pack is a pure
+      // function of the unit sequence), so the re-runs at stacked
+      // decision points (a section boundary followed by the doc end on
+      // the same page) are safe; the fast path (assignment unchanged)
+      // keeps record identity for zero-copy reuse.
+      const balanceSectionTail = (): void => {
+        // The last content page of the OUTPUT so far (at a tier decision
+        // point: the closing section's last page; at the doc end: the
+        // document's last page).
+        let lastPage = 0
+        for (const l of lines) if (l.pageIndex > lastPage) lastPage = l.pageIndex
+        for (const r of placedOut) if (r.pageIndex > lastPage) lastPage = r.pageIndex
+        // The page's frame section owns the grid (first-write-wins — a
+        // continuous run's sections share the geometry, so any of them
+        // resolves to the same slots and spec).
+        const sec = sectionTable[pageSections[lastPage] ?? 0] ?? sectionTable[0]!
+        if (sec.columnSlots.length < 2) return
+        if (sec.columnSpec?.balanced === false) return
+        const C = sec.columnSlots.length
+        const colLeftOf = (c: number): number => sec.columnSlots[c]!.x
+
+        // ── Unit extraction (doc order = flow order) ──
+        interface RawUnit {
+          docIndex: number
+          blockId: string
+          kind: 'line' | 'band' | 'atomic'
+          height: number
+          top: number // current top on the page
+          col: number // current column
+          lineIndex: number // the continuation's atLine (min lane lineIndex; 0 for atomics)
+          boxes: { index: number; box: LineBox }[] // line: [box]; band: the lanes; atomic: []
+          rects: { index: number; rect: PlacedRect }[] // band: the cell rects; atomic: [rect]
+        }
+        const blocksById = new Map<string, Block>(doc.blocks.map((b) => [b.id, b]))
+        const docIndexOf = new Map<string, number>(doc.blocks.map((b, i) => [b.id, i]))
+        const bandsByBlock = new Map<string, { top: number; height: number; boxes: { index: number; box: LineBox }[]; rects: { index: number; rect: PlacedRect }[] }[]>()
+        const floats: { block: ImageBlock }[] = []
+        const raw: RawUnit[] = []
+        // The lastPage records in array order; the per-block runs keep
+        // doc order (both arrays are doc-ordered, pageIndex
+        // non-decreasing).
+        const pageLines: { index: number; box: LineBox }[] = []
+        const pageRects: { index: number; rect: PlacedRect }[] = []
+        for (let i = 0; i < lines.length; i++) {
+          const box = lines[i]!
+          if (box.pageIndex === lastPage && !box.band) pageLines.push({ index: i, box })
+        }
+        for (let i = 0; i < placedOut.length; i++) {
+          const rect = placedOut[i]!
+          if (rect.pageIndex === lastPage) pageRects.push({ index: i, rect })
+        }
+        if (pageLines.length === 0 && pageRects.length === 0) return
+        // Table bands: the CELL RECTS identify the bands (every rect of
+        // a band carries the band's top and its full height; distinct
+        // bands stack — distinct tops). The LANES (tableCell lineBoxes)
+        // sit at bandTop + lane.y — they assign to the band whose
+        // [top, top+height) contains them.
+        for (const { index, rect } of pageRects) {
+          if (rect.kind !== 'tableCell') continue
+          let bands = bandsByBlock.get(rect.blockId)
+          if (!bands) {
+            bands = []
+            bandsByBlock.set(rect.blockId, bands)
+          }
+          let band = bands.find((b) => b.top === rect.rect.y)
+          if (!band) {
+            band = { top: rect.rect.y, height: rect.rect.height, boxes: [], rects: [] }
+            bands.push(band)
+          }
+          if (rect.rect.height > band.height) band.height = rect.rect.height
+          band.rects.push({ index, rect })
+        }
+        for (const { index, box } of pageLines) {
+          if (!box.tableCell) continue
+          const bands = bandsByBlock.get(box.blockId)
+          const band = bands?.find((b) => box.rect.y >= b.top && box.rect.y < b.top + b.height)
+          if (band) band.boxes.push({ index, box })
+        }
+        // Assemble the flow sequence: per block (doc order), its units.
+        const seenBlocks = new Set<string>()
+        const blockIds: string[] = []
+        for (const { box } of pageLines) {
+          if (!seenBlocks.has(box.blockId)) {
+            seenBlocks.add(box.blockId)
+            blockIds.push(box.blockId)
+          }
+        }
+        for (const { rect } of pageRects) {
+          if (!seenBlocks.has(rect.blockId)) {
+            seenBlocks.add(rect.blockId)
+            blockIds.push(rect.blockId)
+          }
+        }
+        blockIds.sort((a, b) => (docIndexOf.get(a) ?? 0) - (docIndexOf.get(b) ?? 0))
+        for (const blockId of blockIds) {
+          const block = blocksById.get(blockId)
+          if (!block) continue // defensive; ids validate upfront
+          if (block.kind === 'image' && block.float != null) {
+            floats.push({ block })
+            continue // zero flow presence — the float rebuilds below
+          }
+          if (block.kind === 'table') {
+            const bands = bandsByBlock.get(blockId) ?? []
+            const sorted = [...bands].sort((a, b) => a.top - b.top)
+            for (const band of sorted) {
+              let laneExtent = 0
+              for (const { box } of band.boxes) {
+                laneExtent = Math.max(laneExtent, box.rect.y + box.rect.height - band.top)
+              }
+              raw.push({
+                docIndex: docIndexOf.get(blockId) ?? 0,
+                blockId,
+                kind: 'band',
+                height: Math.max(band.height, laneExtent),
+                top: band.top,
+                col: band.boxes[0]?.box.column ?? band.rects[0]?.rect.column ?? 0,
+                lineIndex: band.boxes.length
+                  ? band.boxes.reduce((m, { box }) => Math.min(m, box.lineIndex), Number.MAX_SAFE_INTEGER)
+                  : 0,
+                boxes: band.boxes,
+                rects: band.rects,
+              })
+            }
+          } else if (block.kind === 'image' || block.kind === 'equation') {
+            const pr = pageRects.find((p) => p.rect.blockId === blockId)
+            if (!pr) continue
+            raw.push({
+              docIndex: docIndexOf.get(blockId) ?? 0,
+              blockId,
+              kind: 'atomic',
+              height: pr.rect.rect.height,
+              top: pr.rect.rect.y,
+              col: pr.rect.column ?? 0,
+              lineIndex: 0,
+              boxes: [],
+              rects: [pr],
+            })
+          } else {
+            for (const { index, box } of pageLines) {
+              if (box.blockId !== blockId || box.tableCell) continue
+              raw.push({
+                docIndex: docIndexOf.get(blockId) ?? 0,
+                blockId,
+                kind: 'line',
+                height: box.rect.height,
+                top: box.rect.y,
+                col: box.column ?? 0,
+                lineIndex: box.lineIndex,
+                boxes: [{ index, box }],
+                rects: [],
+              })
+            }
+          }
+        }
+        const n = raw.length
+        if (n === 0) return
+
+        // Blocks with lines on pages before lastPage: entry detection
+        // (spaceBefore applies only at a block's true entry) and the
+        // page-continuation break rule (a block continuing from an
+        // earlier page keeps its onto-lastPage FragmentBreak — its
+        // atLine is invariant under the balance).
+        const hasEarlier = new Set<string>()
+        for (const l of lines) {
+          if (l.pageIndex < lastPage) hasEarlier.add(l.blockId)
+        }
+
+        // Per-block first/last unit in the flow sequence (a block's
+        // units are contiguous; a tail block's last unit is its global
+        // last — the section ends here).
+        const firstOfBlock = new Map<string, number>()
+        const lastOfBlock = new Map<string, number>()
+        for (let k = 0; k < n; k++) {
+          const id = raw[k]!.blockId
+          if (!firstOfBlock.has(id)) firstOfBlock.set(id, k)
+          lastOfBlock.set(id, k)
+        }
+        const isEntry = (k: number): boolean =>
+          !hasEarlier.has(raw[k]!.blockId) && firstOfBlock.get(raw[k]!.blockId) === k
+        const isLast = (k: number): boolean => lastOfBlock.get(raw[k]!.blockId) === k
+
+        // Gap arithmetic (the machine's own cursor semantics):
+        // lead(k) — the gap when unit k BEGINS a column (spaceBefore at
+        // the block's true entry; a continuation starts bare).
+        // inner(k) — the gap before unit k continuing a column after
+        // k−1 (same block: tight; across blocks: spaceAfter + spaceBefore).
+        const lead = (k: number): number =>
+          isEntry(k) ? (blocksById.get(raw[k]!.blockId)?.spaceBefore ?? 0) : 0
+        const inner = (k: number): number =>
+          raw[k]!.blockId === raw[k - 1]!.blockId
+            ? 0
+            : (blocksById.get(raw[k - 1]!.blockId)?.spaceAfter ?? 0) + lead(k)
+        // forcedBefore(k): a manual column break pins unit k to a fresh
+        // column (breakAfter on the previous block's last unit, or
+        // breakBefore on this block's true entry).
+        const forcedBefore = (k: number): boolean => {
+          if (k === 0) return false
+          return (
+            (isLast(k - 1) &&
+              blocksById.get(raw[k - 1]!.blockId)?.flow?.breakAfter === 'column') ||
+            (isEntry(k) &&
+              blocksById.get(raw[k]!.blockId)?.flow?.breakBefore === 'column')
+          )
+        }
+
+        // Prefix sums for O(1) column-final-y reads. columnY(j, i): a
+        // column holding units j..i, started fresh at j — the CANDIDATE
+        // GENERATOR for the search (the pack itself accumulates
+        // sequentially — see its comment for the single-arithmetic law).
+        const PH: number[] = new Array<number>(n + 1).fill(0)
+        const PI: number[] = new Array<number>(n + 1).fill(0)
+        for (let k = 0; k < n; k++) {
+          PH[k + 1] = PH[k]! + raw[k]!.height
+          PI[k + 1] = PI[k]! + (k === 0 ? 0 : inner(k))
+        }
+        const columnY = (j: number, i: number): number =>
+          lead(j) + (PH[i + 1]! - PH[j]!) + (PI[i + 1]! - PI[j + 1]!)
+
+        // Candidates: every achievable column-final y (the optimal
+        // pack's fullest column ends exactly at one of them).
+        const candSet = new Set<number>()
+        for (let j = 0; j < n; j++) {
+          for (let i = j; i < n; i++) candSet.add(columnY(j, i))
+        }
+        const candidates = [...candSet].sort((a, b) => a - b)
+
+        // feasible(T): the units pack into ≤ C columns at target T. THE
+        // PACK IS THE FEASIBILITY TEST — the same sequential accumulation
+        // drives both, so the search's witness and the final assignment
+        // agree BITWISE (a prefix-sum feasibility would float-associate
+        // differently from the machine-order pack and could admit a
+        // target the sequential pack overflows by an ulp — the balance
+        // would silently no-op and warm would serve stale records; the
+        // parity fuzzer caught exactly this, seed 1003).
+        const pack = (target: number): { col: number[]; top: number[] } | null => {
+          const col = new Array<number>(n).fill(0)
+          const top = new Array<number>(n).fill(0)
+          let c = 0
+          let k = 0
+          while (k < n) {
+            if (c >= C) return null
+            const g0 = lead(k)
+            if (g0 + raw[k]!.height > target) return null
+            let y = g0 + raw[k]!.height
+            col[k] = c
+            top[k] = g0
+            k++
+            while (k < n && !forcedBefore(k)) {
+              const g = inner(k)
+              if (y + g + raw[k]!.height > target) break
+              y += g
+              col[k] = c
+              top[k] = y
+              y += raw[k]!.height
+              k++
+            }
+            c++
+          }
+          return { col, top }
+        }
+        // The minimal feasible candidate (binary search; feasible at the
+        // largest candidate holds — the original layout's witness).
+        let lo = 0
+        let hi = candidates.length - 1
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1
+          if (pack(candidates[mid]!) !== null) hi = mid
+          else lo = mid + 1
+        }
+        const T = candidates[lo]!
+        const packed = pack(T)
+        if (!packed) return // unreachable (the search just succeeded) — defensive
+
+        // Fast path: the page is already the balanced assignment (the
+        // naive fill happened to be balanced, or the pass re-ran over
+        // its own output) — keep record identity.
+        let same = true
+        for (let k = 0; k < n; k++) {
+          if (raw[k]!.col !== packed.col[k]! || raw[k]!.top !== packed.top[k]!) {
+            same = false
+            break
+          }
+        }
+        if (same) return
+
+        // ── Rebuild (in place — the arrays keep their doc order) ──
+        const shiftX = (x: number, oldCol: number, newCol: number): number =>
+          x + (colLeftOf(newCol) - colLeftOf(oldCol))
+        for (let k = 0; k < n; k++) {
+          const u = raw[k]!
+          const nc = packed.col[k]!
+          const nt = packed.top[k]!
+          if (u.kind === 'line') {
+            const { index, box } = u.boxes[0]!
+            lines[index] = freezeLineBox({
+              ...box,
+              rect: {
+                x: shiftX(box.rect.x, u.col, nc),
+                y: nt,
+                width: box.rect.width,
+                height: box.rect.height,
+              },
+              column: nc,
+            })
+          } else if (u.kind === 'band') {
+            for (const { index, box } of u.boxes) {
+              lines[index] = freezeLineBox({
+                ...box,
+                rect: {
+                  x: shiftX(box.rect.x, u.col, nc),
+                  y: nt + (box.rect.y - u.top),
+                  width: box.rect.width,
+                  height: box.rect.height,
+                },
+                column: nc,
+              })
+            }
+            for (const { index, rect } of u.rects) {
+              placedOut[index] = freezePlacedRect({
+                ...rect,
+                rect: {
+                  x: shiftX(rect.rect.x, u.col, nc),
+                  y: nt + (rect.rect.y - u.top),
+                  width: rect.rect.width,
+                  height: rect.rect.height,
+                },
+                column: nc,
+              })
+            }
+          } else {
+            const { index, rect } = u.rects[0]!
+            placedOut[index] = freezePlacedRect({
+              ...rect,
+              rect: {
+                x: shiftX(rect.rect.x, u.col, nc),
+                y: nt,
+                width: rect.rect.width,
+                height: rect.rect.height,
+              },
+              column: nc,
+            })
+          }
+        }
+        // FLOATS rebuild at their balanced anchor (placeFloat's own
+        // math — the clamp runs on the new entry cursor): the balanced
+        // cursor where the float's block would have started — the page
+        // start, or the previous block-run's balanced exit.
+        for (const { block } of floats) {
+          const pr = pageRects.find((p) => p.rect.blockId === block.id && p.rect.float !== undefined)
+          if (!pr) continue
+          // The float's flow position: after the preceding block's last
+          // unit (or the page start).
+          const docIdx = docIndexOf.get(block.id) ?? 0
+          let anchor: WalkState = { pageIndex: lastPage, column: 0, y: 0 }
+          for (let k = 0; k < n; k++) {
+            if (raw[k]!.docIndex < docIdx) {
+              const spaceAfter = isLast(k) ? (blocksById.get(raw[k]!.blockId)?.spaceAfter ?? 0) : 0
+              anchor = {
+                pageIndex: lastPage,
+                column: packed.col[k]!,
+                y: packed.top[k]! + raw[k]!.height + spaceAfter,
+              }
+            } else break
+          }
+          placedOut[pr.index] = placeFloat(block, block.float!, anchor, sec.size, sec.contentBox).placedRects[0]!
+        }
+        // BREAKS: earlier-page breaks keep (in order); the
+        // onto-lastPage page-continuation keeps (atLine invariant);
+        // within-page column transitions recompute from the balanced
+        // pack. The array order is preserved (pageIndex non-decreasing;
+        // blocks in doc order).
+        let firstLastPageBreak = breaks.length
+        for (let i = 0; i < breaks.length; i++) {
+          if (breaks[i]!.pageIndex >= lastPage) {
+            firstLastPageBreak = i
+            break
+          }
+        }
+        const newTailBreaks: FragmentBreak[] = []
+        for (let k = 0; k < n; k++) {
+          const u = raw[k]!
+          if (firstOfBlock.get(u.blockId) !== k) continue // one pass per block
+          if (hasEarlier.has(u.blockId)) {
+            // The block's page continuation onto lastPage: the FIRST
+            // existing break pointing at lastPage (atLine invariant).
+            const cont = breaks
+              .slice(firstLastPageBreak)
+              .find((brk) => brk.blockId === u.blockId && brk.pageIndex === lastPage)
+            if (cont) newTailBreaks.push(cont)
+          }
+          // Column transitions within the block's run.
+          const k0 = firstOfBlock.get(u.blockId)!
+          const kL = lastOfBlock.get(u.blockId)!
+          for (let k2 = k0 + 1; k2 <= kL; k2++) {
+            if (packed.col[k2]! > packed.col[k2 - 1]!) {
+              newTailBreaks.push(
+                Object.freeze({
+                  blockId: u.blockId,
+                  atLine: raw[k2]!.lineIndex,
+                  pageIndex: lastPage,
+                }),
+              )
+            }
+          }
+        }
+        breaks.length = firstLastPageBreak
+        breaks.push(...newTailBreaks)
+      }
       let state: WalkState = startState
       let i = resume
       while (i < doc.blocks.length) {
@@ -945,6 +1398,13 @@ export function createLayoutEngine({
             // 1-col → 2-col boundary upgrades to a page start (a page
             // cannot hold two grids — the one-geometry-per-page law).
             stableStringify(next.columnSpec) === stableStringify(active.columnSpec)
+          if (!continuous) {
+            // #74 — a FLOW-TERMINATING boundary: the section's last page
+            // is final — balance it (the rebuilt exit cursor feeds the
+            // close below). A continuous same-geometry boundary shares
+            // the page and the column flow continues — no balance.
+            balanceSectionTail()
+          }
           if (!continuous && state.y > 0) state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
           sectionCursor += 1
         }
@@ -1302,6 +1762,10 @@ export function createLayoutEngine({
         }
         i = j
       }
+
+      // #74 — the document end: the last section's last page balances
+      // (the same flow-terminating law as a section boundary).
+      balanceSectionTail()
 
       walkCache = newCache
 
@@ -1796,6 +2260,7 @@ function placeBlock(
             blockId: block.id,
             kind: 'tableCell',
             pageIndex,
+            ...(multiColumn ? { column } : {}),
             rect: { x: x0 + r.x, y: y + r.y, width: r.width, height: r.height },
             cell: {
               fill: r.fill,
@@ -1841,6 +2306,7 @@ function placeBlock(
             src: block.src,
             alt: block.alt,
             pageIndex,
+            ...(multiColumn ? { column } : {}),
             rect: { x: imageLeft + colLeft(), y, width: result.width, height: result.height },
           }),
         )
@@ -1857,6 +2323,7 @@ function placeBlock(
             latex: block.latex,
             fontSize: block.fontSize,
             pageIndex,
+            ...(multiColumn ? { column } : {}),
             rect: { x: imageLeft + colLeft(), y, width: result.width, height: result.height },
           }),
         )

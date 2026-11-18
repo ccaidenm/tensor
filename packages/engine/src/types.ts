@@ -1071,6 +1071,16 @@ export interface PlacedRect {
   z?: 'front' | 'behind'
   /** Present iff kind: 'tableCell' — the cell's paint/grid data. */
   cell?: TableCellPaint
+  /**
+   * #74 COLUMNS: present IFF this rect's page's section carries more
+   * than one column — the 0-based column index the rect flows in (an
+   * index into PageGeometry.columns). rect.x is COLUMN-offset (the
+   * engine folds the column's left edge in), so rect-driven consumers
+   * are column-blind; the index serves lane-bounded consumers and the
+   * balance pass. FLOATS never carry it (page-box positioned — the
+   * clamp may place them anywhere).
+   */
+  column?: number
 }
 
 /**

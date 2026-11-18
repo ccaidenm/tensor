@@ -278,6 +278,8 @@ export interface LineBox {
 }
 ```
 
+(The #74 column facts: `PageGeometry.columns` carries a page's resolved grid and `LineBox.column`/`PlacedRect.column` the flow slot's index — both omitted on single-column documents, floats never carry the slot — see [§6.7](#67-columns-74-the-flow-slot).)
+
 Two fields deserve explanation for anyone new to text layout:
 
 - **baseline**: the y-position (from the line's top) where text "sits". Glyphs in a line are aligned on this invisible line, and a caret is drawn at the baseline height.
@@ -585,6 +587,36 @@ Any unimplemented API surface **throws**, never silently no-ops. There are curre
 
 ---
 
+### 6.7 Columns (#74): the Flow Slot
+
+Multi-column (newsletter-style) layout adds a **dimension** to the flow: the walk state is `(pageIndex, column, y)` and a **slot** is a column of the current page. Flow fills a slot top-down, then advances — the next column, else the next page. The spec rides **section geometry** (`SectionGeometry.columns` — the [§6.2](#62-the-placement-machine) geometry swap carries the grid with the page dims) plus a document-level default (`LayoutOptions.columns`, folded into the single-section fallback). Absent ≡ one column ≡ the pre-columns shape bit-for-bit — the additive law, pinned by tests and by the goldens' zero-diff.
+
+**Close taxonomy** (the one table to consult):
+
+| Close | Target |
+|---|---|
+| `placeBlock`'s internal close (R1/R2/R3/R-ATOMIC/fragment) | next **slot** (next column, else next page) — via `nextSlotState`, the one derivation |
+| structural `breakBefore`/`breakAfter: 'column'` | next **slot** |
+| structural `breakBefore`/`breakAfter: 'page'`, section boundaries, bond moves, `cursorAfter`'s page transform | next **page** (column 0) — Word: a page break wraps the page |
+
+**Width consumers.** The grid resolves into `ColumnSlot`s (engine-issued: `resolveColumnSlots` — loud on invalid specs, the adapter-contract backstop). Lines break at the grid's **narrowest column** (equal-width grids — the default — wrap at each column's width exactly; a custom-widths grid wraps conservatively so every slot holds the lines; per-column re-wrapping is future work). Every emit site folds the current slot's left edge into `rect.x` (prose/indents, table bands + cell rects, reference entries, image/equation `alignOffset` containers) — the shell's rect-driven consumers stay column-blind. Tab stops re-anchor per column (column left ≡ content-box left single-column, so existing docs parse identically).
+
+**Column facts** (the §4.2 law applied to columns): `PageGeometry.columns` carries the page's resolved grid (omitted on single-column pages); `LineBox.column` / `PlacedRect.column` carry the flow slot's index (omitted single-column; floats never carry it — they are page-box positioned). Consumers read, never derive.
+
+**Manual column breaks**: `breakBefore`/`breakAfter: 'column'` — the structural tier's third spelling. A bond at a boundary carrying ANY forced spelling drops at detection (manual breaks outrank bonds — Word parity), and the bond lookahead's slot-aware arms mirror the machine (kept for the mirror law; unreachable via the driver because the structural drop preempts). The pinned ruling: **bonds guard PAGE co-membership** — a column close keeps both lines on the page, so keep-with-next HOLDS across a column close (only a page wrap violates it).
+
+**Balanced columns.** Word equalizes the column heights on a section's last page. The walk cannot know a page is section-final until the section's last block is placed — but the section tier (at a flow-terminating boundary) and the doc end are exactly that moment. At those points the balance re-flows the page's units by a **min-max partition**: the smallest gap-aware column target T such that the units pack into ≤ C columns (the machine's own fill witnesses T = its max column y, so the balance never worsens the overflow). Rulings, all pinned:
+
+- **The cache keeps the machine form.** The balance is an OUTPUT transform over the assembled records — never a cache write. The cached records stay the unbalanced machine outputs, exactly the Markov form the splice gate's state equality proves; a page that stops being section-final serves its honest naive fill and the transform re-applies to whatever the current last page is. (An in-cache balance broke parity — warm prefix-served a previously-balanced page while cold re-walked it unbalanced, fuzzer seed 1004 — see [§7.7](#77-the-fuzzer-catches).)
+- **The pack IS the feasibility test.** One sequential accumulation drives both, so the search's witness and the final assignment agree bitwise (a prefix-sum feasibility float-associates differently and admitted a target the machine-order pack overflowed by an ulp — the balance silently no-op'd; fuzzer seed 1003).
+- **Boundary minimums are not re-applied** at balance-created column boundaries (the balance redistributes already-placed units; v1 ruling).
+- **No balance at a continuous same-geometry boundary** — the sections share the page and the column flow continues; the shared page balances once, at the doc end.
+- **`balanced: false`** opts out; the count is per `ColumnsSpec`.
+
+Unit granularity: prose/reference lines, table bands (a band never splits across a column boundary), atomic images/equations. Floats carry no flow presence — their rects rebuild at the balanced anchor via `placeFloat` itself. FragmentBreaks: a block's page continuation keeps its `atLine` (invariant — the balance preserves the page's line set); within-page column transitions recompute from the balanced pack.
+
+---
+
 ## 7. The Incremental Cache
 
 Layout is a pure function, so a warm engine can memoize aggressively, **provided** warm output stays identical to cold output.
@@ -594,9 +626,9 @@ Layout is a pure function, so a warm engine can memoize aggressively, **provided
 > [!IMPORTANT]
 > The engine instance may memoize; warm output must deep-equal cold output, verified by the [fuzzer](#9-testing-strategy), forever.
 
-`tests/parity.fuzz.test.ts` is the enforcement: a hand-rolled seeded PRNG (mulberry32, no dependencies)[^mulberry32] generates random documents, with mixed font sizes, mixed `lineHeight`s in $\{1.0, 1.5, 2.0\}$, occasional headings, and the full flow menu, then applies 15 random edit operations (insert / delete / edit / swap-adjacent / opts toggle) per sequence. After **every** op, the warm engine's output must deep-equal a fresh cold engine's output (`version` excluded). 40 sequences, fixed seeds `1001..1040`; a failure prints its seed. The corpus has changed deliberately four times (flow policy, `lineHeight`, `indentLeft`, and the indent-family completion `indentRight`/`firstLineIndent` — the generator's `firstLineIndent` menu is non-negative by construction, because a negative value under a small `indentLeft` is the loud-seam throw; the hanging case is pinned by explicit tests): seeds stay, sequences shift, and that is stated in the commit.
+`tests/parity.fuzz.test.ts` is the enforcement: a hand-rolled seeded PRNG (mulberry32, no dependencies)[^mulberry32] generates random documents, with mixed font sizes, mixed `lineHeight`s in $\{1.0, 1.5, 2.0\}$, occasional headings, the full flow menu (forced breaks in both the `page` and #74's `column` spellings), and a drawn column spec (whole sequence; redrawn by the `toggle-columns` op), then applies 15 random edit operations (insert / delete / edit / swap-adjacent / columns toggle / opts toggle) per sequence. After **every** op, the warm engine's output must deep-equal a fresh cold engine's output (`version` excluded). 40 sequences, fixed seeds `1001..1040`; a failure prints its seed. The corpus has changed deliberately six times (flow policy, `lineHeight`, `indentLeft`, the indent-family completion `indentRight`/`firstLineIndent`, the column-break flow spellings, and the column-spec menu/toggle — the generator's `firstLineIndent` menu is non-negative by construction, because a negative value under a small `indentLeft` is the loud-seam throw; the hanging case is pinned by explicit tests): seeds stay, sequences shift, and that is stated in the commit.
 
-The fuzzer has caught two real cache bugs already, see [§7.7](#77-the-two-fuzzer-catches). It is a test that must pass forever, not a debug flag for suspected staleness.
+The fuzzer has caught two real cache bugs already, see [§7.7](#77-the-fuzzer-catches). It is a test that must pass forever, not a debug flag for suspected staleness.
 
 ### 7.2 What Is Cached
 
@@ -712,15 +744,17 @@ function cursorAfter(block: Block, exit: WalkState): WalkState {
 
 This bit the engine once (a fuzzer-caught parity hole): the splice consumed a cached exit without the close, and the next block walked into a stale mid-page state. `cursorAfter` is applied at splice consume, splice pull-back restore, and walk start reconstruction.
 
-### 7.7 The Two Fuzzer Catches
+### 7.7 The Fuzzer Catches
 
-A short bug retrospective, collapsed by default. Both were found by replaying a failing seed with a small debug harness (the seed is printed in the assertion message), reproducing the divergence, and reading the first differing line box. That workflow (replay, dump, fix, delete the harness) is the intended response to any future `PARITY FAIL seed=…`.
+A short bug retrospective, collapsed by default. All were found by replaying a failing seed with a small debug harness (the seed is printed in the assertion message), reproducing the divergence, and reading the first differing line box. That workflow (replay, dump, fix, delete the harness) is the intended response to any future `PARITY FAIL seed=…`.
 
 <details>
-<summary>Replay: the two cache holes the fuzzer caught</summary>
+<summary>Replay: the four holes the fuzzer caught</summary>
 
 1. **Splice ended on a bonded predecessor** whose successor was the next *edited* block: stale bond context, warm ≠ cold. Fix: the splice pull-back described in [§7.4](#74-splice-the-unchanged-suffix).
 2. **`cursorAfter` missing** at splice consume: a `breakAfter` block consumed from cache left the cursor mid-page. Fix: [§7.6](#76-cursor-reconstruction).
+3. **The balance's feasibility float-associated differently from its pack** (#74): a prefix-sum `columnY` test admitted a target the sequential machine-order pack overflowed by an ulp — the balance silently no-op'd on some pages and warm served a different assignment than cold (seed 1003). Fix: the pack IS the feasibility test — one sequential accumulation ([§6.7](#67-columns-74-the-flow-slot)).
+4. **The balance wrote the walk cache** (#74): warm prefix-served a previously-balanced page that had stopped being section-final while cold re-walked it unbalanced (seed 1004). Fix: the cache keeps the machine form; the balance is an output transform re-applied to the current last page every call.
 
 </details>
 
