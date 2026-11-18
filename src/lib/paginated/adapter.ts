@@ -287,7 +287,7 @@ export interface AdapterResult {
    * never read it — markers never print.
    */
   breakFacts: {
-    kind: 'pageBreak' | 'sectionBreak';
+    kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
     type: 'nextPage' | 'continuous';
     pos: number;
     afterBlockId: string | null;
@@ -1570,7 +1570,10 @@ export function pmDocToSemantic(
   const blocks: AdapterBlock[] = [];
   const semantic: Block[] = [];
   const dropped = new Set<string>();
-  let pendingBreakBefore = false;
+  // #74 — the pending forced-break SPELLING ('page' from a pageBreak
+  // node, 'column' from a columnBreak node) — the stamp merges it into
+  // the following block's flow.
+  let pendingBreakBefore: 'page' | 'column' | null = null;
   // M-FLOW — a breakAfter attr's badge anchors above the block it
   // forces — the NEXT in-flow block. Set when the breaking block
   // pushes, attached when the forced block pushes.
@@ -1584,17 +1587,22 @@ export function pmDocToSemantic(
     type: 'nextPage' | 'continuous';
   }[] = [];
 
-  // #58 — the NPC sidecar: every pageBreak/sectionBreak atom with the
-  // block following it (the view paints formatting-mark badges just
-  // above that block's first line — view-only ink, never printed: the
-  // print walk reads the engine's layout, not this sidecar).
+  // #58 — the NPC sidecar: every pageBreak/sectionBreak/columnBreak
+  // atom with the block following it (the view paints formatting-mark
+  // badges just above that block's first line — view-only ink, never
+  // printed: the print walk reads the engine's layout, not this
+  // sidecar). #74 — a columnBreak fact's `type` is inert (the badge
+  // labels off the kind); 'nextPage' keeps the section-typed union.
   const breakFacts: {
-    kind: 'pageBreak' | 'sectionBreak';
+    kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
     type: 'nextPage' | 'continuous';
     pos: number;
     afterBlockId: string | null;
   }[] = [];
-  let pendingBreakFact: { kind: 'pageBreak' | 'sectionBreak'; type: 'nextPage' | 'continuous' } | null = null;
+  let pendingBreakFact: {
+    kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
+    type: 'nextPage' | 'continuous';
+  } | null = null;
 
   // #58 — the PRE-SCAN: a band container may carry a sectionId whose
   // break node sits LATER in doc order (band containers at the doc
@@ -1718,7 +1726,7 @@ export function pmDocToSemantic(
       conv.semantic.kind === 'image' && (conv.semantic as { float?: unknown }).float != null;
     const block =
       pendingBreakBefore && !floated
-        ? { ...conv.semantic, flow: { ...conv.semantic.flow, breakBefore: 'page' as const } }
+        ? { ...conv.semantic, flow: { ...conv.semantic.flow, breakBefore: pendingBreakBefore } }
         : conv.semantic;
     // #58 — a pending pageBreak NPC attaches to THIS block (the block
     // it forces — the marker paints just above its first line).
@@ -1739,13 +1747,26 @@ export function pmDocToSemantic(
     // (the two spellings, one visual language). Style-tier breaks do
     // NOT badge (a style that breaks before every heading would paint
     // every heading — the attr is the user's visible act).
-    if (!floated && !stampedHere && node.attrs?.breakBefore === 'page') {
-      breakFacts.push({ kind: 'pageBreak', type: 'nextPage', pos, afterBlockId: block.id });
+    const directBreakBefore = node.attrs?.breakBefore;
+    if (
+      !floated &&
+      !stampedHere &&
+      (directBreakBefore === 'page' || directBreakBefore === 'column')
+    ) {
+      // M-FLOW/#74 — DIRECT-attr forced breaks badge like the node
+      // spelling (the two spellings, one visual language); the badge's
+      // kind follows the spelling.
+      breakFacts.push({
+        kind: directBreakBefore === 'page' ? 'pageBreak' : 'columnBreak',
+        type: 'nextPage',
+        pos,
+        afterBlockId: block.id,
+      });
     }
     if (!floated && node.attrs?.breakAfter === 'page') {
       pendingAfterBreakFact = { pos };
     }
-    if (!floated) pendingBreakBefore = false;
+    if (!floated) pendingBreakBefore = null;
     semantic.push(block);
     blocks.push({ ...conv.adapter, from: pos, to: pos + node.nodeSize });
   };
@@ -1913,10 +1934,21 @@ export function pmDocToSemantic(
       // Forced page break on the FOLLOWING block. A trailing pageBreak
       // (nothing follows) has no block to force — the engine derives
       // pages from placed lines, so it is simply skipped.
-      pendingBreakBefore = true;
+      pendingBreakBefore = 'page';
       // #58 — the NPC sidecar (the marker paints just above the
       // following block's first line).
       pendingBreakFact = { kind: 'pageBreak' as const, type: 'nextPage' as const };
+      return;
+    }
+
+    if (name === 'columnBreak') {
+      // #74 COLUMNS — forced column break on the FOLLOWING block (the
+      // pageBreak law: the node is NOT part of the IR). A trailing
+      // columnBreak is simply skipped (slots derive from placed lines).
+      pendingBreakBefore = 'column';
+      // #74 — the NPC sidecar (the marker paints just above the
+      // following block's first line, at its column's frame).
+      pendingBreakFact = { kind: 'columnBreak' as const, type: 'nextPage' as const };
       return;
     }
 
@@ -2126,7 +2158,10 @@ export function pmDocToSemantic(
     const geometryOf = (setup: PageSetup | null, prev: PageSetup | null): SectionBoundary['geometry'] => {
       const effective: PageSetup = setup ?? prev ?? (pageSetup ?? FALLBACK_PAGE_SETUP);
       const lo = toLayoutOptions(effective);
-      return { page: lo.page, margins: lo.margins };
+      // #74 COLUMNS — the section's spec rides the geometry verbatim
+      // (the engine's boundary law swaps it with page/margins); absent
+      // ≡ one column, so the field is simply omitted.
+      return { page: lo.page, margins: lo.margins, ...(lo.columns ? { columns: lo.columns } : {}) };
     };
     // THE COMPLETE TABLE (n breaks → n+1 sections): section 0 at the
     // doc start (break 0's props), section k after break k−1 (break

@@ -81,6 +81,16 @@ export function mutedColorOf(color: string | undefined): string {
 export interface PaintExtras {
   align: TextAlign;
   contentWidth: number;
+  /**
+   * #74 COLUMNS — the group's COLUMN frame (content-box-relative): the
+   * decor surfaces (blockquote/code tints, the reference border, the
+   * rule line, the leader extent) span the COLUMN, not the content
+   * box, and the align container is the column's. Absent ≡ the content
+   * box (single-column — every existing doc paints bit-identically).
+   * The group is per-column (the canvas grouping keys blockId+column),
+   * so ONE frame covers the whole paint call.
+   */
+  columnLeft?: number;
   runDecor: readonly RunDecor[];
   /**
    * NON-PRINTING CHARACTERS (M6, paint-only v1): ¶ at every block
@@ -174,6 +184,10 @@ export function paintLines(
 ): void {
   const align = extras.align;
   const contentWidth = extras.contentWidth;
+  // #74 — the COLUMN frame: the decor surfaces and the align container
+  // are the column's (left defaults to 0 = the content box's left).
+  const columnLeft = extras.columnLeft ?? 0;
+  const columnWidth = contentWidth;
   const runDecor = extras.runDecor;
   const npc = extras.npc === true;
   const paint = extras.paint;
@@ -206,33 +220,36 @@ export function paintLines(
     ctx.lineWidth = 1;
     if (typeof ctx.roundRect === 'function') {
       ctx.beginPath();
-      ctx.roundRect(0.5, 0.5, contentWidth - 1, bottom - 0.5, 4);
+      ctx.roundRect(columnLeft + 0.5, 0.5, columnWidth - 1, bottom - 0.5, 4);
       ctx.stroke();
     } else {
-      ctx.strokeRect(0.5, 0.5, contentWidth - 1, bottom - 0.5);
+      ctx.strokeRect(columnLeft + 0.5, 0.5, columnWidth - 1, bottom - 0.5);
     }
     ctx.strokeStyle = prevStroke;
     ctx.lineWidth = prevWidth;
   }
 
   for (const line of lines) {
-    const off = alignOffset(align, line.rect.width, contentWidth - line.rect.x);
+    // #74 — the align container is the COLUMN's (a centered block
+    // centers on its column, Word's ruling the engine already keeps).
+    const off = alignOffset(align, line.rect.width, columnLeft + columnWidth - line.rect.x);
     const baselineY = line.rect.y - minY + line.baseline;
     const baseX = line.rect.x + off;
 
     // BLOCK DECOR (before ink, per line — fragments tile seamlessly):
+    // #74 — the tints span the COLUMN, not the content box.
     if (paint?.blockquote) {
       const prev = ctx.fillStyle;
       ctx.fillStyle = QUOTE_BG_COLOR;
-      ctx.fillRect(0, line.rect.y - minY, contentWidth, line.rect.height);
+      ctx.fillRect(columnLeft, line.rect.y - minY, columnWidth, line.rect.height);
       ctx.fillStyle = QUOTE_BORDER_COLOR;
-      ctx.fillRect(4, line.rect.y - minY, 3, line.rect.height);
+      ctx.fillRect(columnLeft + 4, line.rect.y - minY, 3, line.rect.height);
       ctx.fillStyle = prev;
     }
     if (paint?.code) {
       const prev = ctx.fillStyle;
       ctx.fillStyle = CODE_BG_COLOR;
-      ctx.fillRect(0, line.rect.y - minY, contentWidth, line.rect.height);
+      ctx.fillRect(columnLeft, line.rect.y - minY, columnWidth, line.rect.height);
       ctx.fillStyle = prev;
     }
     // M-REFS-8 — THE LEADER INK (gap-filling dots): for a leader row
@@ -459,7 +476,8 @@ export function paintLines(
       const prev = ctx.fillStyle;
       ctx.fillStyle = RULE_COLOR;
       const ruleY = Math.round(line.rect.y - minY + line.baseline * 0.55);
-      ctx.fillRect(line.rect.x, ruleY, contentWidth - line.rect.x, 1);
+      // #74 — the rule spans to the COLUMN's right edge.
+      ctx.fillRect(line.rect.x, ruleY, columnLeft + columnWidth - line.rect.x, 1);
       ctx.fillStyle = prev;
     }
 
@@ -521,7 +539,19 @@ export function paintLines(
 export function assertContiguity(result: LayoutResult): void {
   if (!import.meta.env.DEV) return;
   for (let p = 0; p < result.pages.length; p++) {
-    const items: { y: number; h: number; what: string }[] = [];
+    // #74 COLUMNS — the flow track is PER COLUMN: each of the page's
+    // column lanes tiles y=0 → h independently (parallel lanes share
+    // ys by design, exactly like table-cell lanes). The lane key: the
+    // record's column index (absent ≡ 0 — the single-lane page).
+    const tracks = new Map<number, { y: number; h: number; what: string }[]>();
+    const push = (col: number, item: { y: number; h: number; what: string }) => {
+      let track = tracks.get(col);
+      if (!track) {
+        track = [];
+        tracks.set(col, track);
+      }
+      track.push(item);
+    };
     for (const line of result.lines) {
       if (line.pageIndex !== p) continue;
       // Table cell lines: lane content inside their band — the band's
@@ -531,21 +561,23 @@ export function assertContiguity(result: LayoutResult): void {
       // flow-track content (the body track starts at the content box,
       // which the engine already inset by the band reservation).
       if (line.band) continue;
-      items.push({ y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
+      push(line.column ?? 0, { y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
     }
     for (const pr of result.placed) {
       if (pr.pageIndex !== p || pr.z != null) continue;
-      items.push({ y: pr.rect.y, h: pr.rect.height, what: `placed(${pr.blockId})` });
+      push(pr.column ?? 0, { y: pr.rect.y, h: pr.rect.height, what: `placed(${pr.blockId})` });
     }
-    items.sort((a, b) => a.y - b.y);
-    let expectedY = 0;
-    for (const it of items) {
-      if (it.y !== expectedY) {
-        console.error(
-          `[paginated] contiguity violated on page ${p}: ${it.what} y=${it.y}, expected ${expectedY}`
-        );
+    for (const [col, items] of tracks) {
+      items.sort((a, b) => a.y - b.y);
+      let expectedY = 0;
+      for (const it of items) {
+        if (it.y !== expectedY) {
+          console.error(
+            `[paginated] contiguity violated on page ${p} column ${col}: ${it.what} y=${it.y}, expected ${expectedY}`
+          );
+        }
+        expectedY = it.y + it.h;
       }
-      expectedY = it.y + it.h;
     }
   }
 }

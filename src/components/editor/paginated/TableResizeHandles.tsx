@@ -67,6 +67,8 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       widths: number[];
       /** The table's current total width. */
       total: number;
+      /** #74 — the table's flow slot (the scale-all max's bound). */
+      column?: number;
     }[] = [];
     for (const [blockId, rects] of byTable) {
       // The track edges: sorted distinct left+right edges.
@@ -99,6 +101,8 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
           rightmost: i === sorted.length - 1,
           widths,
           total,
+          // #74 — the table's flow slot (the scale-all max's bound).
+          column: rects[0]!.column,
         });
       }
     }
@@ -115,9 +119,12 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       if (tablePos == null) return;
       const dx = (ev.clientX - startX) / z;
       if (h.rightmost) {
-        // The TABLE border: scale every track to the new total.
+        // The TABLE border: scale every track to the new total. #74 —
+        // the max is the table's COLUMN's width under columns (the
+        // engine's track derivation runs against the slot).
         const min = h.widths.length * CELL_MIN_TRACK;
-        const max = geometry.contentBox.width;
+        const slot = h.column != null ? geometry.columns?.[h.column] : undefined;
+        const max = slot ? slot.width : geometry.contentBox.width;
         const newTotal = Math.min(max, Math.max(min, h.total + dx));
         const scale = newTotal / h.total;
         setTableTracks(editor, tablePos, h.widths.map((w) => w * scale));

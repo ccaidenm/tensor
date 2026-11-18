@@ -4,7 +4,7 @@ import { EditorContent, type Editor } from '@tiptap/react';
 import type { Transaction } from '@tiptap/pm/state';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
-import type { EquationMetrics, LayoutEngine, LayoutResult, LineBox, TextMetrics } from '@tensor-editor/engine';
+import type { EquationMetrics, LayoutEngine, LayoutResult, LineBox, PageGeometry, TextMetrics } from '@tensor-editor/engine';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import {
   pmDocToSemantic,
@@ -168,6 +168,18 @@ interface LayoutState {
 interface SearchPaint {
   all: PaintedRect[];
   current: PaintedRect[];
+}
+
+/** #74 COLUMNS — the line-owns-x test for the text-track probes: the
+ * line's column frame contains the content-box-relative x. Single-
+ * column pages keep the y-only behavior (bit-identical — the additive
+ * law); a columned page requires the click to fall in the line's own
+ * slot band, so a column-2 click can never claim column-1 text. */
+function lineOwnsX(page: PageGeometry, line: LineBox, x: number): boolean {
+  if (page.columns == null) return true;
+  const slot = page.columns[line.column ?? 0];
+  if (!slot) return true;
+  return x >= slot.x && x < slot.x + slot.width;
 }
 
 export function PaginatedView({ editor, metrics: injectedMetrics, equationMetrics: injectedEquationMetrics }: PaginatedViewProps) {
@@ -1075,7 +1087,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       (l) =>
         l.pageIndex === pageIndex &&
         inPageY >= l.rect.y &&
-        inPageY <= l.rect.y + l.rect.height,
+        inPageY <= l.rect.y + l.rect.height &&
+        lineOwnsX(page, l, inPageX),
     );
     if (!textTrackHit) {
       const behind = layout.result.placed.filter(
@@ -1230,12 +1243,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         }
       }
       // 2. The text track: a line's rect under the click means text
-      //    wins over any behind float (the paint-order mirror).
+      //    wins over any behind float (the paint-order mirror). #74 —
+      //    the line must own the click's COLUMN too.
       const textTrackHit = layout.result.lines.some(
         (l) =>
           l.pageIndex === pageIndex &&
           inPageY >= l.rect.y &&
-          inPageY <= l.rect.y + l.rect.height,
+          inPageY <= l.rect.y + l.rect.height &&
+          lineOwnsX(page, l, inPageX),
       );
       // 3. BEHIND floats — only in text-empty space:
       if (!textTrackHit) {
@@ -1743,7 +1758,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // frozen LineBoxes zero-copy across results). Computed before the
   // early returns — hooks must be unconditional.
   const groupsByPage = useMemo(() => {
-    const map = new Map<number, { blockId: string; lines: LineBox[] }[]>();
+    // #74 COLUMNS — the group key is blockId + COLUMN: a block whose
+    // fragment flows from column 1 into column 2 gets ONE canvas PER
+    // COLUMN (a single canvas would be non-monotonic in y — the
+    // column-2 lines restart at the slot top — and duplicate the React
+    // key). Within a column the fragment stays y-monotonic; the
+    // column index rides the group (the canvas's columnFrame).
+    const map = new Map<number, { blockId: string; column?: number; lines: LineBox[] }[]>();
     if (!layout) return map;
     for (const line of layout.result.lines) {
       let pageGroups = map.get(line.pageIndex);
@@ -1751,9 +1772,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         pageGroups = [];
         map.set(line.pageIndex, pageGroups);
       }
-      let group = pageGroups.find((g) => g.blockId === line.blockId);
+      let group = pageGroups.find(
+        (g) => g.blockId === line.blockId && (g.column ?? 0) === (line.column ?? 0),
+      );
       if (!group) {
-        group = { blockId: line.blockId, lines: [] };
+        group = {
+          blockId: line.blockId,
+          ...(line.column != null ? { column: line.column } : {}),
+          lines: [],
+        };
         pageGroups.push(group);
       }
       group.lines.push(line);
@@ -2266,13 +2293,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     const block = blocks.find((b) => b.id === group.blockId);
                     if (!block) return null;
                     const minY = group.lines[0].rect.y;
+                    // #74 — the group's COLUMN frame (the decor surface
+                    // + the wrap input are the column's; absent ≡ the
+                    // content box).
+                    const slot =
+                      group.column != null ? page.columns?.[group.column] : undefined;
+                    const frameLeft = slot ? slot.x : 0;
+                    const frameWidth = slot ? slot.width : page.contentBox.width;
                     // M-HEADER-FOOTER-2: band groups — muted ink unless
                     // the selection sits in a band container (the
                     // active-band signal, selection-driven).
                     const bandWhich = group.lines[0].band;
                     return (
                       <BlockCanvas
-                        key={group.blockId}
+                        key={`${group.blockId}|${group.column ?? 0}`}
                         lines={group.lines}
                         runs={block.runs}
                         text={block.text}
@@ -2291,9 +2325,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                             | undefined)?.style ?? defaultRunStyle
                         }
                         wrapWidth={
-                          page.contentBox.width -
+                          frameWidth -
                           (block.indentLeft ?? 0) -
                           (block.indentRight ?? 0)
+                        }
+                        columnFrame={
+                          group.column != null
+                            ? { left: frameLeft, width: frameWidth }
+                            : undefined
                         }
                         styleEpoch={layout.styleEpoch}
                         showCaptions={showCaptions}
@@ -2322,6 +2361,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 {lnNumbers &&
                   (() => {
                     const entries: { line: (typeof result.lines)[number]; number: number }[] = [];
+                    // #74 — the v1 ruling: the gutter DISABLES on
+                    // columned pages (two lanes share the same ys — the
+                    // numbers would collide in the margin strip).
+                    // Single-column pages number exactly as before.
+                    if (page.columns != null) return null;
                     for (let i = 0; i < result.lines.length; i++) {
                       const line = result.lines[i]!;
                       if (line.pageIndex !== page.index) continue;

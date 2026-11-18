@@ -37,6 +37,16 @@ const PageSetupSchema = z.object({
     })
     .nullable()
     .optional(),
+  /** #74 COLUMNS — the document-level column spec; absent/null = one column. */
+  columns: z
+    .object({
+      count: z.number().int().min(1),
+      gap: z.number().nonnegative().optional(),
+      widths: z.array(z.number()).optional(),
+      balanced: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
 }) satisfies z.ZodType<PageSetup>;
 
 /**

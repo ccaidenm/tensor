@@ -1,7 +1,21 @@
-import { fitDownImage, type LayoutResult, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
+import { fitDownImage, type LayoutResult, type PageGeometry, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
 import { pageIndexAtY, pageTops } from './pageStack';
 import type { AdapterBlock } from './adapter';
-import { alignOffset, blockWrapWidth } from './positionMap';
+import { alignOffset, blockWrapWidth, lineColumnFrame } from './positionMap';
+
+/** #74 — the click's COLUMN index: the page's resolved grid facts +
+ * the content-box-relative x. A click inside a column's band picks
+ * that column; gutter/margin clicks clamp to the nearest column's
+ * range (the first column whose left edge is at/past the click, else
+ * the last column — a margin click routes to the nearest text, Word's
+ * posture). Single-column pages → 0 (the one lane). */
+function clickColumnOf(page: PageGeometry, x: number): number {
+  if (!page.columns || page.columns.length === 0) return 0;
+  const found = page.columns.findIndex((c) => x >= c.x && x < c.x + c.width);
+  if (found >= 0) return found;
+  const next = page.columns.findIndex((c) => c.x >= x);
+  return next >= 0 ? next : page.columns.length - 1;
+}
 
 // THE NEAREST-LINE RULE (from the legacy dead-zone fixtures): clicks
 // resolve to the nearest line WITHIN the nearest sheet — a click in a
@@ -106,17 +120,22 @@ export function hitTest(
   }
 
   // Flow clamps (body lines only — a band-only page has none, and its
-  // clicks are owned by the band rule above).
-  if (flowLines.length > 0) {
-    const first = flowLines[0]!;
-    const last = flowLines[flowLines.length - 1]!;
+  // clicks are owned by the band rule above). #74 — the clamps are
+  // COLUMN-scoped: the click's lane's first/last line, so a click
+  // above/below column 2 clamps to column 2's endpoints, never column
+  // 1's (the single-column page has one lane — identical behavior).
+  const clickColumn = clickColumnOf(result.pages[pageIndex]!, x);
+  const laneFlow = flowLines.filter((l) => (l.column ?? 0) === clickColumn);
+  if (laneFlow.length > 0) {
+    const first = laneFlow[0]!;
+    const last = laneFlow[laneFlow.length - 1]!;
     if (y < first.rect.y)
       return { blockId: first.blockId, offset: first.rangeStart, pageIndex };
     if (y >= last.rect.y + last.rect.height) {
       return { blockId: last.blockId, offset: last.rangeEnd, pageIndex };
     }
   }
-  const bodyLast = flowLines[flowLines.length - 1];
+  const bodyLast = laneFlow[laneFlow.length - 1];
 
   // M-TABLES — THE CELL-FIRST RULE: a click inside a tableCell rect
   // resolves within THAT cell (the lane's own lines, y-clamped),
@@ -137,7 +156,10 @@ export function hitTest(
     // (rect.x IS indentLeft). A click in the marker GUTTER (x < indent)
     // falls through the nearest-glyph loop and resolves to the item's
     // first position — the nearest-line rule stays symmetric with paint.
-    const baseX = line.rect.x + alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+    // #74 — the align container and the clamp width are the line's
+    // COLUMN's (the engine broke the line at the column's width).
+    const frame = lineColumnFrame(result.pages[pageIndex]!, line);
+    const baseX = line.rect.x + alignOffset(block.align, line.rect.width, frame.left + frame.width - line.rect.x);
     // M-PAGEFIELD: the per-page INK SHIFT accumulates across the walk
     // (fieldShiftBefore — the same derivation paint/lineOffsetX use).
     // Drawn ink sits at measured - shift; the walk compensates so
@@ -178,8 +200,9 @@ export function hitTest(
         // resolves to its offset (the token position BEFORE the node).
         // The clamp width is the cell's LANE CONTENT width for table
         // lines (the engine's own clamp input), else the block's BASE
-        // wrap width — the SAME inputs the engine's clamp used.
-        const wrap = line.tableCell ? line.tableCell.width : blockWrapWidth(cb.width, block);
+        // wrap width — the SAME inputs the engine's clamp used. #74 —
+        // the base wrap is the COLUMN's width.
+        const wrap = line.tableCell ? line.tableCell.width : blockWrapWidth(frame.width, block);
         const dims = fitDownImage(run.width, run.height, wrap, Infinity);
         if (x < cursor + dims.width) return { blockId: line.blockId, offset: seg.start, pageIndex };
         continue;
@@ -227,9 +250,13 @@ export function hitTest(
   // Lines tile the content box (band-wise contiguity) — table cell
   // lines are lane content (skipped: the cell-first rule above owns
   // them); band lines are band content (the strip rule above owns
-  // them); exactly one flow line contains y.
+  // them); exactly one flow line contains y. #74 — the match is
+  // COLUMN-scoped: the click's lane's lines share the slot index, so a
+  // column-2 click resolves to column 2's line at that y, never
+  // column 1's (the M-TABLES cell-lane rule generalized; the
+  // single-column page has one lane — identical behavior).
   const line =
-    pageLines.find(
+    laneFlow.find(
       (l) => !l.tableCell && !l.band && y >= l.rect.y && y < l.rect.y + l.rect.height,
     ) ?? bodyLast;
   if (!line) return null;

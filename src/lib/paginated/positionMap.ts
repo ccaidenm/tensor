@@ -1,5 +1,5 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { fitDownImage, type LayoutResult, type LineBox, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
+import { fitDownImage, type LayoutResult, type LineBox, type PageGeometry, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
 import { pageTops } from './pageStack';
 import type { AdapterBlock } from './adapter';
 
@@ -22,6 +22,25 @@ export function alignOffset(align: TextAlign, lineWidth: number, contentWidth: n
   if (align === 'center') return (contentWidth - lineWidth) / 2;
   if (align === 'right') return contentWidth - lineWidth;
   return 0;
+}
+
+/** #74 COLUMNS — the COLUMN frame a line flows in, from the engine's
+ * resolved grid facts (PageGeometry.columns + LineBox.column): the
+ * column's left edge and width, CONTENT-BOX-relative. Single-column
+ * pages (no facts, no slot index) return the content box itself, so
+ * every existing caller's behavior is bit-identical — the additive
+ * law. THE ONE derivation: the align containers (a centered block
+ * centers on its column, not the content box), the wrap-width inputs
+ * (the engine broke the line at the column's width), and the
+ * selection-stripe clamps (middle lines end at the column's right
+ * edge, not the content box's) all consume this — a second derivation
+ * anywhere is the asymmetry bug class alignOffset kills. */
+export function lineColumnFrame(page: PageGeometry, line: LineBox): { left: number; width: number } {
+  if (page.columns && line.column != null) {
+    const slot = page.columns[line.column];
+    if (slot) return { left: slot.x, width: slot.width };
+  }
+  return { left: 0, width: page.contentBox.width };
 }
 
 export interface PaintedRect {
@@ -380,13 +399,14 @@ export function inlineObjectRect(
   const line = lineForOffset(result.lines.filter((l) => l.blockId === block.id), offset);
   if (!page0 || !line) return null;
   // #58 — the line's OWN page carries the contentBox (mixed sections).
-  const cb = result.pages[line.pageIndex]!.contentBox;
-  const wrap = blockWrapWidth(cb.width, block);
+  // #74 — the wrap and align containers are the line's COLUMN's.
+  const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
+  const wrap = blockWrapWidth(frame.width, block);
   const seg = line.segments.find((s) => offset >= s.start && offset < s.end);
   const run = seg ? block.runs[seg.runIndex] : undefined;
   if (!seg || !run || run.kind !== 'inlineImage') return null;
   const dims = fitDownImage(run.width, run.height, wrap, Infinity);
-  const off = alignOffset(block.align, line.rect.width, cb.width - line.rect.x);
+  const off = alignOffset(block.align, line.rect.width, frame.left + frame.width - line.rect.x);
   // The object's left edge: everything before the token advanced
   // (text measured + earlier objects' placed widths).
   const left = off + lineOffsetX(line, block, offset, metrics, wrap);
@@ -493,19 +513,24 @@ export function textRangeLineRects(
     const first = idx === 0;
     const last = idx === spans.length - 1;
     // Partial first/last lines ride the same alignOffset the caret and
-    // hitTest use; middle lines span the full content width. The
-    // offset's width input is the INDENT-NARROWED box
-    // (contentWidth − line.rect.x — rect.x IS the engine's indentLeft):
+    // hitTest use; middle lines span their COLUMN's width (#74 — the
+    // column frame below owns the container). The offset's width input
+    // is the INDENT-NARROWED box (rect.x IS the engine's indentLeft):
     // centered/right-aligned indented blocks align inside their own
-    // column, not the whole content box. Selection rects start at
-    // indentLeft automatically (lineOffsetX begins at line.rect.x).
+    // column. Selection rects start at indentLeft automatically
+    // (lineOffsetX begins at line.rect.x).
+    // #74 — the line's COLUMN frame: the align container, the wrap
+    // input, and the middle-line right edge are the COLUMN's (the
+    // engine broke the line at the column's width and folded colLeft
+    // into rect.x). Single-column ≡ the content box.
+    const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
-        ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
+        ? alignOffset(block.align, line.rect.width, frame.left + frame.width - line.rect.x)
         : 0;
-    const wrap = blockWrapWidth(cb.width, block);
+    const wrap = blockWrapWidth(frame.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
-    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : frame.left + frame.width;
     // M-TABLES: a cell line's rects clamp to the LANE — a selection's
     // middle lines must never stripe across the neighboring cells.
     const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
@@ -555,13 +580,18 @@ export function textRangeTextExtents(
     // builder for the full rationale.
     const first = idx === 0 || line.band != null;
     const last = idx === spans.length - 1 || line.band != null;
+    // #74 — the line's COLUMN frame: the align container, the wrap
+    // input, and the middle-line right edge are the COLUMN's (the
+    // engine broke the line at the column's width and folded colLeft
+    // into rect.x). Single-column ≡ the content box.
+    const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
-        ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
+        ? alignOffset(block.align, line.rect.width, frame.left + frame.width - line.rect.x)
         : 0;
-    const wrap = blockWrapWidth(cb.width, block);
+    const wrap = blockWrapWidth(frame.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
-    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : frame.left + frame.width;
     // M-TABLES: the cell lane clamp (the selection rects' rule).
     const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
     const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
@@ -642,13 +672,18 @@ export function textRangeUnderlineRects(
     // the whole header" bug. Each echo is its own line sequence.
     const first = idx === 0 || line.band != null;
     const last = idx === spans.length - 1 || line.band != null;
+    // #74 — the line's COLUMN frame: the align container, the wrap
+    // input, and the middle-line right edge are the COLUMN's (the
+    // engine broke the line at the column's width and folded colLeft
+    // into rect.x). Single-column ≡ the content box.
+    const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
-        ? alignOffset(block.align, line.rect.width, cb.width - line.rect.x)
+        ? alignOffset(block.align, line.rect.width, frame.left + frame.width - line.rect.x)
         : 0;
-    const wrap = blockWrapWidth(cb.width, block);
+    const wrap = blockWrapWidth(frame.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
-    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : cb.width;
+    const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : frame.left + frame.width;
     const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
     const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
     const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
@@ -739,14 +774,15 @@ export function caretGeometry(
   if (!line || !page0) return null;
   // #58 — the caret line's OWN page carries the contentBox (mixed
   // sections; a uniform doc is the degenerate same-page case).
-  const caretCb = result.pages[line.pageIndex]!.contentBox;
+  // #74 — the caret's wrap and align containers are the COLUMN's.
+  const caretFrame = lineColumnFrame(result.pages[line.pageIndex]!, line);
   return {
     pageIndex: line.pageIndex,
     x:
-      lineOffsetX(line, bo.block, bo.offset, metrics, blockWrapWidth(caretCb.width, bo.block)) +
+      lineOffsetX(line, bo.block, bo.offset, metrics, blockWrapWidth(caretFrame.width, bo.block)) +
       // Indent-narrowed box (rect.x IS indentLeft): the caret x of a
       // centered/right-aligned indented block stays in its column.
-      alignOffset(bo.block.align, line.rect.width, caretCb.width - line.rect.x),
+      alignOffset(bo.block.align, line.rect.width, caretFrame.left + caretFrame.width - line.rect.x),
     // THE CARET IS THE TEXT BAND, NOT THE LINE BOX (GDocs): top stays
     // at the box top (text, under the M6 ruling) but the bottom stops
     // at the text's descent — a 2.0-spaced line never stretches the

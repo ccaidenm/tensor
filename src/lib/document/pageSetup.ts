@@ -1,7 +1,7 @@
 // Package-root import only — deep '@tensor-editor/engine/src/*' imports are
 // banned by the ESLint no-restricted-imports rule (they bypass the package
 // contract and break the moment the engine ships compiled artifacts).
-import type { LayoutOptions } from '@tensor-editor/engine';
+import type { ColumnsSpec, LayoutOptions } from '@tensor-editor/engine';
 
 export interface PageDimensions {
   width: number;
@@ -45,6 +45,18 @@ export interface PageSetup {
    * PM JSON round-trip convention).
    */
   watermark?: WatermarkSettings | null;
+  /**
+   * #74 COLUMNS — the document-level column spec (newsletter-style
+   * multi-column flow). RIDES toLayoutOptions (the engine consumes the
+   * spec verbatim — layout, not paint). Per-SECTION columns ride the
+   * sectionBreak setup-riding mechanism verbatim (the pageColor/
+   * watermark precedent). null = explicitly none (the PM JSON
+   * round-trip convention) — mapped to undefined (the engine's
+   * absent ≡ one column additive law) at the boundary; absent behaves
+   * identically. The engine validates loudly (integer count ≥ 1, a
+   * non-negative gap, widths[] of the right length).
+   */
+  columns?: ColumnsSpec | null;
 }
 
 /**
@@ -343,5 +355,9 @@ export function toLayoutOptions(pageSetup: PageSetup): LayoutOptions {
     // M-FLOW — the document-level widow/orphan default; the engine's
     // own default (true) covers absent (old documents).
     preventWidowsAndOrphans: pageSetup.widowControl ?? true,
+    // #74 COLUMNS — the spec rides to the engine verbatim; null ≡
+    // absent ≡ one column (the additive law — the ?? undefined maps
+    // both spellings away, the engine never sees null).
+    ...(pageSetup.columns ? { columns: pageSetup.columns } : {}),
   };
 }

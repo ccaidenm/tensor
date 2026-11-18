@@ -5,7 +5,7 @@ import {
   type TextStyle,
 } from '@tensor-editor/engine';
 import type { AdapterBlock, RunDecor } from '@/lib/paginated/adapter';
-import { alignOffset, fieldShiftBefore } from '@/lib/paginated/positionMap';
+import { alignOffset, fieldShiftBefore, lineColumnFrame } from '@/lib/paginated/positionMap';
 import type { TextMetricsPort } from '@/lib/print/metricsPort';
 import { bulletMarkerText, orderedMarkerText } from '@/lib/print/markers';
 
@@ -118,7 +118,7 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
       if (line.pageIndex !== page.index) continue;
       const block = byId.get(line.blockId);
       if (!block) continue;
-      renderLine(page.elements, line, block, cb, metrics, bitmapSrc, fieldTotal, page.index);
+      renderLine(page.elements, line, block, cb, metrics, bitmapSrc, fieldTotal, page.index, lineColumnFrame(geo, line));
     }
 
     // 5. EQUATIONS (block atoms; DOM/KaTeX above the decor).
@@ -147,7 +147,10 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
   return pages;
 }
 
-/** One line → elements (the paintLines mirror, positioned not drawn). */
+/** One line → elements (the paintLines mirror, positioned not drawn).
+ *  `columnFrame` (#74): the line's COLUMN frame (content-box-relative
+ *  left/width) — the decor surfaces and the align container are the
+ *  column's; absent ≡ the content box (single-column, bit-identical). */
 function renderLine(
   into: PrintElement[],
   line: LineBox,
@@ -157,25 +160,28 @@ function renderLine(
   bitmapSrc: (sha: string) => string | undefined,
   fieldTotal: number,
   pageIndex: number,
+  columnFrame?: { left: number; width: number },
 ): void {
-  const contentWidth = cb.width;
-  const off = alignOffset(block.align, line.rect.width, contentWidth - line.rect.x);
+  const columnLeft = columnFrame?.left ?? 0;
+  const columnWidth = columnFrame?.width ?? cb.width;
+  const off = alignOffset(block.align, line.rect.width, columnLeft + columnWidth - line.rect.x);
   const baselineY = cb.y + line.rect.y + line.baseline;
   const baseX = cb.x + line.rect.x + off;
 
   // BLOCK DECOR (under the line's ink — element order IS paint order).
+  // #74 — the tints span the COLUMN, not the content box.
   if (block.paint?.blockquote) {
     into.push({
       kind: 'rect',
-      x: cb.x,
+      x: cb.x + columnLeft,
       top: cb.y + line.rect.y,
-      width: contentWidth,
+      width: columnWidth,
       height: line.rect.height,
       fill: QUOTE_BG_COLOR,
     });
     into.push({
       kind: 'rect',
-      x: cb.x + 4,
+      x: cb.x + columnLeft + 4,
       top: cb.y + line.rect.y,
       width: 3,
       height: line.rect.height,
@@ -185,9 +191,9 @@ function renderLine(
   if (block.paint?.code) {
     into.push({
       kind: 'rect',
-      x: cb.x,
+      x: cb.x + columnLeft,
       top: cb.y + line.rect.y,
-      width: contentWidth,
+      width: columnWidth,
       height: line.rect.height,
       fill: CODE_BG_COLOR,
     });
@@ -210,7 +216,9 @@ function renderLine(
 
     if (run.kind === 'inlineImage') {
       // Inline objects: baseline-seated, the engine's clamp.
-      const wrap = line.tableCell ? line.tableCell.width : contentWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0);
+      // #74 — the base wrap is the COLUMN's width (the engine's clamp
+      // input); the cell lane keeps its own width.
+      const wrap = line.tableCell ? line.tableCell.width : columnWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0);
       const dims = fitDownImage(run.width, run.height, wrap, Infinity);
       const sha = run.src.startsWith('media://') ? run.src.slice('media://'.length) : null;
       const src = sha ? bitmapSrc(sha) : undefined;
@@ -308,13 +316,14 @@ function renderLine(
     });
   }
 
-  // RULE (horizontalRule): 1px across the indent-narrowed width.
+  // RULE (horizontalRule): 1px across the indent-narrowed width —
+  // #74: to the COLUMN's right edge.
   if (block.paint?.rule) {
     into.push({
       kind: 'line',
       x: cb.x + line.rect.x,
       top: Math.round(cb.y + line.rect.y + line.baseline * 0.55),
-      width: contentWidth - line.rect.x,
+      width: columnLeft + columnWidth - line.rect.x,
       height: 1,
       color: RULE_COLOR,
     });
