@@ -24,6 +24,7 @@ import { BlockIdExtension } from '@/lib/editor/BlockIdExtension';
 import { CharStyleMark, StyleCommandsExtension } from '@/lib/styles/styleExtensions';
 import { ScrollGuardExtension } from '@/lib/paginated/ScrollGuardExtension';
 import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
+import { ColumnBreakNode } from '@/lib/pagination/ColumnBreakNode';
 import { SectionBreakNode } from '@/lib/pagination/SectionBreakNode';
 // M-HEADER-FOOTER-2: the doc-level header/footer containers — content
 // rides the ONE PM doc (L3); the adapter routes them into doc.bands.
@@ -100,6 +101,7 @@ export function tensorExtensions(): Extensions {
     // atom renders its marker, and the adapter translates it into the
     // engine's forced-break spelling (flow.breakBefore: 'page').
     PageBreakNode,
+    ColumnBreakNode,
     // #58 SECTIONS: the sectionBreak atom — the adapter translates it
     // into the engine's per-section geometry boundaries (the node is
     // NOT part of the IR; the pageBreak law).

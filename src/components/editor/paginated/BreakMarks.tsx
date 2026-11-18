@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { LayoutResult } from '@tensor-editor/engine';
 import { pageTops } from '@/lib/paginated/pageStack';
+import { lineColumnFrame } from '@/lib/paginated/positionMap';
 
 /**
  * #58 — the BREAK MARKS (the NPC layer): formatting-mark badges for the
@@ -13,7 +14,9 @@ import { pageTops } from '@/lib/paginated/pageStack';
  * block's id). A nextPage break's following block opens a page → the
  * badge sits at the top of THAT page (the break's visual effect is the
  * page edge); a continuous break's block flows on the same page → the
- * badge sits mid-flow, exactly where the sections join.
+ * badge sits mid-flow, exactly where the sections join. #74 — a
+ * columnBreak's badge anchors at the anchor line's COLUMN (the bar
+ * spans the column's frame, not the content box).
  *
  * COORDINATES: stack-local px (the SelectionHighlights frame — the
  * cumulative page tops + each mark's page's own contentBox origin).
@@ -24,7 +27,7 @@ import { pageTops } from '@/lib/paginated/pageStack';
  */
 
 export interface BreakFact {
-  kind: 'pageBreak' | 'sectionBreak';
+  kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
   type: 'nextPage' | 'continuous';
   /** The break atom's PM position. */
   pos: number;
@@ -36,9 +39,11 @@ export interface BreakFact {
 const labelOf = (kind: BreakFact['kind'], type: string): string =>
   kind === 'pageBreak'
     ? 'Page Break'
-    : type === 'continuous'
-      ? 'Section Break (Continuous)'
-      : 'Section Break (Next Page)';
+    : kind === 'columnBreak'
+      ? 'Column Break'
+      : type === 'continuous'
+        ? 'Section Break (Continuous)'
+        : 'Section Break (Next Page)';
 
 export function BreakMarks({
   facts,
@@ -59,15 +64,19 @@ export function BreakMarks({
     if (!line) continue; // not laid out (virtualization edge) — skip
     const page = result.pages[line.pageIndex];
     if (!page) continue;
+    // #74 — the badge's bar spans the anchor line's COLUMN frame
+    // (single-column ≡ the content box — identical to the pre-columns
+    // badges).
+    const frame = lineColumnFrame(page, line);
     marks.push({
       key: `${fact.kind}:${fact.pos}`,
       label: labelOf(fact.kind, fact.type),
       style: {
-        left: page.contentBox.x,
+        left: page.contentBox.x + frame.left,
         // Just above the anchor line (a continuous break sits at the
         // sections' join; a nextPage break at its page's top).
         top: tops[line.pageIndex]! + page.contentBox.y + line.rect.y - 13,
-        width: page.contentBox.width,
+        width: frame.width,
       },
     });
   }
