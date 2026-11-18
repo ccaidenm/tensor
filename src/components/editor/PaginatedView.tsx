@@ -2139,6 +2139,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // state, so the ruler rules it identically (tab stops land in band
   // paragraphs while the selection sits there).
   const rulerModel = editor && layout ? deriveRulerModel(editor.state) : null;
+  // #74 COLUMNS — the caret's COLUMN frame for the ruler: the caret
+  // block's first line's slot on its own page (the engine's grid
+  // facts). Undefined single-column — the ruler stays content-framed.
+  const rulerColumnFrame = (() => {
+    if (!layout || !editor) return undefined;
+    const head = editor.state.selection.head ?? editor.state.selection.from;
+    const block = layout.blocks.find((b) => head >= b.from && head <= b.to);
+    if (!block) return undefined;
+    const line = result.lines.find((l) => l.blockId === block.id);
+    if (!line || line.column == null) return undefined;
+    const slot = result.pages[line.pageIndex]?.columns?.[line.column];
+    return slot ? { left: slot.x, width: slot.width } : undefined;
+  })();
   // #58 — the stack's cumulative arithmetic (mixed page sizes): the
   // sheet tops, the max width, the total height — one helper, shared
   // with the hit-testers and the overlays.
@@ -2570,7 +2583,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         deskWrapper &&
         editor &&
         createPortal(
-          <Ruler geometry={firstGeometry} zoom={z} model={rulerModel} editor={editor} />,
+          <Ruler geometry={firstGeometry} zoom={z} model={rulerModel} editor={editor} columnFrame={rulerColumnFrame} />,
           deskWrapper,
         )}
     </div>

@@ -41,7 +41,9 @@ const PageSetupSchema = z.object({
   columns: z
     .object({
       count: z.number().int().min(1),
+      /** POINTS — the store's canonical unit (toLayoutOptions converts). */
       gap: z.number().nonnegative().optional(),
+      /** Absolute per-column widths in POINTS (the engine's weights). */
       widths: z.array(z.number()).optional(),
       balanced: z.boolean().optional(),
     })

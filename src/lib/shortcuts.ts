@@ -42,6 +42,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // #58 — no default key (the page break owns ctrl+enter; the ribbon
   // and the palette carry the section break until a key is chosen).
   { id: 'insertSectionBreak', label: 'Section Break', keys: '', context: 'editor', category: 'Insert' },
+  // #74 COLUMNS — no default key (the ribbon and the palette carry the
+  // column break until a key is chosen — the section break's posture).
+  { id: 'insertColumnBreak', label: 'Column Break', keys: '', context: 'editor', category: 'Insert' },
   // Word's equation shortcut convention (Alt+=).
   { id: 'insertEquation', label: 'Equation', keys: 'alt+=', context: 'editor', category: 'Insert' },
 
@@ -144,6 +147,12 @@ export function findLiveConflict(
 export function findShortcutConflicts(): string[][] {
   const seen = new Map<string, string[]>();
   for (const s of SHORTCUTS) {
+    // #74 — an UNBOUND shortcut has no collision surface: two registry
+    // entries with keys '' (the section/column breaks' posture — the
+    // ribbon + the palette carry them until a key is chosen) are not a
+    // conflict. (The detector's pre-existing blind spot — the column
+    // break's registration was the second '' entry.)
+    if (!s.keys) continue;
     const list = seen.get(s.keys) ?? [];
     list.push(s.id);
     seen.set(s.keys, list);

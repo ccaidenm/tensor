@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { fireEvent, render, act } from '@testing-library/react';
 import { renderTensor, settleLayout } from './harness';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import {
@@ -8,10 +9,14 @@ import {
   type PageSetup,
 } from '@/lib/document/pageSetup';
 import { useDocumentStore } from '@/lib/document/store';
+import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { createLayoutEngine } from '@tensor-editor/engine';
 import { assembleDocumentFile } from '@/lib/document/fileOperations';
 import { FakeMetrics } from './fakeMetrics';
+import { ColumnsDialog } from '@/components/dialogs/ColumnsDialog';
+import { ArrangeGroup } from '@/components/layout/ribbon/layout/groups/ArrangeGroup';
+import { BreaksGroup } from '@/components/layout/ribbon/insert/groups/BreaksGroup';
 
 /**
  * #74 COLUMNS — the shell suite. The ENGINE's laws live in the engine's
@@ -29,7 +34,7 @@ const LETTER: PageSetup = {
   pageGap: PAGE_GAP,
 };
 
-const TWO_COL = { count: 2, gap: 24 } as const;
+const TWO_COL = { count: 2, gap: 36 } as const; // 36pt = Word's 0.5" → 48px
 
 /** The FIRST sectionBreak node's position (PM's descendants walk). */
 function findBreakPos(editor: ReturnType<typeof useDocumentStore.getState>['editor']): number | null {
@@ -83,12 +88,15 @@ describe('columns — the persistence + pipeline', () => {
     useDocumentStore.getState().setPageSetup({ ...LETTER });
   });
 
-  it('toLayoutOptions carries the document-level column spec (null ≡ absent ≡ one column)', () => {
+  it('toLayoutOptions carries the document-level column spec (gap pt → px; null ≡ absent ≡ one column)', () => {
     const withColumns = toLayoutOptions({ ...LETTER, columns: TWO_COL });
-    expect(withColumns.columns).toEqual(TWO_COL);
+    // The store law: the setup's gap is POINTS; the boundary converts.
+    expect(withColumns.columns).toEqual({ count: 2, gap: 48 });
     // null is the PM round-trip spelling of "none" — mapped away.
     expect(toLayoutOptions({ ...LETTER, columns: null }).columns).toBeUndefined();
     expect(toLayoutOptions({ ...LETTER }).columns).toBeUndefined();
+    // Absent gap ≡ the engine's own default (Word's 0.5") — omitted.
+    expect(toLayoutOptions({ ...LETTER, columns: { count: 3 } }).columns).toEqual({ count: 3 });
   });
 
   it('the store pageSetup drives the engine facts end-to-end (doc-level columns)', () => {
@@ -98,11 +106,11 @@ describe('columns — the persistence + pipeline', () => {
       sem.doc,
       toLayoutOptions(useDocumentStore.getState().pageSetup),
     );
-    // The page carries the resolved grid (Letter content 624 − 24 gap →
-    // 300px columns at 0 and 324).
+    // The page carries the resolved grid (Letter content 624 − the
+    // 48px gap → 288px columns at 0 and 336).
     expect(result.pages[0]!.columns).toEqual([
-      { x: 0, width: 300 },
-      { x: 324, width: 300 },
+      { x: 0, width: 288 },
+      { x: 336, width: 288 },
     ]);
     // Lines carry the slot index; both columns hold flow (the doc is
     // long enough to fill col 0 to the 54-line cap and spill).
@@ -112,7 +120,7 @@ describe('columns — the persistence + pipeline', () => {
     expect(col1.length).toBeGreaterThan(0);
     // Column left edges fold into rect.x.
     expect(col0.every((l) => l.rect.x === 0)).toBe(true);
-    expect(col1.every((l) => l.rect.x === 324)).toBe(true);
+    expect(col1.every((l) => l.rect.x === 336)).toBe(true);
   });
 
   it('per-section columns ride the sectionBreak setup verbatim (the pageColor precedent)', () => {
@@ -130,7 +138,7 @@ describe('columns — the persistence + pipeline', () => {
     );
     // Section 0 (the −1 boundary) carries the break's setup — the grid.
     expect(sem.sections).toHaveLength(2);
-    expect(sem.sections![0]!.geometry.columns).toEqual(TWO_COL);
+    expect(sem.sections![0]!.geometry.columns).toEqual({ count: 2, gap: 48 });
     // The final section rides the store's pageSetup — single column.
     expect(sem.sections![1]!.geometry.columns).toBeUndefined();
   });
@@ -154,16 +162,19 @@ describe('columns — the persistence + pipeline', () => {
     });
     // Page 0 = section 0 (columned): the grid + slot-indexed lines.
     expect(result.pages[0]!.columns).toEqual([
-      { x: 0, width: 300 },
-      { x: 324, width: 300 },
+      { x: 0, width: 288 },
+      { x: 336, width: 288 },
     ]);
     expect(result.lines.some((l) => l.pageIndex === 0 && l.column === 1)).toBe(true);
-    // Page 1+ = the final section (single column): no facts.
-    const laterPages = result.pages.slice(1);
-    expect(laterPages.length).toBeGreaterThan(0);
-    expect(laterPages.every((p) => p.columns === undefined)).toBe(true);
+    // The FINAL section's page (the last page) is single column — no
+    // facts. (Section 0's own overflow pages legitimately carry the
+    // grid — the section's pages, not the final section's.)
+    const lastPage = result.pages[result.pages.length - 1]!;
+    expect(lastPage.columns).toBeUndefined();
     expect(
-      result.lines.filter((l) => l.pageIndex > 0).every((l) => l.column === undefined),
+      result.lines
+        .filter((l) => l.pageIndex === lastPage.index)
+        .every((l) => l.column === undefined),
     ).toBe(true);
   });
 
@@ -177,9 +188,10 @@ describe('columns — the persistence + pipeline', () => {
     // `satisfies z.ZodType<PageSetup>` binding keeps file and model in
     // lockstep — a spelling drift is a type error).
     expect(file.metadata.pageSetup!.columns).toEqual(TWO_COL);
-    // And the model side reads it back into a valid PageSetup.
+    // And the model side reads it back into a valid PageSetup (the
+    // boundary converts the persisted pt to the engine's px).
     const reopened = file.metadata.pageSetup! as PageSetup;
-    expect(toLayoutOptions(reopened).columns).toEqual(TWO_COL);
+    expect(toLayoutOptions(reopened).columns).toEqual({ count: 2, gap: 48 });
   });
 });
 
@@ -290,7 +302,7 @@ describe('columns — the manual column break (ColumnBreakNode)', () => {
     const two = result.lines.filter((l) => l.blockId !== result.lines[0]!.blockId);
     expect(two[0]!.column).toBe(1);
     expect(two[0]!.rect.y).toBe(0);
-    expect(two[0]!.rect.x).toBe(324);
+    expect(two[0]!.rect.x).toBe(336);
   });
 
   it('the Column Break badge paints at the anchor line’s column (NPC marks on)', async () => {
@@ -302,9 +314,132 @@ describe('columns — the manual column break (ColumnBreakNode)', () => {
     );
     expect(marks).toHaveLength(1);
     expect(marks[0]!.textContent).toContain('Column Break');
-    // The bar spans the COLUMN (300px), not the content box (624px).
+    // The bar spans the COLUMN (288px), not the content box (624px).
     const width = parseFloat(marks[0]!.style.width);
     expect(width).toBeLessThan(624);
     expect(width).toBeGreaterThan(0);
+  });
+});
+
+describe('columns — the Columns surfaces (the dialog, the popover, the button)', () => {
+  beforeEach(() => {
+    useDocumentStore.getState().setPageSetup({ ...LETTER });
+    useDocumentPropertiesStore.getState().closeColumns();
+  });
+
+  function mountDialog() {
+    const dialog = render(<ColumnsDialog />);
+    return { dialog, open: () => act(() => useDocumentPropertiesStore.getState().openColumns()) };
+  }
+
+  it('the dialog drafts from the store; Done applies document-wide (the store + every break)', () => {
+    useDocumentStore.getState().setPageSetup({ ...LETTER, columns: TWO_COL });
+    const { editor } = renderTensor('<p>a</p><div data-section-break></div><p>b</p>');
+    const { open } = mountDialog();
+    open();
+    // The draft seeds from the store's spec (the document scope's target).
+    const count = document.querySelector<HTMLInputElement>('input[aria-label="Number of columns"]');
+    expect(count?.value).toBe('2');
+    // Preset "Three" drafts count 3; Done applies document-wide.
+    fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Three')!);
+    fireEvent.click(document.querySelector('[data-testid="columns-dialog-done"]')!);
+    // The store carries the spec; the break's setup merged it too (the
+    // document scope's one-transaction law).
+    expect(useDocumentStore.getState().pageSetup.columns).toEqual({ count: 3, gap: 36 });
+    const breakPos = ((): number | null => {
+      let found: number | null = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (found !== null) return false;
+        if (node.type.name === 'sectionBreak') {
+          found = pos;
+          return false;
+        }
+        return true;
+      });
+      return found;
+    })();
+    const setup = editor.state.doc.nodeAt(breakPos!)!.attrs.setup as PageSetup;
+    expect(setup.columns).toEqual({ count: 3, gap: 36 });
+  });
+
+  it('the One preset clears the spec (null = one column, the additive law)', () => {
+    useDocumentStore.getState().setPageSetup({ ...LETTER, columns: TWO_COL });
+    renderTensor('<p>a</p>');
+    const { open } = mountDialog();
+    open();
+    fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'One')!);
+    fireEvent.click(document.querySelector('[data-testid="columns-dialog-done"]')!);
+    expect(useDocumentStore.getState().pageSetup.columns).toBeNull();
+    // And toLayoutOptions maps it away — the engine never sees null.
+    expect(toLayoutOptions(useDocumentStore.getState().pageSetup).columns).toBeUndefined();
+  });
+
+  it('unequal widths ride the draft (the Word checkbox; the engine consumes the weights)', () => {
+    renderTensor('<p>a</p>');
+    const { open } = mountDialog();
+    open();
+    // Left preset: 1:2 (the narrow left column takes a third) — the
+    // count drafts to 2 with UNEQUAL widths (the checkbox unchecks).
+    fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Left')!);
+    const widthInputs = document.querySelectorAll<HTMLInputElement>('input[aria-label^="Column "]');
+    expect(widthInputs.length).toBe(2);
+    fireEvent.click(document.querySelector('[data-testid="columns-dialog-done"]')!);
+    const spec = useDocumentStore.getState().pageSetup.columns!;
+    expect(spec.count).toBe(2);
+    expect(spec.widths).toHaveLength(2);
+    expect(spec.widths![0]!).toBeLessThan(spec.widths![1]!);
+    // The engine's grid honors the ratio: the 576px post-gap space
+    // (624 − the 48px gap) splits 1:2 → 192/384.
+    const sem = adapt().run('<p>' + 'word '.repeat(300) + '</p>');
+    const result = createLayoutEngine({ metrics: FakeMetrics }).layout(
+      sem.doc,
+      toLayoutOptions(useDocumentStore.getState().pageSetup),
+    );
+    expect(result.pages[0]!.columns![0]!.width).toBeCloseTo(192, 0);
+    expect(result.pages[0]!.columns![1]!.width).toBeCloseTo(384, 0);
+  });
+
+  it('the ColumnsButton presets apply document-wide; "More columns…" opens the dialog', () => {
+    renderTensor('<p>a</p><div data-section-break></div><p>b</p>');
+    render(<ArrangeGroup />);
+    // The Two preset: one click, the store + the break merge.
+    fireEvent.click(document.querySelector('[data-testid="columns-button"]')!);
+    fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Two')!);
+    expect(useDocumentStore.getState().pageSetup.columns).toEqual({ count: 2 });
+    // More columns… opens the dialog.
+    fireEvent.click(document.querySelector('[data-testid="columns-button"]')!);
+    fireEvent.click(document.querySelector('[data-testid="more-columns"]')!);
+    expect(useDocumentPropertiesStore.getState().columnsIsOpen).toBe(true);
+  });
+
+  it('the BreaksGroup carries the Column Break button (the insert command)', () => {
+    const { editor } = renderTensor('<p>one</p>');
+    render(<BreaksGroup editor={editor} />);
+    fireEvent.click(
+      [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Column Break')!,
+    );
+    const names: string[] = [];
+    editor.state.doc.forEach((n) => names.push(n.type.name));
+    expect(names).toContain('columnBreak');
+  });
+
+  it('the ruler frames to the caret’s column (the tab-stop glyph anchors to the slot)', async () => {
+    useDocumentStore.getState().setPageSetup({ ...LETTER, columns: TWO_COL });
+    const { editor } = renderTensor(
+      '<p>' + 'word '.repeat(1200) + '</p><p>tail block in the second column</p>',
+    );
+    await settleLayout();
+    // The caret into the LAST block (whose first line flows in column 1
+    // — the second slot) and give it a tab stop at 100px.
+    const lastPos = editor.state.doc.content.size - 2;
+    act(() => {
+      editor.commands.setTextSelection(lastPos);
+      editor.commands.setTabStops([{ position: 100, alignment: 'left' }]);
+    });
+    await settleLayout();
+    // The bar's tab glyph: left = (contentX 96 + slot.x 336 + 100) × 1.
+    const glyph = document.querySelector<HTMLElement>('[data-testid="ruler-tab-stop"]');
+    expect(glyph).not.toBeNull();
+    expect(parseFloat(glyph!.style.left)).toBeCloseTo(96 + 336 + 100, 0);
   });
 });

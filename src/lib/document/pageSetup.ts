@@ -1,7 +1,7 @@
 // Package-root import only — deep '@tensor-editor/engine/src/*' imports are
 // banned by the ESLint no-restricted-imports rule (they bypass the package
 // contract and break the moment the engine ships compiled artifacts).
-import type { ColumnsSpec, LayoutOptions } from '@tensor-editor/engine';
+import type { LayoutOptions } from '@tensor-editor/engine';
 
 export interface PageDimensions {
   width: number;
@@ -56,7 +56,28 @@ export interface PageSetup {
    * identically. The engine validates loudly (integer count ≥ 1, a
    * non-negative gap, widths[] of the right length).
    */
-  columns?: ColumnsSpec | null;
+  columns?: ColumnSetup | null;
+}
+
+/**
+ * #74 COLUMNS — the SETUP spelling of the column spec. The store law
+ * governs: persisted measurements are POINTS, so `gap` is pt here and
+ * toLayoutOptions converts to the engine's px. `widths` carries the
+ * ABSOLUTE per-column widths in pt (the UI's spelling — Word's dialog
+ * shows each column's width); the engine consumes them as RELATIVE
+ * weights (any positive numbers normalize to the post-gap space), so
+ * the scale cancels and pt is safe to pass verbatim. `balanced`
+ * defaults true (Word's balance law).
+ */
+export interface ColumnSetup {
+  /** Column count, integer ≥ 1; 1 ≡ one column (clears). */
+  count: number;
+  /** POINTS between neighboring columns; absent = Word's 0.5" (36pt). */
+  gap?: number;
+  /** Absolute per-column widths in POINTS (unequal columns). */
+  widths?: number[];
+  /** Balance the section's last-page column heights. Default true. */
+  balanced?: boolean;
 }
 
 /**
@@ -355,9 +376,24 @@ export function toLayoutOptions(pageSetup: PageSetup): LayoutOptions {
     // M-FLOW — the document-level widow/orphan default; the engine's
     // own default (true) covers absent (old documents).
     preventWidowsAndOrphans: pageSetup.widowControl ?? true,
-    // #74 COLUMNS — the spec rides to the engine verbatim; null ≡
-    // absent ≡ one column (the additive law — the ?? undefined maps
-    // both spellings away, the engine never sees null).
-    ...(pageSetup.columns ? { columns: pageSetup.columns } : {}),
+    // #74 COLUMNS — the spec rides to the engine with the boundary
+    // conversion: gap pt → px (the store's canonical-unit law);
+    // widths pass VERBATIM (the engine consumes them as relative
+    // weights — any positive numbers normalize to the post-gap space,
+    // so the pt scale cancels). null ≡ absent ≡ one column (the
+    // additive law — the ?? undefined maps both spellings away, the
+    // engine never sees null).
+    ...(pageSetup.columns
+      ? {
+          columns: {
+            count: pageSetup.columns.count,
+            ...(pageSetup.columns.gap != null ? { gap: ptToPx(pageSetup.columns.gap) } : {}),
+            ...(pageSetup.columns.widths ? { widths: pageSetup.columns.widths } : {}),
+            ...(pageSetup.columns.balanced != null
+              ? { balanced: pageSetup.columns.balanced }
+              : {}),
+          },
+        }
+      : {}),
   };
 }

@@ -32,6 +32,12 @@ interface DocumentPropertiesStore {
   pageSetupIsOpen: boolean;
   openPageSetup: () => void;
   closePageSetup: () => void;
+  /** #74 COLUMNS — the ONE Columns dialog (the spec with an Apply-to
+   *  scope — the Page Setup machinery, no page scope: columns are
+   *  geometry, never page decor). */
+  columnsIsOpen: boolean;
+  openColumns: () => void;
+  closeColumns: () => void;
 }
 
 export const useDocumentPropertiesStore = create<DocumentPropertiesStore>((set) => ({
@@ -57,4 +63,7 @@ export const useDocumentPropertiesStore = create<DocumentPropertiesStore>((set) 
   pageSetupIsOpen: false,
   openPageSetup: () => set({ pageSetupIsOpen: true }),
   closePageSetup: () => set({ pageSetupIsOpen: false }),
+  columnsIsOpen: false,
+  openColumns: () => set({ columnsIsOpen: true }),
+  closeColumns: () => set({ columnsIsOpen: false }),
 }));

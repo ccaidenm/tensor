@@ -7,6 +7,7 @@ import { AccessibilityCheckPanel } from './components/editor/AccessibilityCheckP
 import { WatermarkPanel } from './components/editor/WatermarkPanel';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
+import { ColumnsDialog } from './components/dialogs/ColumnsDialog';
 import { PageSetupDialog } from './components/dialogs/PageSetupDialog';
 import { DocumentStatisticsDialog } from './components/dialogs/DocumentStatisticsDialog';
 import { CustomPageSizeDialog } from './components/dialogs/CustomPageSizeDialog';
@@ -234,6 +235,9 @@ function App() {
           with an Apply-to scope: whole document / this section / this
           point forward). */}
       <PageSetupDialog />
+      {/* #74 COLUMNS — the ONE Columns dialog (the spec with an
+          Apply-to scope; the ArrangeGroup's "More columns…" opens it). */}
+      <ColumnsDialog />
       {/* Spell check: the provider-choice consent surface + the
           personal dictionary manager (both store-driven, one mount). */}
       <SpellSetupDialog />
