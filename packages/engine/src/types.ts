@@ -263,14 +263,22 @@ export interface FlowPolicy {
   /** BOND: same bond as keepNext on the previous block — one mechanism, two spellings. */
   keepPrevious?: boolean
   /**
-   * Structural tier (precedence 1): force a page break before this
-   * block. A fresh-page start is a no-op. A bond at this boundary
-   * drops — a page that must start with B cannot also start with A's
-   * last fragment.
+   * Structural tier (precedence 1): force a break before this block.
+   * 'page' closes to the next PAGE (a fresh-page start is a no-op);
+   * 'column' (#74) closes to the next FLOW SLOT — the next column of
+   * the page, else the next page (a fresh-slot start is a no-op) —
+   * the manual column break, Word's newsletter-flow early wrap. A
+   * bond at this boundary drops — a page/column that must start with
+   * B cannot also start with A's last fragment (manual breaks outrank
+   * bonds — Word parity).
    */
-  breakBefore?: 'page' | null
-  /** Structural tier (precedence 1): force a page break after this block. Emits no FragmentBreak. */
-  breakAfter?: 'page' | null
+  breakBefore?: 'page' | 'column' | null
+  /**
+   * Structural tier (precedence 1): force a break after this block —
+   * 'page' closes to the next page; 'column' (#74) to the next slot.
+   * Emits no FragmentBreak.
+   */
+  breakAfter?: 'page' | 'column' | null
 }
 
 export interface BlockBase {

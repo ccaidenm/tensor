@@ -272,3 +272,171 @@ describe('columns: the flow-slot core', () => {
     expect(engine.lastStats.blocksWalked).toBeLessThan(3)
   })
 })
+
+describe('columns: manual column breaks (the structural tier)', () => {
+  const colBreak = { breakBefore: 'column' as const }
+  // version is a staleness signal, not output — strip before comparing.
+  const stripVersion = (r: { version: number }) => {
+    const { version: _v, ...rest } = r
+    return rest
+  }
+
+  it('1. breakBefore column: the block starts the next column top (same page)', () => {
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [para('fill', 12), { ...para('b', 6), flow: colBreak }],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(1)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.pageIndex, l.column, l.rect.y, l.rect.x])).toEqual([[0, 1, 0, 324]])
+  })
+
+  it('2. breakBefore column in the LAST column wraps to the next page (column 0)', () => {
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [para('fill', 72), { ...para('b', 6), flow: colBreak }],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(2)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.pageIndex, l.column, l.rect.y, l.rect.x])).toEqual([[1, 0, 0, 0]])
+  })
+
+  it('3. breakBefore column at a fresh slot is a no-op (both spellings compose)', () => {
+    // A ends col 0 with breakAfter 'column' → the close puts B at col 1
+    // fresh; B's own breakBefore 'column' is then vacuous.
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [
+        { ...para('a', 12), flow: { breakAfter: 'column' } },
+        { ...para('b', 12), flow: colBreak },
+      ],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(1)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.column, l.rect.y, l.rect.x])).toEqual([
+      [1, 0, 324],
+      [1, 110, 324],
+    ])
+  })
+
+  it('4. breakAfter column: the FOLLOWING block opens the next column', () => {
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [{ ...para('a', 12), flow: { breakAfter: 'column' } }, para('b', 12)],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(1)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.column, l.rect.y, l.rect.x])).toEqual([
+      [1, 0, 324],
+      [1, 110, 324],
+    ])
+  })
+
+  it('5. STRUCTURAL DROP: a bond at a breakBefore-column boundary never moves A', () => {
+    // A fills both columns (14 lines) with keepNext; B breakBefore
+    // 'column' wraps from the last column to page 1. Enforcement would
+    // pull A to page 1 (shape 1); the manual break outranks the bond —
+    // A stays, B alone opens page 1.
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [
+        { ...para('a', 84), flow: { keepNext: true } },
+        { ...para('b', 12), flow: colBreak },
+      ],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(2)
+    const a = result.lines.filter((l) => l.blockId === 'a')
+    expect(a.every((l) => l.pageIndex === 0)).toBe(true)
+    expect(a.filter((l) => l.column === 0)).toHaveLength(7)
+    expect(a.filter((l) => l.column === 1)).toHaveLength(7)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.pageIndex, l.column, l.rect.y])).toEqual([
+      [1, 0, 0],
+      [1, 0, 110],
+    ])
+  })
+
+  it('6. STRUCTURAL DROP (same page): B takes the next column, A unmoved', () => {
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [
+        { ...para('a', 12), flow: { keepNext: true } },
+        { ...para('b', 12), flow: colBreak },
+      ],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(1)
+    const a = result.lines.filter((l) => l.blockId === 'a')
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(a.every((l) => l.column === 0)).toBe(true)
+    expect(b.map((l) => [l.column, l.rect.y])).toEqual([
+      [1, 0],
+      [1, 110],
+    ])
+  })
+
+  it('7. STRUCTURAL FIRST: the break preempts R2 (no orphan double-move, no loop)', () => {
+    // Filler 6 lines (y=660) would orphan B (fits 1) — but B's column
+    // break closes col 0 first; B places whole at col 1 fresh.
+    const doc: SemanticDoc = {
+      baseStyle,
+      blocks: [para('fill', 36), { ...para('b', 30), flow: colBreak }],
+    }
+    const result = layout(doc, twoCol)
+    expect(result.pages).toHaveLength(1)
+    const b = result.lines.filter((l) => l.blockId === 'b')
+    expect(b.map((l) => [l.column, l.rect.y])).toEqual([
+      [1, 0],
+      [1, 110],
+      [1, 220],
+      [1, 330],
+      [1, 440],
+    ])
+  })
+
+  it('8. WARM PARITY: the breakAfter-column close re-applies on resume (splice gate)', () => {
+    // Editing block b (resume = 1) reconstructs the cursor through
+    // cursorAfter's 'column' transform — it must reproduce the exact
+    // original entry state or b's placement shifts (a parity break).
+    const engine = createLayoutEngine({ metrics: FakeMetrics })
+    const doc1: SemanticDoc = {
+      baseStyle,
+      blocks: [
+        { ...para('a', 12), flow: { breakAfter: 'column' } },
+        para('b', 12),
+        para('c', 12),
+      ],
+    }
+    const doc2: SemanticDoc = {
+      baseStyle,
+      blocks: [
+        { ...para('a', 12), flow: { breakAfter: 'column' } },
+        para('b', 24),
+        para('c', 12),
+      ],
+    }
+    engine.layout(doc1, twoCol)
+    const warm = engine.layout(doc2, twoCol)
+    const cold = createLayoutEngine({ metrics: FakeMetrics }).layout(doc2, twoCol)
+    expect(stripVersion(warm)).toEqual(stripVersion(cold))
+    // And the result is the honest layout: b (4 lines) fills col 1,
+    // c continues under it.
+    const warmB = warm.lines.filter((l) => l.blockId === 'b')
+    expect(warmB.map((l) => [l.column, l.rect.y])).toEqual([
+      [1, 0],
+      [1, 110],
+      [1, 220],
+      [1, 330],
+    ])
+    const warmC = warm.lines.filter((l) => l.blockId === 'c')
+    expect(warmC.map((l) => [l.column, l.rect.y])).toEqual([
+      [1, 440],
+      [1, 550],
+    ])
+  })
+})

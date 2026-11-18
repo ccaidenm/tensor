@@ -168,15 +168,18 @@ export class EquationTooTallError extends Error {
 //    widow concern is void — a STRUCTURALLY DROPPED bond does NOT
 //    preempt (control returns to R3; pinned by flow.test.ts).
 //  - STRUCTURAL DROP: a bond at a boundary carrying a forced break —
-//    breakBefore(B) OR breakAfter(A), symmetric, both spellings —
-//    drops at detection, loudly: a page that must start with B cannot
-//    also start with A's last fragment.
-//  - FORCED BREAKS: breakBefore closes a non-fresh page before the
-//    block (fresh start = no-op); breakAfter closes after the block.
-//    A closed page always holds content — never an empty page; a
-//    trailing close never materializes (pages derive from the max line
-//    pageIndex). Forced breaks emit NO FragmentBreak (not mid-block
-//    splits).
+//    breakBefore(B) OR breakAfter(A), symmetric, every spelling
+//    ('page' and #74's 'column') — drops at detection, loudly: a
+//    page/column that must start with B cannot also start with A's
+//    last fragment (manual breaks outrank bonds — Word parity).
+//  - FORCED BREAKS: breakBefore closes a non-fresh page (or, #74,
+//    slot) before the block (fresh start = no-op); breakAfter closes
+//    after the block. 'page' targets the next page; 'column' targets
+//    the next SLOT — the next column, else the next page (the manual
+//    column break). A closed page always holds content — never an
+//    empty page; a trailing close never materializes (pages derive
+//    from the max line pageIndex). Forced breaks emit NO FragmentBreak
+//    (not mid-block splits).
 //  - CACHE: the resume point extends BACKWARD through bonded chains —
 //    a bonded predecessor's placement consumed its successor's
 //    first-line height, so an edit inside the successor can invalidate
@@ -190,11 +193,11 @@ export class EquationTooTallError extends Error {
 // #74 COLUMNS: `column` is the 0-based flow-slot index within the page's
 // column grid (0 on single-column docs — the additive law). A SLOT is a
 // column of the current page; flow fills a slot top-down, then advances:
-// next column, else next page. Driver-level closes (structural forced
-// breaks, section boundaries, bond moves) are PAGE closes — column 0 of
-// the next page (Word: a page break in a columned section wraps the
-// page); only placeBlock's internal close is slot-aware (the machine
-// fills the grid before wrapping).
+// next column, else next page. CLOSE TAXONOMY: placeBlock's internal
+// close and the structural 'column' spellings close to the next SLOT
+// (the machine fills the grid before wrapping); 'page' spellings,
+// section boundaries, and bond moves are PAGE closes — column 0 of the
+// next page (Word: a page break in a columned section wraps the page).
 interface WalkState {
   pageIndex: number
   column: number
@@ -525,6 +528,10 @@ export function createLayoutEngine({
       // the walk is the active section's).
       let active: ActiveSection = sectionTable[0]!
 
+      // #74 — the column count of a cached entry's section (cursorAfter's
+      // breakAfter-'column' transform needs the grid the block lived in).
+      const columnCountOf = (s: number): number => sectionTable[s]?.columnSlots.length ?? 1
+
       const hashes = doc.blocks.map(hashBlock)
       const optsHash = stableStringify(opts)
       const baseStyleHash = stableStringify(doc.baseStyle)
@@ -622,7 +629,13 @@ export function createLayoutEngine({
       // close (a cursor transform).
       const startState: WalkState = (() => {
         if (resume === 0) return { pageIndex: 0, column: 0, y: 0 }
-        return cursorAfter(doc.blocks[resume - 1], oldCache[resume - 1].exitState)
+        // #74 — the column count of the predecessor's section (its grid
+        // governs the breakAfter-'column' transform).
+        return cursorAfter(
+          doc.blocks[resume - 1],
+          oldCache[resume - 1].exitState,
+          columnCountOf(oldCache[resume - 1].section),
+        )
       })()
 
       const walked = new Set<number>()
@@ -940,13 +953,15 @@ export function createLayoutEngine({
         active = sectionTable[sectionCursor]!
 
         // STRUCTURAL TIER (precedence 1): breakBefore closes a
-        // non-fresh page; a fresh-page start is a no-op. Emits no
-        // FragmentBreak (not a mid-block split). #74: a PAGE close —
-        // column 0 of the next page (Word: a page break wraps the
-        // page in a columned section; only the machine's internal
-        // close fills columns first).
+        // non-fresh page/slot; a fresh start is a no-op. Emits no
+        // FragmentBreak (not a mid-block split). 'page' → column 0 of
+        // the next page; 'column' (#74) → the next SLOT (next column,
+        // else next page — the manual column break, Word's
+        // newsletter-flow early wrap).
         if (block.flow?.breakBefore === 'page' && state.y > 0) {
           state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
+        } else if (block.flow?.breakBefore === 'column' && state.y > 0) {
+          state = nextSlotState(state, active.columnSlots.length)
         }
 
         // Headings route through breakLines exactly like paragraphs —
@@ -996,10 +1011,14 @@ export function createLayoutEngine({
               stableStringify(next.columnSpec) === stableStringify(active.columnSpec)
             )
           })()
+        // #74 — ANY forced-break spelling at the boundary is structural
+        // ('page' and 'column'; null/undefined count as unset — the PM
+        // round-trip convention). Manual breaks outrank bonds: the drop
+        // keeps the bounded-attempt machinery from fighting the break.
         const structural =
           bondExists &&
-          (block.flow?.breakAfter === 'page' ||
-            next.flow?.breakBefore === 'page' ||
+          (block.flow?.breakAfter != null ||
+            next.flow?.breakBefore != null ||
             nextIsClosingBoundary)
         const bonded = bondExists && !structural
 
@@ -1118,9 +1137,13 @@ export function createLayoutEngine({
         // closed page always holds this block's lines, never an empty
         // page; a trailing close never materializes a phantom page
         // (pages derive from the max line pageIndex). Emits no
-        // FragmentBreak. #74: a PAGE close (column 0 of the next page).
+        // FragmentBreak. 'page' → column 0 of the next page; 'column'
+        // (#74) → the next SLOT (the block's own slot always holds its
+        // lines — never vacuous, unlike breakBefore).
         if (block.flow?.breakAfter === 'page') {
           state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
+        } else if (block.flow?.breakAfter === 'column') {
+          state = nextSlotState(state, active.columnSlots.length)
         }
 
         // BACKWARD CASCADE (shape-1 moves only — shape 2 moves no
@@ -1132,8 +1155,10 @@ export function createLayoutEngine({
           const prevEntry = newCache[i - 1]
           const prevBondActive =
             (prev.flow?.keepNext === true || block.flow?.keepPrevious === true) &&
-            prev.flow?.breakAfter !== 'page' &&
-            block.flow?.breakBefore !== 'page'
+            // Any forced-break spelling is structural (#74: 'page' and
+            // 'column'; null/undefined count as unset).
+            prev.flow?.breakAfter == null &&
+            block.flow?.breakBefore == null
           if (
             prevBondActive &&
             firstPageOfOutputs(placed) !== lastPageOfEntry(prevEntry)
@@ -1237,8 +1262,9 @@ export function createLayoutEngine({
           // the walk AFTER placement, not part of the record. Every
           // path that resumes the cursor from a cached exit must
           // re-apply the close, or the next block enters a stale
-          // mid-page state.
-          state = cursorAfter(doc.blocks[j], oldCache[j].exitState)
+          // mid-page state. #74 — the transform needs the entry's
+          // section grid (the 'column' close).
+          state = cursorAfter(doc.blocks[j], oldCache[j].exitState, columnCountOf(oldCache[j].section))
           stats.blocksSpliced += 1
           j += 1
         }
@@ -1267,7 +1293,7 @@ export function createLayoutEngine({
         if (j > i + 1) {
           // Remaining consumed entries chain exactly to the current
           // cursor (breakAfter closes re-applied).
-          state = cursorAfter(doc.blocks[j - 1], newCache[newCache.length - 1].exitState)
+          state = cursorAfter(doc.blocks[j - 1], newCache[newCache.length - 1].exitState, columnCountOf(newCache[newCache.length - 1].section))
         } else {
           // Nothing consumed (or all un-consumed): restore the
           // pre-splice cursor (includes a possible breakAfter close —
@@ -1491,7 +1517,9 @@ function imagePlacedSize(
 // entry PAGE, mirroring the placement machine's start decisions
 // EXACTLY. The prediction must mirror "the same rules the walk
 // applies" completely, or it isn't exact; every arm is listed:
-//   - structural breakBefore: y > 0 → the page closes → next page.
+//   - structural breakBefore: y > 0 → 'page' closes to the next page;
+//     'column' (#74) closes to the next slot (the same page when a
+//     column remains — the bond guards PAGE co-membership).
 //   - spaceBefore is consumed at entry, shrinking the fit budget;
 //     the y > 0 guards below test line-top presence (entry.y), not
 //     the padded cursor — spaceBefore is not content.
@@ -1525,6 +1553,12 @@ function firstLineLands(
   const hasContent = entry.y > 0
   // The slot move's page answer: another column on this page, or wrap.
   const nextSlotSamePage = entry.column + 1 < columnCount
+  // #74 — UNREACHABLE via the driver (a bond at a breakBefore boundary
+  // is structural — dropped at detection) but kept for the mirror law:
+  // the prediction must reproduce the machine for any block handed to
+  // it. A 'column' break lands B in the next slot — the SAME page when
+  // a column remains (the bond guards page co-membership).
+  if (block.flow?.breakBefore === 'column' && entry.y > 0) return nextSlotSamePage
   const n = lines.length
   const fits = countFitting(lines, 0, contentHeight - entry.y - (block.spaceBefore ?? 0))
   if (fits >= n) return true
@@ -1560,12 +1594,29 @@ function lastPageOfEntry(entry: WalkCacheEntry): number {
 // AFTER placement as a cursor transform — the cached exitState is the
 // MACHINE exit. Every path that resumes the cursor from a cached exit
 // must re-apply the close, or the next block enters a stale mid-page
-// state (a parity bug the fuzzer caught).
-function cursorAfter(block: Block, exit: WalkState): WalkState {
+// state (a parity bug the fuzzer caught). #74: the 'column' transform
+// needs the grid the block lived in — call sites pass
+// columnCountOf(entry.section) (the cached entry records its section).
+function cursorAfter(block: Block, exit: WalkState, columnCount: number): WalkState {
   if (block.flow?.breakAfter === 'page') {
     return { pageIndex: exit.pageIndex + 1, column: 0, y: 0 }
   }
+  if (block.flow?.breakAfter === 'column') {
+    return nextSlotState(exit, columnCount)
+  }
   return exit
+}
+
+// #74 COLUMNS — the ONE slot-close derivation: the next flow slot, the
+// next column first, else the next page (column 0). placeBlock's
+// closeSlot, the driver's structural 'column' closes, and cursorAfter's
+// breakAfter-'column' transform all route through it — one arithmetic,
+// the single-derivation posture (parity requires bit-identical closes).
+function nextSlotState(state: WalkState, columnCount: number): WalkState {
+  if (state.column + 1 < columnCount) {
+    return { pageIndex: state.pageIndex, column: state.column + 1, y: 0 }
+  }
+  return { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
 }
 
 // Bond flags between blocks[i] and blocks[i+1] (either spelling).
@@ -1861,15 +1912,14 @@ function placeBlock(
   }
 
   // #74 — the SLOT close: the next flow slot, next column first, else
-  // the next page (column 0). The walk's ONLY column-aware close —
-  // driver closes (forced breaks, boundaries, bond moves) are page
-  // closes by law.
+  // the next page (column 0) — via the ONE nextSlotState arithmetic.
+  // Driver 'page' closes, section boundaries, and bond moves are PAGE
+  // closes by law; the driver's structural 'column' closes route
+  // through the same helper.
   const closeSlot = (): void => {
-    if (column + 1 < columnSlots.length) column += 1
-    else {
-      pageIndex += 1
-      column = 0
-    }
+    const next = nextSlotState({ pageIndex, column, y: 0 }, columnSlots.length)
+    pageIndex = next.pageIndex
+    column = next.column
     y = 0
     hasContent = false
     if (isTable) pendingHeader = true
@@ -3006,9 +3056,9 @@ function validateFloatFlow(doc: SemanticDoc): void {
         `block "${block.id}": floated image carries keepNext/keepPrevious — a float is not in flow and cannot bond; the adapter must validate before sending`,
       )
     }
-    if (flow?.breakBefore === 'page' || flow?.breakAfter === 'page') {
+    if (flow?.breakBefore != null || flow?.breakAfter != null) {
       throw new Error(
-        `block "${block.id}": floated image carries breakBefore/breakAfter — a float must not derive pages; put the forced break on the following text block instead`,
+        `block "${block.id}": floated image carries breakBefore/breakAfter — a float must not derive pages or slots; put the forced break on the following text block instead`,
       )
     }
   }
