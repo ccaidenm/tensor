@@ -134,7 +134,10 @@ export function ImageSelection({
     // and then snap back on commit — "accepted the input and did
     // nothing". The preview now STICKS at the page limit: an honest
     // response, and the commit always lands where the preview is.
-    w = Math.min(w, geometry.contentBox.width);
+    // #74 — the clamp is the image's COLUMN's width under columns (the
+    // engine will fit the placed rect into the slot).
+    const slot = placed.column != null ? geometry.columns?.[placed.column] : undefined;
+    w = Math.min(w, slot ? slot.width : geometry.contentBox.width);
     h = Math.min(h, geometry.contentBox.height);
     setPreview({ w: Math.max(MIN_DRAG, w), h: Math.max(MIN_DRAG, h) });
   }

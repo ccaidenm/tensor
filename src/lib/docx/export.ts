@@ -2,6 +2,8 @@ import type { JSONContent } from '@tiptap/core';
 import {
   AlignmentType,
   BorderStyle,
+  Column,
+  ColumnBreak,
   Document,
   ExternalHyperlink,
   Footer,
@@ -791,6 +793,12 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
       case 'pageBreak':
         out.push(new Paragraph({ children: [new PageBreak()] }));
         break;
+      case 'columnBreak':
+        // #74 COLUMNS — Word's own spelling: a column-break run in the
+        // break's own (otherwise empty) paragraph — the pageBreak node's
+        // exact twin.
+        out.push(new Paragraph({ children: [new ColumnBreak()] }));
+        break;
       case 'horizontalRule':
         // Word's own horizontal-line spelling: an empty paragraph whose
         // bottom border draws the rule.
@@ -1236,6 +1244,27 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
             right: ptToTwip(setup.margins.right),
           },
         },
+        // #74 COLUMNS — the section's spec as Word spells it (w:cols):
+        // count + spacing (twips), equalWidth with per-col entries when
+        // the setup carries absolute widths (pt → twips — Word reads
+        // them literally; the engine consumes the same numbers as
+        // relative weights, so the round trip is consistent).
+        ...(setup.columns && setup.columns.count > 1
+          ? {
+              column: {
+                count: setup.columns.count,
+                space: ptToTwip(setup.columns.gap ?? 36),
+                equalWidth: !setup.columns.widths,
+                ...(setup.columns.widths
+                  ? {
+                      children: setup.columns.widths.map(
+                        (w) => new Column({ width: ptToTwip(w) }),
+                      ),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
         // titlePg lives on the section whose FIRST page differs —
         // page 0 = section 0's (the doc-level model).
         titlePage: isSection0 && differentFirst ? true : undefined,

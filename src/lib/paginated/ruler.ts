@@ -179,9 +179,11 @@ export interface RulerModel {
   indentLeft: number;
   indentRight: number;
   firstLineIndent: number;
-  /** The block's tab stops — px, CONTENT-BOX-relative (margin-relative:
-   *  indent edits never move them), ascending, normalized, each with
-   *  its alignment kind. Empty when the block has none. */
+  /** The block's tab stops — px, COLUMN-relative (#74: margin-relative
+   *  in the Word sense — indent edits never move them, and each column
+   *  re-anchors the grid; column left ≡ content-box left single-
+   *  column), ascending, normalized, each with its alignment kind.
+   *  Empty when the block has none. */
   tabStops: TabStop[];
 }
 

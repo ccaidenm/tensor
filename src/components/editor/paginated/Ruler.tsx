@@ -226,6 +226,7 @@ export function Ruler({
   zoom,
   model,
   editor,
+  columnFrame,
 }: {
   /** The FIRST page's engine geometry — the single source of page and
    * content-box dims (L1: never re-derived from pageSetup here). */
@@ -239,6 +240,18 @@ export function Ruler({
    * transactions: undoable, one step per gesture). Null in the fonts
    * gate stub only; every tab handler guards. */
   editor: Editor | null;
+  /**
+   * #74 COLUMNS — the caret's COLUMN frame (CONTENT-BOX-relative
+   * left/width, from the engine's resolved grid facts). Present IFF
+   * the caret's block's first line flows in a columned section — the
+   * ruler's ACTIVE frame becomes the column (Word's ruler-in-columns
+   * law): ticks ink within the column, the rails/indent markers/
+   * stop glyphs/band gates are column-relative. Absent ≡ the content
+   * box (single-column — bit-identical). The page strip, the margin
+   * regions, and the margin DRAG handles stay PAGE-framed (margins
+   * are page properties; only the flow frame narrows).
+   */
+  columnFrame?: { left: number; width: number };
 }) {
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   // Canvas colors are computed-style READS at paint time, not live CSS —
@@ -259,6 +272,13 @@ export function Ruler({
   const contentX = geometry.contentBox.x;
   const contentW = geometry.contentBox.width;
   const contentR = contentX + contentW;
+  // #74 — the ACTIVE frame: the caret's column under columns, else the
+  // content box. Everything flow-relative (ticks ink, the rails, the
+  // indent markers, the stop glyphs, the band gates) reads THESE.
+  const columned = columnFrame != null;
+  const frameX = contentX + (columnFrame?.left ?? 0);
+  const frameW = columnFrame?.width ?? contentW;
+  const frameR = frameX + frameW;
   const pageWz = pageW * zoom;
   // The page strip's screen origin within this bar: the SAME centering
   // the desk scroller gives the zoom wrapper (clientWidth-based, so a
@@ -465,10 +485,12 @@ export function Ruler({
     if (Math.abs(e.clientX - down.clientX) >= 4) return; // a drag, not a click
     const pageX = bandPageX(e);
     if (pageX == null) return;
-    const rawStop = pageX - contentX;
-    if (rawStop < 0 || rawStop > contentW) return; // margin spans stay inert
-    const snapped = e.altKey ? rawStop : snapToMinor(pageX, unit) - contentX;
-    const stop = Math.min(contentW, Math.max(0, snapped));
+    // #74 — the band gates and the stop writes are the ACTIVE frame's
+    // (column-relative under columns — the engine's tab-stop frame).
+    const rawStop = pageX - frameX;
+    if (rawStop < 0 || rawStop > frameW) return; // margin spans stay inert
+    const snapped = e.altKey ? rawStop : snapToMinor(pageX, unit) - frameX;
+    const stop = Math.min(frameW, Math.max(0, snapped));
     // Left-click adds the DEFAULT kind (left) — the context menu owns
     // the alignment choice.
     editor.commands.setTabStops([...model.tabStops, { position: stop, alignment: 'left' }]);
@@ -496,13 +518,13 @@ export function Ruler({
     const drag = tabDragRef.current;
     if (!drag) return;
     const raw = drag.startStopPx + (e.clientX - drag.startClientX) / zoom;
-    const snapped = e.altKey ? raw : snapToMinor(contentX + raw, unit) - contentX;
-    // Out of the content band = the removal drag (a small tolerance is
+    const snapped = e.altKey ? raw : snapToMinor(frameX + raw, unit) - frameX;
+    // Out of the ACTIVE band = the removal drag (a small tolerance is
     // unnecessary — the snap grid keeps in-band jitters on-grid).
     const next: TabDrag = {
       ...drag,
       draftPx: snapped,
-      removing: raw < 0 || raw > contentW,
+      removing: raw < 0 || raw > frameW,
     };
     tabDragRef.current = next;
     setTabDrag(next);
@@ -558,15 +580,16 @@ export function Ruler({
     e.stopPropagation();
     const pageX = bandPageX(e);
     if (pageX == null) return;
-    const rawStop = pageX - contentX;
-    if (rawStop < 0 || rawStop > contentW) return; // margins: no menu
+    // #74 — the band menu and its stop write are the ACTIVE frame's.
+    const rawStop = pageX - frameX;
+    if (rawStop < 0 || rawStop > frameW) return; // margins: no menu
     setTabMenu({ mode: 'band', pageX });
   }
 
   function addStopAt(alignment: TabStop['alignment']) {
     if (!tabMenu || tabMenu.mode !== 'band' || !editor || !model) return;
-    const snapped = snapToMinor(tabMenu.pageX, unit) - contentX;
-    const stop = Math.min(contentW, Math.max(0, snapped));
+    const snapped = snapToMinor(tabMenu.pageX, unit) - frameX;
+    const stop = Math.min(frameW, Math.max(0, snapped));
     editor.commands.setTabStops([
       ...model.tabStops,
       { position: stop, alignment },
@@ -629,6 +652,11 @@ export function Ruler({
     // (ticks at 2×pageLeft + tick.x).
     const contentLs = LABEL_PAD + dragContentL * zoom;
     const contentRs = LABEL_PAD + dragContentR * zoom;
+    // #74 — the ACTIVE frame's screen edges: the caret's column under
+    // columns (ticks ink within it; the rest of the page grays —
+    // Word's ruler-in-columns look), the content box single-column.
+    const frameLs = LABEL_PAD + frameX * zoom;
+    const frameRs = LABEL_PAD + frameR * zoom;
 
     // Numbered majors ride full-height ticks — set the text state once.
     ctx.font = '500 9px system-ui, sans-serif';
@@ -643,7 +671,9 @@ export function Ruler({
     for (const tick of generateTicks(pageW, unit)) {
       const x = LABEL_PAD + tick.x * zoom;
       const rx = Math.round(x);
-      const inContent = x >= contentLs - 1e-6 && x <= contentRs + 1e-6;
+      // #74 — "usable" means the ACTIVE frame (the column's band under
+      // columns; the other columns' spans gray with the margins).
+      const inContent = x >= frameLs - 1e-6 && x <= frameRs + 1e-6;
       if (tick.kind === 'major') {
         // Full-height major; the number is drawn over a knockout box
         // below (the line shows through everywhere but the digits).
@@ -694,13 +724,25 @@ export function Ruler({
       ctx.fillText(label.text, label.x, RULER_HEIGHT / 2);
     }
 
-    // Content-box rails — the margin markers' boundary, full height.
+    // The rails. Single-column: the content box's edges, full height
+    // (today's paint, bit-identical). #74 columned: the COLUMN's edges
+    // in fg; the content box's edges stay visible but muted (the
+    // margin boundary — the margin DRAG handles still live there).
     ctx.fillStyle = fg;
-    ctx.globalAlpha = 0.5;
-    ctx.fillRect(Math.round(contentLs), 0, 1, RULER_HEIGHT);
-    ctx.fillRect(Math.round(contentRs), 0, 1, RULER_HEIGHT);
+    if (columned) {
+      ctx.globalAlpha = 0.2;
+      ctx.fillRect(Math.round(contentLs), 0, 1, RULER_HEIGHT);
+      ctx.fillRect(Math.round(contentRs), 0, 1, RULER_HEIGHT);
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(Math.round(frameLs), 0, 1, RULER_HEIGHT);
+      ctx.fillRect(Math.round(frameRs), 0, 1, RULER_HEIGHT);
+    } else {
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(Math.round(contentLs), 0, 1, RULER_HEIGHT);
+      ctx.fillRect(Math.round(contentRs), 0, 1, RULER_HEIGHT);
+    }
     ctx.globalAlpha = 1;
-  }, [canvasW, dragContentL, dragContentR, pageW, pageWz, theme, unit, zoom]);
+  }, [canvasW, dragContentL, dragContentR, frameX, frameR, columned, pageW, pageWz, theme, unit, zoom]);
 
   const fmt = (px: number, what: string): string =>
     `${what}: ${formatPxAsUnit(px, unit)} ${unitSuffix(unit)}`;
@@ -759,31 +801,32 @@ export function Ruler({
     // value derives afterwards — inverted for the right marker (it
     // grows leftward from the content's right edge).
     const delta = (e.clientX - d.startClientX) / zoom;
+    // #74 — the markers anchor to the ACTIVE frame's edges.
     const startMarkerPageX =
       d.which === 'first'
-        ? contentX + model.indentLeft + d.startValuePx
+        ? frameX + model.indentLeft + d.startValuePx
         : d.which === 'left'
-          ? contentX + d.startValuePx
-          : contentR - d.startValuePx;
+          ? frameX + d.startValuePx
+          : frameR - d.startValuePx;
     const rawMarkerX = startMarkerPageX + delta;
     const markerPageX = e.altKey ? rawMarkerX : snapToMinor(rawMarkerX, unit);
     let value =
       d.which === 'right'
-        ? contentR - markerPageX
+        ? frameR - markerPageX
         : d.which === 'first'
-          ? markerPageX - (contentX + model.indentLeft)
-          : markerPageX - contentX;
+          ? markerPageX - (frameX + model.indentLeft)
+          : markerPageX - frameX;
     // Clamps: the engine's negative-left-edge guard + the content floor.
     const floor = ptToPx(MIN_CONTENT_WIDTH_PT);
     if (d.which === 'first') {
       value = Math.max(-model.indentLeft, value);
-      value = Math.min(contentW - model.indentLeft - model.indentRight - floor, value);
+      value = Math.min(frameW - model.indentLeft - model.indentRight - floor, value);
     } else if (d.which === 'left') {
       value = Math.max(Math.max(0, -model.firstLineIndent), value);
-      value = Math.min(contentW - model.indentRight - floor, value);
+      value = Math.min(frameW - model.indentRight - floor, value);
     } else {
       value = Math.max(0, value);
-      value = Math.min(contentW - model.indentLeft - floor, value);
+      value = Math.min(frameW - model.indentLeft - floor, value);
     }
     // Math.max(-0, …) yields NEGATIVE zero — Object.is(−0, 0) is false,
     // so the stored attr must be normalized (the hang-clamp pin).
@@ -818,9 +861,12 @@ export function Ruler({
   const liveFli = indentDrag?.which === 'first' ? indentDrag.draftPx : (model?.firstLineIndent ?? 0);
   const liveLeft = indentDrag?.which === 'left' ? indentDrag.draftPx : (model?.indentLeft ?? 0);
   const liveRight = indentDrag?.which === 'right' ? indentDrag.draftPx : (model?.indentRight ?? 0);
-  const firstLineX = model != null ? (dragContentL + liveLeft + liveFli) * zoom : 0;
-  const leftIndentX = model != null ? (dragContentL + liveLeft) * zoom : 0;
-  const rightIndentX = model != null ? (dragContentR - liveRight) * zoom : 0;
+  // #74 — the markers anchor to the ACTIVE frame (the column's edges
+  // under columns); the margin-drag preview stays PAGE-framed and does
+  // not move them.
+  const firstLineX = model != null ? (frameX + liveLeft + liveFli) * zoom : 0;
+  const leftIndentX = model != null ? (frameX + liveLeft) * zoom : 0;
+  const rightIndentX = model != null ? (frameR - liveRight) * zoom : 0;
 
   const dragBadge = marginDrag
     ? {
@@ -832,7 +878,8 @@ export function Ruler({
       }
     : tabDrag
       ? {
-          x: pageLeft + (dragContentL + tabDrag.draftPx) * zoom,
+          // #74 — the dragged glyph anchors to the ACTIVE frame.
+          x: pageLeft + (frameX + tabDrag.draftPx) * zoom,
           text: fmtVal(tabDrag.draftPx),
         }
       : indentDrag
@@ -840,10 +887,10 @@ export function Ruler({
             x:
               pageLeft +
               (indentDrag.which === 'first'
-                ? contentX + (model?.indentLeft ?? 0) + indentDrag.draftPx
+                ? frameX + (model?.indentLeft ?? 0) + indentDrag.draftPx
                 : indentDrag.which === 'left'
-                  ? contentX + indentDrag.draftPx
-                  : contentR - indentDrag.draftPx) *
+                  ? frameX + indentDrag.draftPx
+                  : frameR - indentDrag.draftPx) *
                 zoom,
             text: fmtVal(indentDrag.draftPx),
           }
@@ -927,7 +974,10 @@ export function Ruler({
                 data-testid="ruler-tab-stop"
                 aria-label={`${stop.alignment} tab stop at ${fmtVal(stop.position)}`}
                 className={`absolute bottom-0 -translate-x-1/2 translate-y-1/2 touch-none cursor-ew-resize${removing ? ' opacity-40' : ''}`}
-                style={{ left: `${(dragContentL + draft) * zoom}px` }}
+                // #74 — the glyph anchors to the ACTIVE frame's left
+                // (the column's left under columns; the frame does not
+                // drag, so the margin-drag preview no longer applies).
+                style={{ left: `${(frameX + draft) * zoom}px` }}
                 onPointerDown={startTabDrag(i)}
                 onPointerMove={moveTabDrag}
                 onPointerUp={endTabDrag(true)}
@@ -935,7 +985,7 @@ export function Ruler({
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  setTabMenu({ mode: 'stop', index: i, pageX: contentX + stop.position });
+                  setTabMenu({ mode: 'stop', index: i, pageX: frameX + stop.position });
                 }}
               >
                 <Tooltip>

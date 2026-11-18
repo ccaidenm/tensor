@@ -1,5 +1,7 @@
 import type {
   Block,
+  ColumnSlot,
+  ColumnsSpec,
   EquationBlock,
   Run,
   EquationMetrics,
@@ -22,7 +24,7 @@ import type {
   TextStyle,
   TextMetrics,
 } from './types.js'
-import { BAND_ANCHOR_PX } from './types.js'
+import { BAND_ANCHOR_PX, DEFAULT_COLUMN_GAP } from './types.js'
 import { breakCodeLines, breakLines, fitDownImage } from './line-breaker.js'
 
 /**
@@ -166,15 +168,18 @@ export class EquationTooTallError extends Error {
 //    widow concern is void — a STRUCTURALLY DROPPED bond does NOT
 //    preempt (control returns to R3; pinned by flow.test.ts).
 //  - STRUCTURAL DROP: a bond at a boundary carrying a forced break —
-//    breakBefore(B) OR breakAfter(A), symmetric, both spellings —
-//    drops at detection, loudly: a page that must start with B cannot
-//    also start with A's last fragment.
-//  - FORCED BREAKS: breakBefore closes a non-fresh page before the
-//    block (fresh start = no-op); breakAfter closes after the block.
-//    A closed page always holds content — never an empty page; a
-//    trailing close never materializes (pages derive from the max line
-//    pageIndex). Forced breaks emit NO FragmentBreak (not mid-block
-//    splits).
+//    breakBefore(B) OR breakAfter(A), symmetric, every spelling
+//    ('page' and #74's 'column') — drops at detection, loudly: a
+//    page/column that must start with B cannot also start with A's
+//    last fragment (manual breaks outrank bonds — Word parity).
+//  - FORCED BREAKS: breakBefore closes a non-fresh page (or, #74,
+//    slot) before the block (fresh start = no-op); breakAfter closes
+//    after the block. 'page' targets the next page; 'column' targets
+//    the next SLOT — the next column, else the next page (the manual
+//    column break). A closed page always holds content — never an
+//    empty page; a trailing close never materializes (pages derive
+//    from the max line pageIndex). Forced breaks emit NO FragmentBreak
+//    (not mid-block splits).
 //  - CACHE: the resume point extends BACKWARD through bonded chains —
 //    a bonded predecessor's placement consumed its successor's
 //    first-line height, so an edit inside the successor can invalidate
@@ -183,10 +188,19 @@ export class EquationTooTallError extends Error {
 //    breakBefore(B) boundary (the gate's state equality fails; the
 //    walk re-applies the close) — conservative, safe.
 
-// Walk state: (pageIndex, yCursor) at block entry. The unit of the
+// Walk state: (pageIndex, column, yCursor) at block entry. The unit of the
 // Markov property — nothing else persists across block boundaries.
+// #74 COLUMNS: `column` is the 0-based flow-slot index within the page's
+// column grid (0 on single-column docs — the additive law). A SLOT is a
+// column of the current page; flow fills a slot top-down, then advances:
+// next column, else next page. CLOSE TAXONOMY: placeBlock's internal
+// close and the structural 'column' spellings close to the next SLOT
+// (the machine fills the grid before wrapping); 'page' spellings,
+// section boundaries, and bond moves are PAGE closes — column 0 of the
+// next page (Word: a page break in a columned section wraps the page).
 interface WalkState {
   pageIndex: number
+  column: number
   y: number
 }
 
@@ -348,6 +362,10 @@ export function createLayoutEngine({
                   bottom: opts.margins.bottom,
                   left: opts.margins.left,
                 },
+                // #74 — the document-level default folds into the
+                // single-section fallback (the additive law: absent ≡
+                // one column ≡ today's shape).
+                columns: opts.columns,
               },
             ]
       // The block index where each section begins: section 0 at block
@@ -376,6 +394,10 @@ export function createLayoutEngine({
         anchorTop: number
         anchorBottom: number
         contentBox: Rect
+        /** #74 — the section's RAW column spec (the continuous-upgrade comparison reads it). */
+        columnSpec: ColumnsSpec | undefined
+        /** #74 — the RESOLVED column grid (one slot per column, content-box-relative). */
+        columnSlots: readonly ColumnSlot[]
         topBlocks: BandEntry[]
         bottomBlocks: BandEntry[]
         restTopBlocks: BandEntry[]
@@ -490,6 +512,11 @@ export function createLayoutEngine({
             width: geom.page.width - geom.margins.left - geom.margins.right,
             height: geom.page.height - bodyTop - bodyBottom,
           }),
+          columnSpec: geom.columns,
+          // #74 — the resolved grid: one slot per column against this
+          // section's content box (loud on invalid specs — the adapter
+          // normalizes, this is the backstop).
+          columnSlots: resolveColumnSlots(geom.columns, geom.page.width - geom.margins.left - geom.margins.right),
           topBlocks,
           bottomBlocks,
           restTopBlocks,
@@ -500,6 +527,10 @@ export function createLayoutEngine({
       // helpers below close over this binding — every geometry read in
       // the walk is the active section's).
       let active: ActiveSection = sectionTable[0]!
+
+      // #74 — the column count of a cached entry's section (cursorAfter's
+      // breakAfter-'column' transform needs the grid the block lived in).
+      const columnCountOf = (s: number): number => sectionTable[s]?.columnSlots.length ?? 1
 
       const hashes = doc.blocks.map(hashBlock)
       const optsHash = stableStringify(opts)
@@ -597,8 +628,14 @@ export function createLayoutEngine({
       // prefix: the predecessor's machine exit plus its breakAfter
       // close (a cursor transform).
       const startState: WalkState = (() => {
-        if (resume === 0) return { pageIndex: 0, y: 0 }
-        return cursorAfter(doc.blocks[resume - 1], oldCache[resume - 1].exitState)
+        if (resume === 0) return { pageIndex: 0, column: 0, y: 0 }
+        // #74 — the column count of the predecessor's section (its grid
+        // governs the breakAfter-'column' transform).
+        return cursorAfter(
+          doc.blocks[resume - 1],
+          oldCache[resume - 1].exitState,
+          columnCountOf(oldCache[resume - 1].section),
+        )
       })()
 
       const walked = new Set<number>()
@@ -615,8 +652,15 @@ export function createLayoutEngine({
         if ((sectionStartBlock[k] ?? Number.MAX_SAFE_INTEGER) <= resume) sectionCursor = k
       }
 
-      const getLines = (index: number): LineResult[] => {
+      // #74 — the WRAP WIDTH is the grid's NARROWEST column (equal-width
+      // grids — the default — wrap at each column's width exactly; a
+      // custom-widths grid wraps conservatively so every slot holds the
+      // lines — per-column re-wrapping is future work, documented). The
+      // ENTRY column still anchors the tab-stop frames and the
+      // reference right-edge below.
+      const getLines = (index: number, column: number): LineResult[] => {
         const block = doc.blocks[index]
+        const columnWidth = Math.min(...active.columnSlots.map((s) => s.width))
         // ATOMIC IMAGES (E-IMG-1): the image's single synthetic "line"
         // — INTERNAL, never emitted into lines[]. Feeding it through
         // the SAME machinery (countFitting, firstLineLands, fitsFresh)
@@ -628,7 +672,7 @@ export function createLayoutEngine({
           const dims = imagePlacedSize(
             block.width,
             block.height,
-            active.contentBox.width,
+            columnWidth,
             active.contentBox.height,
           )
           return [
@@ -683,22 +727,22 @@ export function createLayoutEngine({
           if (
             cached &&
             cached.contentHash === hash &&
-            cached.maxWidth === active.contentBox.width &&
+            cached.maxWidth === columnWidth &&
             cached.contentHeight === active.contentBox.height
           ) {
             return cached.lines
           }
           const layout = computeTableLayout(
             block,
-            active.contentBox.width,
+            columnWidth,
             active.contentBox.height,
             metrics,
             doc.baseStyle,
           )
           lineCache.set(block.id, {
             contentHash: hash,
-            maxWidth: active.contentBox.width,
-            firstMaxWidth: active.contentBox.width,
+            maxWidth: columnWidth,
+            firstMaxWidth: columnWidth,
             contentHeight: active.contentBox.height,
             lines: layout.results,
           })
@@ -722,8 +766,12 @@ export function createLayoutEngine({
         // firstLineIndent is refused by validation, so firstMaxWidth ≡
         // maxWidth for this kind.
         if (block.kind === 'referenceTable') {
-          const maxWidth =
-            active.contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
+          // #74 — entries wrap at the ENTRY column's width; the right
+          // tab stop anchors the page numbers at the COLUMN's right edge
+          // (tabLeft carries the column offset — stops resolve in the
+          // content frame, the breaker's pen + tabLeft law).
+          const colLeft = active.columnSlots[column]!.x
+          const maxWidth = columnWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
           const cached = lineCache.get(block.id)
           const hash = hashes[index]
           if (cached && cached.contentHash === hash && cached.maxWidth === maxWidth) {
@@ -747,12 +795,12 @@ export function createLayoutEngine({
               // The entry's EVERY line sits at its own indent (first ≡
               // rest — the block-tier firstLineIndent is refused);
               // stops resolve in the CONTENT frame (pen + tabLeft), so
-              // the right stop lands the number's END at the shared
-              // text edge regardless of the entry's level.
-              first: entryIndent,
-              rest: entryIndent,
+              // the right stop lands the number's END at the column's
+              // right edge − indentRight regardless of the entry's level.
+              first: colLeft + entryIndent,
+              rest: colLeft + entryIndent,
               stops: [
-                { position: active.contentBox.width - (block.indentRight ?? 0), alignment: 'right' },
+                { position: colLeft + columnWidth - (block.indentRight ?? 0), alignment: 'right' },
               ],
             })
             for (const line of lines) {
@@ -790,15 +838,13 @@ export function createLayoutEngine({
           return results
         }
         // INDENT FAMILY, effect 1 (line breaking): base lines wrap at
-        // active.contentBox.width − indentLeft − indentRight; ONLY line 0
-        // wraps at active.contentBox.width − (indentLeft + firstLineIndent) −
-        // indentRight — a NEGATIVE firstLineIndent under a larger
-        // indentLeft is the hanging style, so line 0 can wrap WIDER.
-        // The cache key stores BOTH widths: a re-layout under different
-        // indents (same content) must re-break even before the hash
-        // misses.
-        const maxWidth =
-          active.contentBox.width - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
+        // the ENTRY COLUMN's width − indentLeft − indentRight; ONLY line 0
+        // wraps at that − firstLineIndent — a NEGATIVE firstLineIndent
+        // under a larger indentLeft is the hanging style, so line 0 can
+        // wrap WIDER. The cache key stores BOTH widths: a re-layout under
+        // different indents (same content) must re-break even before the
+        // hash misses.
+        const maxWidth = columnWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0)
         const firstMaxWidth = maxWidth - (block.firstLineIndent ?? 0)
         const cached = lineCache.get(block.id)
         const hash = hashes[index]
@@ -821,13 +867,18 @@ export function createLayoutEngine({
           block.kind === 'codeBlock'
             ? breakCodeLines(block.runs, metrics, maxWidth, doc.baseStyle, firstMaxWidth)
             : breakLines(block.runs, metrics, maxWidth, doc.baseStyle, firstMaxWidth, {
-                // M-RULER Phase 4: tab stops resolve in the CONTENT
-                // frame — line 0's left edge sits indentLeft +
-                // firstLineIndent into it (the hanging seam), later
-                // lines at indentLeft. The stops ride the block
-                // (normalized by the adapter).
-                first: (block.indentLeft ?? 0) + (block.firstLineIndent ?? 0),
-                rest: block.indentLeft ?? 0,
+                // M-RULER Phase 4: tab stops resolve in the COLUMN
+                // frame (#74 — each column re-anchors the grid; column
+                // left ≡ content-box left single-column, so existing
+                // docs parse identically) — line 0's left edge sits
+                // indentLeft + firstLineIndent into it (the hanging
+                // seam), later lines at indentLeft. The stops ride
+                // the block (normalized by the adapter).
+                first:
+                  active.columnSlots[column]!.x +
+                  (block.indentLeft ?? 0) +
+                  (block.firstLineIndent ?? 0),
+                rest: active.columnSlots[column]!.x + (block.indentLeft ?? 0),
                 stops: block.tabStops,
               })
         lineCache.set(block.id, {
@@ -858,6 +909,459 @@ export function createLayoutEngine({
         placedOut.push(...entry.placedRects)
       }
 
+      // ── #74 BALANCED COLUMNS — the section-end balance, an OUTPUT
+      // TRANSFORM ──
+      // Word equalizes the column heights on the LAST page of a section
+      // (and at the document end). The balance runs at the two decision
+      // points where a page is known to be section-final — the SECTION
+      // TIER at a flow-terminating boundary, and the DOC END — and
+      // re-flows that page's flow units into equal-height columns.
+      //
+      // THE CACHE KEEPS THE MACHINE FORM. The balance NEVER writes the
+      // walk cache: the cached records are the unbalanced machine
+      // outputs — exactly the Markov form the splice gate's state
+      // equality proves — so prefix/splice reuse stays exact and a page
+      // that STOPS being section-final (content inserted after it)
+      // serves its honest naive fill on the next call. The transform
+      // re-applies to whatever the current last page is, every call.
+      // (An in-cache balance broke parity here: warm prefix-served a
+      // previously-balanced page while cold re-walked it unbalanced —
+      // the fuzzer caught it, seed 1004.) Parity is then structural:
+      // warm and cold machine outputs are deep-equal (the pre-columns
+      // law), and the transform is a pure function of (the output
+      // records, the doc's block metadata, the page's section grid) —
+      // the same pure function both paths apply.
+      //
+      // THE MODEL: the page's flow units (prose/reference lines, table
+      // bands, atomic images/equations — in doc order, which IS flow
+      // order) are re-assigned to the columns by a MIN-MAX partition:
+      // the smallest gap-aware column target T such that the units
+      // pack into ≤ C columns. A column's y accumulates the machine's
+      // own gap arithmetic (lead = spaceBefore at a block's true entry;
+      // inner = spaceAfter(prev) + spaceBefore across blocks within a
+      // column; a fresh column consumes ONLY the lead — spaceAfter
+      // stays behind), and a forced 'column' break (breakAfter on the
+      // previous block's last unit / breakBefore on the next block's
+      // true entry) pins a column start. THE PACK IS THE FEASIBILITY
+      // TEST — one sequential accumulation drives both, so the search's
+      // witness and the final assignment agree bitwise (a prefix-sum
+      // feasibility float-associates differently and could admit a
+      // target the machine-order pack overflows by an ulp — the fuzzer
+      // caught that too, seed 1003). The machine's own fill is a
+      // witness at T = its max column y, so the minimum T never
+      // worsens the overflow. Boundary minimums (R2/R3) are NOT
+      // re-applied at balance-created column boundaries (v1 ruling:
+      // the balance redistributes already-placed units; bonds hold by
+      // PAGE co-membership — every unit stays on the page).
+      //
+      // The pass is IDEMPOTENT over its own output (the pack is a pure
+      // function of the unit sequence), so the re-runs at stacked
+      // decision points (a section boundary followed by the doc end on
+      // the same page) are safe; the fast path (assignment unchanged)
+      // keeps record identity for zero-copy reuse.
+      const balanceSectionTail = (): void => {
+        // The last content page of the OUTPUT so far (at a tier decision
+        // point: the closing section's last page; at the doc end: the
+        // document's last page).
+        let lastPage = 0
+        for (const l of lines) if (l.pageIndex > lastPage) lastPage = l.pageIndex
+        for (const r of placedOut) if (r.pageIndex > lastPage) lastPage = r.pageIndex
+        // The page's frame section owns the grid (first-write-wins — a
+        // continuous run's sections share the geometry, so any of them
+        // resolves to the same slots and spec).
+        const sec = sectionTable[pageSections[lastPage] ?? 0] ?? sectionTable[0]!
+        if (sec.columnSlots.length < 2) return
+        if (sec.columnSpec?.balanced === false) return
+        const C = sec.columnSlots.length
+        const colLeftOf = (c: number): number => sec.columnSlots[c]!.x
+
+        // ── Unit extraction (doc order = flow order) ──
+        interface RawUnit {
+          docIndex: number
+          blockId: string
+          kind: 'line' | 'band' | 'atomic'
+          height: number
+          top: number // current top on the page
+          col: number // current column
+          lineIndex: number // the continuation's atLine (min lane lineIndex; 0 for atomics)
+          boxes: { index: number; box: LineBox }[] // line: [box]; band: the lanes; atomic: []
+          rects: { index: number; rect: PlacedRect }[] // band: the cell rects; atomic: [rect]
+        }
+        const blocksById = new Map<string, Block>(doc.blocks.map((b) => [b.id, b]))
+        const docIndexOf = new Map<string, number>(doc.blocks.map((b, i) => [b.id, i]))
+        const bandsByBlock = new Map<string, { top: number; height: number; boxes: { index: number; box: LineBox }[]; rects: { index: number; rect: PlacedRect }[] }[]>()
+        const floats: { block: ImageBlock }[] = []
+        const raw: RawUnit[] = []
+        // The lastPage records in array order; the per-block runs keep
+        // doc order (both arrays are doc-ordered, pageIndex
+        // non-decreasing).
+        const pageLines: { index: number; box: LineBox }[] = []
+        const pageRects: { index: number; rect: PlacedRect }[] = []
+        for (let i = 0; i < lines.length; i++) {
+          const box = lines[i]!
+          if (box.pageIndex === lastPage && !box.band) pageLines.push({ index: i, box })
+        }
+        for (let i = 0; i < placedOut.length; i++) {
+          const rect = placedOut[i]!
+          if (rect.pageIndex === lastPage) pageRects.push({ index: i, rect })
+        }
+        if (pageLines.length === 0 && pageRects.length === 0) return
+        // Table bands: the CELL RECTS identify the bands (every rect of
+        // a band carries the band's top and its full height; distinct
+        // bands stack — distinct tops). The LANES (tableCell lineBoxes)
+        // sit at bandTop + lane.y — they assign to the band whose
+        // [top, top+height) contains them.
+        for (const { index, rect } of pageRects) {
+          if (rect.kind !== 'tableCell') continue
+          let bands = bandsByBlock.get(rect.blockId)
+          if (!bands) {
+            bands = []
+            bandsByBlock.set(rect.blockId, bands)
+          }
+          let band = bands.find((b) => b.top === rect.rect.y)
+          if (!band) {
+            band = { top: rect.rect.y, height: rect.rect.height, boxes: [], rects: [] }
+            bands.push(band)
+          }
+          if (rect.rect.height > band.height) band.height = rect.rect.height
+          band.rects.push({ index, rect })
+        }
+        for (const { index, box } of pageLines) {
+          if (!box.tableCell) continue
+          const bands = bandsByBlock.get(box.blockId)
+          const band = bands?.find((b) => box.rect.y >= b.top && box.rect.y < b.top + b.height)
+          if (band) band.boxes.push({ index, box })
+        }
+        // Assemble the flow sequence: per block (doc order), its units.
+        const seenBlocks = new Set<string>()
+        const blockIds: string[] = []
+        for (const { box } of pageLines) {
+          if (!seenBlocks.has(box.blockId)) {
+            seenBlocks.add(box.blockId)
+            blockIds.push(box.blockId)
+          }
+        }
+        for (const { rect } of pageRects) {
+          if (!seenBlocks.has(rect.blockId)) {
+            seenBlocks.add(rect.blockId)
+            blockIds.push(rect.blockId)
+          }
+        }
+        blockIds.sort((a, b) => (docIndexOf.get(a) ?? 0) - (docIndexOf.get(b) ?? 0))
+        for (const blockId of blockIds) {
+          const block = blocksById.get(blockId)
+          if (!block) continue // defensive; ids validate upfront
+          if (block.kind === 'image' && block.float != null) {
+            floats.push({ block })
+            continue // zero flow presence — the float rebuilds below
+          }
+          if (block.kind === 'table') {
+            const bands = bandsByBlock.get(blockId) ?? []
+            const sorted = [...bands].sort((a, b) => a.top - b.top)
+            for (const band of sorted) {
+              let laneExtent = 0
+              for (const { box } of band.boxes) {
+                laneExtent = Math.max(laneExtent, box.rect.y + box.rect.height - band.top)
+              }
+              raw.push({
+                docIndex: docIndexOf.get(blockId) ?? 0,
+                blockId,
+                kind: 'band',
+                height: Math.max(band.height, laneExtent),
+                top: band.top,
+                col: band.boxes[0]?.box.column ?? band.rects[0]?.rect.column ?? 0,
+                lineIndex: band.boxes.length
+                  ? band.boxes.reduce((m, { box }) => Math.min(m, box.lineIndex), Number.MAX_SAFE_INTEGER)
+                  : 0,
+                boxes: band.boxes,
+                rects: band.rects,
+              })
+            }
+          } else if (block.kind === 'image' || block.kind === 'equation') {
+            const pr = pageRects.find((p) => p.rect.blockId === blockId)
+            if (!pr) continue
+            raw.push({
+              docIndex: docIndexOf.get(blockId) ?? 0,
+              blockId,
+              kind: 'atomic',
+              height: pr.rect.rect.height,
+              top: pr.rect.rect.y,
+              col: pr.rect.column ?? 0,
+              lineIndex: 0,
+              boxes: [],
+              rects: [pr],
+            })
+          } else {
+            for (const { index, box } of pageLines) {
+              if (box.blockId !== blockId || box.tableCell) continue
+              raw.push({
+                docIndex: docIndexOf.get(blockId) ?? 0,
+                blockId,
+                kind: 'line',
+                height: box.rect.height,
+                top: box.rect.y,
+                col: box.column ?? 0,
+                lineIndex: box.lineIndex,
+                boxes: [{ index, box }],
+                rects: [],
+              })
+            }
+          }
+        }
+        const n = raw.length
+        if (n === 0) return
+
+        // Blocks with lines on pages before lastPage: entry detection
+        // (spaceBefore applies only at a block's true entry) and the
+        // page-continuation break rule (a block continuing from an
+        // earlier page keeps its onto-lastPage FragmentBreak — its
+        // atLine is invariant under the balance).
+        const hasEarlier = new Set<string>()
+        for (const l of lines) {
+          if (l.pageIndex < lastPage) hasEarlier.add(l.blockId)
+        }
+
+        // Per-block first/last unit in the flow sequence (a block's
+        // units are contiguous; a tail block's last unit is its global
+        // last — the section ends here).
+        const firstOfBlock = new Map<string, number>()
+        const lastOfBlock = new Map<string, number>()
+        for (let k = 0; k < n; k++) {
+          const id = raw[k]!.blockId
+          if (!firstOfBlock.has(id)) firstOfBlock.set(id, k)
+          lastOfBlock.set(id, k)
+        }
+        const isEntry = (k: number): boolean =>
+          !hasEarlier.has(raw[k]!.blockId) && firstOfBlock.get(raw[k]!.blockId) === k
+        const isLast = (k: number): boolean => lastOfBlock.get(raw[k]!.blockId) === k
+
+        // Gap arithmetic (the machine's own cursor semantics):
+        // lead(k) — the gap when unit k BEGINS a column (spaceBefore at
+        // the block's true entry; a continuation starts bare).
+        // inner(k) — the gap before unit k continuing a column after
+        // k−1 (same block: tight; across blocks: spaceAfter + spaceBefore).
+        const lead = (k: number): number =>
+          isEntry(k) ? (blocksById.get(raw[k]!.blockId)?.spaceBefore ?? 0) : 0
+        const inner = (k: number): number =>
+          raw[k]!.blockId === raw[k - 1]!.blockId
+            ? 0
+            : (blocksById.get(raw[k - 1]!.blockId)?.spaceAfter ?? 0) + lead(k)
+        // forcedBefore(k): a manual column break pins unit k to a fresh
+        // column (breakAfter on the previous block's last unit, or
+        // breakBefore on this block's true entry).
+        const forcedBefore = (k: number): boolean => {
+          if (k === 0) return false
+          return (
+            (isLast(k - 1) &&
+              blocksById.get(raw[k - 1]!.blockId)?.flow?.breakAfter === 'column') ||
+            (isEntry(k) &&
+              blocksById.get(raw[k]!.blockId)?.flow?.breakBefore === 'column')
+          )
+        }
+
+        // Prefix sums for O(1) column-final-y reads. columnY(j, i): a
+        // column holding units j..i, started fresh at j — the CANDIDATE
+        // GENERATOR for the search (the pack itself accumulates
+        // sequentially — see its comment for the single-arithmetic law).
+        const PH: number[] = new Array<number>(n + 1).fill(0)
+        const PI: number[] = new Array<number>(n + 1).fill(0)
+        for (let k = 0; k < n; k++) {
+          PH[k + 1] = PH[k]! + raw[k]!.height
+          PI[k + 1] = PI[k]! + (k === 0 ? 0 : inner(k))
+        }
+        const columnY = (j: number, i: number): number =>
+          lead(j) + (PH[i + 1]! - PH[j]!) + (PI[i + 1]! - PI[j + 1]!)
+
+        // Candidates: every achievable column-final y (the optimal
+        // pack's fullest column ends exactly at one of them).
+        const candSet = new Set<number>()
+        for (let j = 0; j < n; j++) {
+          for (let i = j; i < n; i++) candSet.add(columnY(j, i))
+        }
+        const candidates = [...candSet].sort((a, b) => a - b)
+
+        // feasible(T): the units pack into ≤ C columns at target T. THE
+        // PACK IS THE FEASIBILITY TEST — the same sequential accumulation
+        // drives both, so the search's witness and the final assignment
+        // agree BITWISE (a prefix-sum feasibility would float-associate
+        // differently from the machine-order pack and could admit a
+        // target the sequential pack overflows by an ulp — the balance
+        // would silently no-op and warm would serve stale records; the
+        // parity fuzzer caught exactly this, seed 1003).
+        const pack = (target: number): { col: number[]; top: number[] } | null => {
+          const col = new Array<number>(n).fill(0)
+          const top = new Array<number>(n).fill(0)
+          let c = 0
+          let k = 0
+          while (k < n) {
+            if (c >= C) return null
+            const g0 = lead(k)
+            if (g0 + raw[k]!.height > target) return null
+            let y = g0 + raw[k]!.height
+            col[k] = c
+            top[k] = g0
+            k++
+            while (k < n && !forcedBefore(k)) {
+              const g = inner(k)
+              if (y + g + raw[k]!.height > target) break
+              y += g
+              col[k] = c
+              top[k] = y
+              y += raw[k]!.height
+              k++
+            }
+            c++
+          }
+          return { col, top }
+        }
+        // The minimal feasible candidate (binary search; feasible at the
+        // largest candidate holds — the original layout's witness).
+        let lo = 0
+        let hi = candidates.length - 1
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1
+          if (pack(candidates[mid]!) !== null) hi = mid
+          else lo = mid + 1
+        }
+        const T = candidates[lo]!
+        const packed = pack(T)
+        if (!packed) return // unreachable (the search just succeeded) — defensive
+
+        // Fast path: the page is already the balanced assignment (the
+        // naive fill happened to be balanced, or the pass re-ran over
+        // its own output) — keep record identity.
+        let same = true
+        for (let k = 0; k < n; k++) {
+          if (raw[k]!.col !== packed.col[k]! || raw[k]!.top !== packed.top[k]!) {
+            same = false
+            break
+          }
+        }
+        if (same) return
+
+        // ── Rebuild (in place — the arrays keep their doc order) ──
+        const shiftX = (x: number, oldCol: number, newCol: number): number =>
+          x + (colLeftOf(newCol) - colLeftOf(oldCol))
+        for (let k = 0; k < n; k++) {
+          const u = raw[k]!
+          const nc = packed.col[k]!
+          const nt = packed.top[k]!
+          if (u.kind === 'line') {
+            const { index, box } = u.boxes[0]!
+            lines[index] = freezeLineBox({
+              ...box,
+              rect: {
+                x: shiftX(box.rect.x, u.col, nc),
+                y: nt,
+                width: box.rect.width,
+                height: box.rect.height,
+              },
+              column: nc,
+            })
+          } else if (u.kind === 'band') {
+            for (const { index, box } of u.boxes) {
+              lines[index] = freezeLineBox({
+                ...box,
+                rect: {
+                  x: shiftX(box.rect.x, u.col, nc),
+                  y: nt + (box.rect.y - u.top),
+                  width: box.rect.width,
+                  height: box.rect.height,
+                },
+                column: nc,
+              })
+            }
+            for (const { index, rect } of u.rects) {
+              placedOut[index] = freezePlacedRect({
+                ...rect,
+                rect: {
+                  x: shiftX(rect.rect.x, u.col, nc),
+                  y: nt + (rect.rect.y - u.top),
+                  width: rect.rect.width,
+                  height: rect.rect.height,
+                },
+                column: nc,
+              })
+            }
+          } else {
+            const { index, rect } = u.rects[0]!
+            placedOut[index] = freezePlacedRect({
+              ...rect,
+              rect: {
+                x: shiftX(rect.rect.x, u.col, nc),
+                y: nt,
+                width: rect.rect.width,
+                height: rect.rect.height,
+              },
+              column: nc,
+            })
+          }
+        }
+        // FLOATS rebuild at their balanced anchor (placeFloat's own
+        // math — the clamp runs on the new entry cursor): the balanced
+        // cursor where the float's block would have started — the page
+        // start, or the previous block-run's balanced exit.
+        for (const { block } of floats) {
+          const pr = pageRects.find((p) => p.rect.blockId === block.id && p.rect.float !== undefined)
+          if (!pr) continue
+          // The float's flow position: after the preceding block's last
+          // unit (or the page start).
+          const docIdx = docIndexOf.get(block.id) ?? 0
+          let anchor: WalkState = { pageIndex: lastPage, column: 0, y: 0 }
+          for (let k = 0; k < n; k++) {
+            if (raw[k]!.docIndex < docIdx) {
+              const spaceAfter = isLast(k) ? (blocksById.get(raw[k]!.blockId)?.spaceAfter ?? 0) : 0
+              anchor = {
+                pageIndex: lastPage,
+                column: packed.col[k]!,
+                y: packed.top[k]! + raw[k]!.height + spaceAfter,
+              }
+            } else break
+          }
+          placedOut[pr.index] = placeFloat(block, block.float!, anchor, sec.size, sec.contentBox).placedRects[0]!
+        }
+        // BREAKS: earlier-page breaks keep (in order); the
+        // onto-lastPage page-continuation keeps (atLine invariant);
+        // within-page column transitions recompute from the balanced
+        // pack. The array order is preserved (pageIndex non-decreasing;
+        // blocks in doc order).
+        let firstLastPageBreak = breaks.length
+        for (let i = 0; i < breaks.length; i++) {
+          if (breaks[i]!.pageIndex >= lastPage) {
+            firstLastPageBreak = i
+            break
+          }
+        }
+        const newTailBreaks: FragmentBreak[] = []
+        for (let k = 0; k < n; k++) {
+          const u = raw[k]!
+          if (firstOfBlock.get(u.blockId) !== k) continue // one pass per block
+          if (hasEarlier.has(u.blockId)) {
+            // The block's page continuation onto lastPage: the FIRST
+            // existing break pointing at lastPage (atLine invariant).
+            const cont = breaks
+              .slice(firstLastPageBreak)
+              .find((brk) => brk.blockId === u.blockId && brk.pageIndex === lastPage)
+            if (cont) newTailBreaks.push(cont)
+          }
+          // Column transitions within the block's run.
+          const k0 = firstOfBlock.get(u.blockId)!
+          const kL = lastOfBlock.get(u.blockId)!
+          for (let k2 = k0 + 1; k2 <= kL; k2++) {
+            if (packed.col[k2]! > packed.col[k2 - 1]!) {
+              newTailBreaks.push(
+                Object.freeze({
+                  blockId: u.blockId,
+                  atLine: raw[k2]!.lineIndex,
+                  pageIndex: lastPage,
+                }),
+              )
+            }
+          }
+        }
+        breaks.length = firstLastPageBreak
+        breaks.push(...newTailBreaks)
+      }
       let state: WalkState = startState
       let i = resume
       while (i < doc.blocks.length) {
@@ -889,8 +1393,19 @@ export function createLayoutEngine({
             next.contentBox.x === active.contentBox.x &&
             next.contentBox.y === active.contentBox.y &&
             next.contentBox.width === active.contentBox.width &&
-            next.contentBox.height === active.contentBox.height
-          if (!continuous && state.y > 0) state = { pageIndex: state.pageIndex + 1, y: 0 }
+            next.contentBox.height === active.contentBox.height &&
+            // #74 — the COLUMN GRID is geometry too: a continuous
+            // 1-col → 2-col boundary upgrades to a page start (a page
+            // cannot hold two grids — the one-geometry-per-page law).
+            stableStringify(next.columnSpec) === stableStringify(active.columnSpec)
+          if (!continuous) {
+            // #74 — a FLOW-TERMINATING boundary: the section's last page
+            // is final — balance it (the rebuilt exit cursor feeds the
+            // close below). A continuous same-geometry boundary shares
+            // the page and the column flow continues — no balance.
+            balanceSectionTail()
+          }
+          if (!continuous && state.y > 0) state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
           sectionCursor += 1
         }
         // The OUTER binding — getLines/placeFloat close over it; an
@@ -898,10 +1413,15 @@ export function createLayoutEngine({
         active = sectionTable[sectionCursor]!
 
         // STRUCTURAL TIER (precedence 1): breakBefore closes a
-        // non-fresh page; a fresh-page start is a no-op. Emits no
-        // FragmentBreak (not a mid-block split).
+        // non-fresh page/slot; a fresh start is a no-op. Emits no
+        // FragmentBreak (not a mid-block split). 'page' → column 0 of
+        // the next page; 'column' (#74) → the next SLOT (next column,
+        // else next page — the manual column break, Word's
+        // newsletter-flow early wrap).
         if (block.flow?.breakBefore === 'page' && state.y > 0) {
-          state = { pageIndex: state.pageIndex + 1, y: 0 }
+          state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
+        } else if (block.flow?.breakBefore === 'column' && state.y > 0) {
+          state = nextSlotState(state, active.columnSlots.length)
         }
 
         // Headings route through breakLines exactly like paragraphs —
@@ -915,7 +1435,7 @@ export function createLayoutEngine({
         // getLines is skipped entirely: no synthetic line, nothing to
         // fit, nothing to bond (validateFloatFlow refused flow).
         const floated = block.kind === 'image' && block.float != null
-        const results: readonly LineResult[] = floated ? [] : getLines(i)
+        const results: readonly LineResult[] = floated ? [] : getLines(i, entryState.column)
         // M-TABLES: the R2/R3 boundary minimums (orphan/widow) never
         // apply BETWEEN a table's bands — rows break naturally (Word
         // has no widow control on table rows; "keep rows together" is
@@ -945,13 +1465,20 @@ export function createLayoutEngine({
               next.contentBox.x === active.contentBox.x &&
               next.contentBox.y === active.contentBox.y &&
               next.contentBox.width === active.contentBox.width &&
-              next.contentBox.height === active.contentBox.height
+              next.contentBox.height === active.contentBox.height &&
+              // #74 — the column grid joins the geometry comparison
+              // (the continuous-upgrade law above).
+              stableStringify(next.columnSpec) === stableStringify(active.columnSpec)
             )
           })()
+        // #74 — ANY forced-break spelling at the boundary is structural
+        // ('page' and 'column'; null/undefined count as unset — the PM
+        // round-trip convention). Manual breaks outrank bonds: the drop
+        // keeps the bounded-attempt machinery from fighting the break.
         const structural =
           bondExists &&
-          (block.flow?.breakAfter === 'page' ||
-            next.flow?.breakBefore === 'page' ||
+          (block.flow?.breakAfter != null ||
+            next.flow?.breakBefore != null ||
             nextIsClosingBoundary)
         const bonded = bondExists && !structural
 
@@ -960,7 +1487,7 @@ export function createLayoutEngine({
           block.kind === 'image' && block.float != null
             ? placeFloat(block, block.float, currentEntry, active.size, active.contentBox)
             : placeBlock(
-                block, results, currentEntry, active.contentBox.width, active.contentBox.height,
+                block, results, currentEntry, active.columnSlots, active.contentBox.height,
                 control, bonded, false,
               )
         let movedViaShape1 = false
@@ -985,11 +1512,14 @@ export function createLayoutEngine({
         } else if (bonded) {
           // BOND LOOKAHEAD — A's placement consumes B's first-line
           // height via firstLineLands, the exact same rules the walk
-          // applies (see its comment for the full arm list).
-          const nextLines = getLines(i + 1)
+          // applies (see its comment for the full arm list). #74: the
+          // lookahead breaks B at the width of the column B ENTERS
+          // (A's exit slot).
+          const nextLines = getLines(i + 1, placed.exitState.column)
           const lands = firstLineLands(
             next, nextLines, placed.exitState, active.contentBox.height,
             next.kind === 'table' ? false : controlOf(next),
+            active.columnSlots.length,
           )
           if (!lands) {
             if (!bondAttempts.has(i)) {
@@ -998,9 +1528,10 @@ export function createLayoutEngine({
                 countFitting(results, 0, active.contentBox.height) === results.length
               if (fitsFresh && entryState.y > 0) {
                 // SHAPE 1 (R1 shape): move A's start to the fresh page.
-                currentEntry = { pageIndex: entryState.pageIndex + 1, y: 0 }
+                // #74: a PAGE move — column 0 of the next page.
+                currentEntry = { pageIndex: entryState.pageIndex + 1, column: 0, y: 0 }
                 placed = placeBlock(
-                  block, results, currentEntry, active.contentBox.width, active.contentBox.height,
+                  block, results, currentEntry, active.columnSlots, active.contentBox.height,
                   control, bonded, false,
                 )
                 movedViaShape1 = true
@@ -1015,7 +1546,7 @@ export function createLayoutEngine({
                 // For an ATOMIC image A this shape is vacuous by
                 // construction (n == 1, never splits) → bounded drop.
                 placed = placeBlock(
-                  block, results, currentEntry, active.contentBox.width, active.contentBox.height,
+                  block, results, currentEntry, active.columnSlots, active.contentBox.height,
                   control, bonded, true,
                 )
               }
@@ -1066,9 +1597,13 @@ export function createLayoutEngine({
         // closed page always holds this block's lines, never an empty
         // page; a trailing close never materializes a phantom page
         // (pages derive from the max line pageIndex). Emits no
-        // FragmentBreak.
+        // FragmentBreak. 'page' → column 0 of the next page; 'column'
+        // (#74) → the next SLOT (the block's own slot always holds its
+        // lines — never vacuous, unlike breakBefore).
         if (block.flow?.breakAfter === 'page') {
-          state = { pageIndex: state.pageIndex + 1, y: 0 }
+          state = { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
+        } else if (block.flow?.breakAfter === 'column') {
+          state = nextSlotState(state, active.columnSlots.length)
         }
 
         // BACKWARD CASCADE (shape-1 moves only — shape 2 moves no
@@ -1080,8 +1615,10 @@ export function createLayoutEngine({
           const prevEntry = newCache[i - 1]
           const prevBondActive =
             (prev.flow?.keepNext === true || block.flow?.keepPrevious === true) &&
-            prev.flow?.breakAfter !== 'page' &&
-            block.flow?.breakBefore !== 'page'
+            // Any forced-break spelling is structural (#74: 'page' and
+            // 'column'; null/undefined count as unset).
+            prev.flow?.breakAfter == null &&
+            block.flow?.breakBefore == null
           if (
             prevBondActive &&
             firstPageOfOutputs(placed) !== lastPageOfEntry(prevEntry)
@@ -1089,16 +1626,16 @@ export function createLayoutEngine({
             // bond (i-1 → i) violated → predecessor enforcement (one
             // attempt, keyed i-1).
             if (!bondAttempts.has(i - 1)) {
-              const prevResults = getLines(i - 1)
+              const prevResults = getLines(i - 1, prevEntry.entryState.column)
               const prevFitsFresh =
                 countFitting(prevResults, 0, active.contentBox.height) === prevResults.length
               const prevEntryState = prevEntry.entryState
               if (prevFitsFresh && prevEntryState.y > 0) {
                 bondAttempts.add(i - 1)
                 // Unwind: close the predecessor's entry page, re-place
-                // it fresh; the loop re-flows the chain from there.
+                // it fresh. #74: a PAGE move (column 0).
                 i -= 1
-                state = { pageIndex: prevEntryState.pageIndex + 1, y: 0 }
+                state = { pageIndex: prevEntryState.pageIndex + 1, column: 0, y: 0 }
                 continue
               }
               if (!prevFitsFresh) {
@@ -1110,7 +1647,7 @@ export function createLayoutEngine({
                   prev,
                   prevResults,
                   prevEntryState,
-                  active.contentBox.width,
+                  active.columnSlots,
                   active.contentBox.height,
                   // M-TABLES: same table-aware control the walk used —
                   // the re-placement must mirror the machine exactly.
@@ -1185,8 +1722,9 @@ export function createLayoutEngine({
           // the walk AFTER placement, not part of the record. Every
           // path that resumes the cursor from a cached exit must
           // re-apply the close, or the next block enters a stale
-          // mid-page state.
-          state = cursorAfter(doc.blocks[j], oldCache[j].exitState)
+          // mid-page state. #74 — the transform needs the entry's
+          // section grid (the 'column' close).
+          state = cursorAfter(doc.blocks[j], oldCache[j].exitState, columnCountOf(oldCache[j].section))
           stats.blocksSpliced += 1
           j += 1
         }
@@ -1215,7 +1753,7 @@ export function createLayoutEngine({
         if (j > i + 1) {
           // Remaining consumed entries chain exactly to the current
           // cursor (breakAfter closes re-applied).
-          state = cursorAfter(doc.blocks[j - 1], newCache[newCache.length - 1].exitState)
+          state = cursorAfter(doc.blocks[j - 1], newCache[newCache.length - 1].exitState, columnCountOf(newCache[newCache.length - 1].section))
         } else {
           // Nothing consumed (or all un-consumed): restore the
           // pre-splice cursor (includes a possible breakAfter close —
@@ -1224,6 +1762,10 @@ export function createLayoutEngine({
         }
         i = j
       }
+
+      // #74 — the document end: the last section's last page balances
+      // (the same flow-terminating law as a section boundary).
+      balanceSectionTail()
 
       walkCache = newCache
 
@@ -1250,6 +1792,13 @@ export function createLayoutEngine({
             size: sec.size,
             contentBox: sec.contentBox,
             sectionIndex: sectionIndexOf,
+            // #74 — the page's column grid, engine-issued (the
+            // contentBox law applied to columns): consumers read the
+            // facts, never re-derive. Omitted on single-column pages
+            // (the additive law — existing snapshots pinned on it).
+            ...(sec.columnSlots.length > 1
+              ? { columns: sec.columnSlots as ColumnSlot[] }
+              : {}),
           }),
         )
       }
@@ -1356,6 +1905,62 @@ export function alignOffset(
 }
 
 /**
+ * #74 COLUMNS — the ONE column-grid derivation (the engine owns this
+ * math; the shell imports PageGeometry.columns, never re-derives).
+ * Resolves a ColumnsSpec against the section's content width into one
+ * slot per column, CONTENT-BOX-relative. Absent spec ≡ ONE full-width
+ * slot (the additive law). LOUD on invalid specs (the adapter-contract
+ * backstop family): non-integer or < 1 count, negative gap, a
+ * widths array whose length ≠ count or carrying negative weights, or
+ * a gap that consumes the content box (no space left to divide).
+ * Equal weights absent `widths`; else the weights are normalized
+ * fractions of the post-gap space (relative, NOT px — the widths
+ * reflow with the content box).
+ */
+function resolveColumnSlots(
+  spec: ColumnsSpec | undefined,
+  contentWidth: number,
+): ColumnSlot[] {
+  if (spec === undefined) return [Object.freeze({ x: 0, width: contentWidth }) as ColumnSlot]
+  const { count, gap = DEFAULT_COLUMN_GAP, widths } = spec
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(
+      `columns.count ${count} — not an integer >= 1; the adapter must validate before sending`,
+    )
+  }
+  if (!(gap >= 0) || !Number.isFinite(gap)) {
+    throw new Error(`columns.gap ${gap} — negative/invalid column gap; the adapter must validate before sending`)
+  }
+  if (widths !== undefined) {
+    if (widths.length !== count) {
+      throw new Error(
+        `columns.widths.length ${widths.length} ≠ columns.count ${count}; the adapter must validate before sending`,
+      )
+    }
+    if (widths.some((w) => !(w >= 0) || !Number.isFinite(w)) || widths.reduce((s, w) => s + w, 0) <= 0) {
+      throw new Error(`columns.widths carry a negative/zero-sum weight; the adapter must validate before sending`)
+    }
+  }
+  if (count === 1) return [Object.freeze({ x: 0, width: contentWidth }) as ColumnSlot]
+  const available = contentWidth - gap * (count - 1)
+  if (available <= 0) {
+    throw new Error(
+      `columns: gap ${gap} × ${count - 1} consumes the ${contentWidth}px content box — no space to divide; ` +
+        'the adapter must validate before sending',
+    )
+  }
+  const totalWeight = widths?.reduce((s, w) => s + w, 0)
+  let x = 0
+  const slots: ColumnSlot[] = []
+  for (let c = 0; c < count; c++) {
+    const width = widths === undefined ? available / count : (available * widths[c]!) / totalWeight!
+    slots.push(Object.freeze({ x, width }) as ColumnSlot)
+    x += width + gap
+  }
+  return slots
+}
+
+/**
  * Image fit-down (E-IMG-1): the block placement's box — the ENGINE owns
  * this math (two-sided law: the shell must never scale; it imports the
  * primitive). Delegates to fitDownImage (line-breaker.ts) — the ONE
@@ -1373,41 +1978,58 @@ function imagePlacedSize(
 }
 
 // BOND LOOKAHEAD — predicts whether a block's FIRST line lands on the
-// entry page, mirroring the placement machine's start decisions
+// entry PAGE, mirroring the placement machine's start decisions
 // EXACTLY. The prediction must mirror "the same rules the walk
 // applies" completely, or it isn't exact; every arm is listed:
-//   - structural breakBefore: y > 0 → the page closes → next page.
+//   - structural breakBefore: y > 0 → 'page' closes to the next page;
+//     'column' (#74) closes to the next slot (the same page when a
+//     column remains — the bond guards PAGE co-membership).
 //   - spaceBefore is consumed at entry, shrinking the fit budget;
 //     the y > 0 guards below test line-top presence (entry.y), not
 //     the padded cursor — spaceBefore is not content.
 //   - R0: the whole block fits → stays.
-//   - fits == 0: content on the page → R1 closes → next page; fresh
-//     page → R6 places the first line by fiat → STAYS (degenerate: a
-//     single line taller than the page still lands on the entry page —
+//   - fits == 0: content on the page → R1 closes → NEXT SLOT; fresh
+//     slot → R6 places the first line by fiat → STAYS (degenerate: a
+//     single line taller than the slot still lands on the entry slot —
 //     the bond HOLDS).
-//   - R2 orphan: fits == 1 && n > 1 && control && hasContent → next page.
+//   - R2 orphan: fits == 1 && n > 1 && control && hasContent → next slot.
 //   - R-ATOMIC: keepLines && n <= cap while the block doesn't fit →
-//     next page (cannot fire on a fresh page: n <= cap means the
-//     unpadded fresh page fits the whole block, so R0 already fired —
+//     next slot (cannot fire on a fresh slot: n <= cap means the
+//     unpadded fresh slot fits the whole block, so R0 already fired —
 //     with spaceBefore the hasContent guard pins it).
 //   - otherwise: R3-adjusted/R5 splits place fits >= 1 FIRST lines on
-//     the entry page → stays (R3 never moves the start).
+//     the entry slot → stays (R3 never moves the start).
+// #74 COLUMNS (the ruling, pinned by columns.test.ts): every slot move
+// above lands on the NEXT SLOT — column+1 of the same page when one
+// remains, else the next page. The BOND guards PAGE co-membership
+// (Word: keep-with-next prevents PAGE breaks; a column close keeps
+// both lines on the page), so each "moves" arm returns TRUE (lands)
+// when another column remains on the entry page, FALSE otherwise.
 function firstLineLands(
   block: Block,
   lines: readonly LineResult[],
   entry: WalkState,
   contentHeight: number,
   control: boolean,
+  columnCount: number,
 ): boolean {
   if (block.flow?.breakBefore === 'page' && entry.y > 0) return false
   const hasContent = entry.y > 0
+  // The slot move's page answer: another column on this page, or wrap.
+  const nextSlotSamePage = entry.column + 1 < columnCount
+  // #74 — UNREACHABLE via the driver (a bond at a breakBefore boundary
+  // is structural — dropped at detection) but kept for the mirror law:
+  // the prediction must reproduce the machine for any block handed to
+  // it. A 'column' break lands B in the next slot — the SAME page when
+  // a column remains (the bond guards page co-membership).
+  if (block.flow?.breakBefore === 'column' && entry.y > 0) return nextSlotSamePage
   const n = lines.length
   const fits = countFitting(lines, 0, contentHeight - entry.y - (block.spaceBefore ?? 0))
   if (fits >= n) return true
-  if (fits === 0) return !hasContent
-  if (fits === 1 && n > 1 && control && hasContent) return false
+  if (fits === 0) return !hasContent || nextSlotSamePage
+  if (fits === 1 && n > 1 && control && hasContent) return nextSlotSamePage
   const cap = countFitting(lines, 0, contentHeight)
-  if (block.flow?.keepLines === true && n <= cap && hasContent) return false
+  if (block.flow?.keepLines === true && n <= cap && hasContent) return nextSlotSamePage
   return true
 }
 
@@ -1436,12 +2058,29 @@ function lastPageOfEntry(entry: WalkCacheEntry): number {
 // AFTER placement as a cursor transform — the cached exitState is the
 // MACHINE exit. Every path that resumes the cursor from a cached exit
 // must re-apply the close, or the next block enters a stale mid-page
-// state (a parity bug the fuzzer caught).
-function cursorAfter(block: Block, exit: WalkState): WalkState {
+// state (a parity bug the fuzzer caught). #74: the 'column' transform
+// needs the grid the block lived in — call sites pass
+// columnCountOf(entry.section) (the cached entry records its section).
+function cursorAfter(block: Block, exit: WalkState, columnCount: number): WalkState {
   if (block.flow?.breakAfter === 'page') {
-    return { pageIndex: exit.pageIndex + 1, y: 0 }
+    return { pageIndex: exit.pageIndex + 1, column: 0, y: 0 }
+  }
+  if (block.flow?.breakAfter === 'column') {
+    return nextSlotState(exit, columnCount)
   }
   return exit
+}
+
+// #74 COLUMNS — the ONE slot-close derivation: the next flow slot, the
+// next column first, else the next page (column 0). placeBlock's
+// closeSlot, the driver's structural 'column' closes, and cursorAfter's
+// breakAfter-'column' transform all route through it — one arithmetic,
+// the single-derivation posture (parity requires bit-identical closes).
+function nextSlotState(state: WalkState, columnCount: number): WalkState {
+  if (state.column + 1 < columnCount) {
+    return { pageIndex: state.pageIndex, column: state.column + 1, y: 0 }
+  }
+  return { pageIndex: state.pageIndex + 1, column: 0, y: 0 }
 }
 
 // Bond flags between blocks[i] and blocks[i+1] (either spelling).
@@ -1453,8 +2092,9 @@ function bondExistsBetween(doc: SemanticDoc, i: number): boolean {
 }
 
 // The placement machine. PURE: a function of (block, LineResults,
-// entry state, content-box size, widow control, bond context, split
-// backup) — the Markov property made physically true of the code.
+// entry state, the section's column grid, the slot height, widow
+// control, bond context, split backup) — the Markov property made
+// physically true of the code.
 // `bonded` (an ACTIVE bond to the successor) preempts R3: when the
 // bond already relocates A's last line onto B's page, the widow
 // concern is void. `backupFinalSplit` is the one-shot shape-2 hook:
@@ -1475,7 +2115,8 @@ function placeBlock(
   block: Block,
   results: readonly LineResult[],
   entryState: WalkState,
-  contentWidth: number,
+  /** #74 — the section's resolved column grid (one slot per column). */
+  columnSlots: readonly ColumnSlot[],
   contentHeight: number,
   control: boolean,
   bonded: boolean,
@@ -1513,7 +2154,17 @@ function placeBlock(
   const lineBoxes: LineBox[] = []
   const breaks: FragmentBreak[] = []
   const placedRects: PlacedRect[] = []
-  let { pageIndex, y } = entryState
+  let { pageIndex, column, y } = entryState
+  // #74 COLUMNS — the machine is SLOT-aware: `column` is the current
+  // flow slot (lines break ONCE at the ENTRY slot's width — the
+  // getLines law; a fragment landing in another width of a custom
+  // widths[] grid places at the broken width, documented). The
+  // current slot's left edge folds into every emitted rect.x (the
+  // engine emits COLUMN-offset rects — the shell stays column-blind
+  // for everything rect-driven); the `column` field rides LineBoxes
+  // iff the grid carries more than one column (the additive law).
+  const multiColumn = columnSlots.length > 1
+  const colLeft = (): number => columnSlots[column]!.x
 
   // SPACE-BEFORE (block entry, applied ONCE): the first line's top
   // is pushed down by spaceBefore, so every fit count below evaluates
@@ -1540,20 +2191,23 @@ function placeBlock(
   // validateIndentGeometry guarantees the line-0 edge is ≥ 0.
   const baseLeft = block.indentLeft ?? 0
   const firstLeft = baseLeft + (block.firstLineIndent ?? 0)
+  // #74 — the ENTRY slot's width positions aligned atomic blocks and
+  // the table box (the getLines wrap-width law's placement twin).
+  const entryWidth = columnSlots[entryState.column]!.width
   // IMAGE / EQUATION EMIT GEOMETRY: align positions the PLACED rect
-  // within the full content box via the shared alignOffset (center of
+  // within the ENTRY COLUMN via the shared alignOffset (center of
   // the placed rect, not the intrinsic). Computed once — an atomic
   // visual block is one line. Equations default 'center' (Word's
   // display-equation convention; images default 'left').
   const imageLeft =
     block.kind === 'image'
-      ? alignOffset(block.align ?? 'left', results[0].width, contentWidth)
+      ? alignOffset(block.align ?? 'left', results[0].width, entryWidth)
       : block.kind === 'equation'
-        ? alignOffset(block.align ?? 'center', results[0].width, contentWidth)
+        ? alignOffset(block.align ?? 'center', results[0].width, entryWidth)
         : 0
   // TABLE EMIT GEOMETRY: the table sits inside its MARGINED box — the
   // left margin first, then the shared alignOffset over the tracks'
-  // total within the box (contentWidth − mL − mR). The band data is
+  // total within the box (entryWidth − mL − mR). The band data is
   // TABLE-relative; the emit adds the table's x and the band top.
   const tableMarginL = block.kind === 'table' ? Math.max(0, block.margin?.left ?? 0) : 0
   const tableMarginR = block.kind === 'table' ? Math.max(0, block.margin?.right ?? 0) : 0
@@ -1562,8 +2216,8 @@ function placeBlock(
       ? tableMarginL +
         alignOffset(
           block.align ?? 'left',
-          results[0]?.width ?? contentWidth,
-          contentWidth - tableMarginL - tableMarginR,
+          results[0]?.width ?? entryWidth,
+          entryWidth - tableMarginL - tableMarginR,
         )
       : 0
   // The BAND emit (M-TABLES): the band's cell lines are PARALLEL
@@ -1575,14 +2229,19 @@ function placeBlock(
       const result = results[i]
       const band = result?.tableBand
       if (!band) continue
+      // #74 — band lanes/fills carry the CURRENT slot's left edge (a
+      // table fragmenting across columns tiles band-wise into the
+      // grid; the table x stays the entry-column approximation).
+      const x0 = colLeft() + tableX
       for (const l of band.lines) {
         lineBoxes.push(
           freezeLineBox({
             blockId: block.id,
             lineIndex: l.lineIndex,
             pageIndex,
+            ...(multiColumn ? { column } : {}),
             rect: {
-              x: tableX + l.x,
+              x: x0 + l.x,
               y: y + l.y,
               width: l.width,
               height: l.height,
@@ -1601,7 +2260,8 @@ function placeBlock(
             blockId: block.id,
             kind: 'tableCell',
             pageIndex,
-            rect: { x: tableX + r.x, y: y + r.y, width: r.width, height: r.height },
+            ...(multiColumn ? { column } : {}),
+            rect: { x: x0 + r.x, y: y + r.y, width: r.width, height: r.height },
             cell: {
               fill: r.fill,
               border: r.border,
@@ -1636,7 +2296,9 @@ function placeBlock(
       const result = results[i]
       if (block.kind === 'image') {
         // The ATOMIC emit: a PlacedRect, never a LineBox. src/alt are
-        // opaque echoes — the engine never interprets them.
+        // opaque echoes — the engine never interprets them. #74: the
+        // rect carries the CURRENT slot's left edge (a fit-failure
+        // close moves the image to the next slot before R6 places).
         placedRects.push(
           freezePlacedRect({
             blockId: block.id,
@@ -1644,7 +2306,8 @@ function placeBlock(
             src: block.src,
             alt: block.alt,
             pageIndex,
-            rect: { x: imageLeft, y, width: result.width, height: result.height },
+            ...(multiColumn ? { column } : {}),
+            rect: { x: imageLeft + colLeft(), y, width: result.width, height: result.height },
           }),
         )
       } else if (block.kind === 'equation') {
@@ -1660,14 +2323,16 @@ function placeBlock(
             latex: block.latex,
             fontSize: block.fontSize,
             pageIndex,
-            rect: { x: imageLeft, y, width: result.width, height: result.height },
+            ...(multiColumn ? { column } : {}),
+            rect: { x: imageLeft + colLeft(), y, width: result.width, height: result.height },
           }),
         )
       } else if (block.kind === 'referenceTable') {
         // M-REFS — the entry line's rect.x is its ENTRY's left edge
         // (the per-line referenceLine.x — the block tier's
         // baseLeft/firstLeft don't apply: the indent lives per entry,
-        // the same ruling that gave tables their band emitter).
+        // the same ruling that gave tables their band emitter). #74:
+        // + the current slot's left edge.
         const ref = result.referenceLine
         if (!ref) {
           throw new Error(
@@ -1680,8 +2345,9 @@ function placeBlock(
             blockId: block.id,
             lineIndex: i,
             pageIndex,
+            ...(multiColumn ? { column } : {}),
             rect: {
-              x: ref.x,
+              x: colLeft() + ref.x,
               y,
               width: result.width,
               height: result.height,
@@ -1698,7 +2364,8 @@ function placeBlock(
             blockId: block.id,
             lineIndex: i,
             pageIndex,
-            rect: { x: i === 0 ? firstLeft : baseLeft, y, width: result.width, height: result.height },
+            ...(multiColumn ? { column } : {}),
+            rect: { x: colLeft() + (i === 0 ? firstLeft : baseLeft), y, width: result.width, height: result.height },
             baseline: result.baseline,
             rangeStart: result.start,
             rangeEnd: result.end,
@@ -1711,12 +2378,23 @@ function placeBlock(
     }
   }
 
-  const closePage = (): void => {
-    pageIndex += 1
+  // #74 — the SLOT close: the next flow slot, next column first, else
+  // the next page (column 0) — via the ONE nextSlotState arithmetic.
+  // Driver 'page' closes, section boundaries, and bond moves are PAGE
+  // closes by law; the driver's structural 'column' closes route
+  // through the same helper.
+  const closeSlot = (): void => {
+    const next = nextSlotState({ pageIndex, column, y: 0 }, columnSlots.length)
+    pageIndex = next.pageIndex
+    column = next.column
     y = 0
     hasContent = false
     if (isTable) pendingHeader = true
   }
+  // The page the continuation begins on after the next close (a
+  // column continuation keeps the page).
+  const continuationPage = (): number =>
+    column + 1 < columnSlots.length ? pageIndex : pageIndex + 1
 
   let k = 0
   while (k < L) {
@@ -1730,7 +2408,7 @@ function placeBlock(
     if (fits >= n) {
       if (backupFinalSplit && n > 1) {
         // SHAPE 2 (R3 shape): back the FINAL split point up one line —
-        // A's last line opens the successor's page.
+        // A's last line opens the successor's slot.
         place(k, n - 1)
         k += n - 1
         // M-TABLES: atLine is the CONTINUATION's first content
@@ -1741,10 +2419,10 @@ function placeBlock(
           Object.freeze({
             blockId: block.id,
             atLine: results[k]?.tableBand?.firstLineIndex ?? k,
-            pageIndex: pageIndex + 1,
+            pageIndex: continuationPage(),
           }),
         )
-        closePage()
+        closeSlot()
         continue
       }
       place(k, n) // R0
@@ -1754,7 +2432,7 @@ function placeBlock(
 
     if (fits === 0) {
       if (hasContent) {
-        closePage() // R1
+        closeSlot() // R1
         continue
       }
       // Fresh page. A pending header repeat shrank the budget above —
@@ -1765,23 +2443,23 @@ function placeBlock(
         pendingHeader = false
         fits = countFitting(results, k, contentHeight - y)
       }
-      if (fits === 0) fits = 1 // R6: a fresh page always places one band/line
+      if (fits === 0) fits = 1 // R6: a fresh slot always places one band/line
     }
 
     if (control && hasContent && fits === 1 && n > 1) {
-      closePage() // R2 orphan: the block's start moves
+      closeSlot() // R2 orphan: the block's start moves (#74: at COLUMN closes too — Word parity)
       continue
     }
 
     if (k === 0 && hasContent && block.flow?.keepLines === true && n <= cap) {
-      closePage() // R-ATOMIC: keepLines moves the whole block
+      closeSlot() // R-ATOMIC: keepLines moves the whole block
       continue
     }
 
     if (control && !bonded && n - fits === 1 && fits > 1) {
       fits -= 1 // R3 widow (bond preempts when ACTIVE)
       if (fits === 1 && hasContent && n > 1) {
-        closePage() // re-check R2 (inherits its content guard)
+        closeSlot() // re-check R2 (inherits its content guard)
         continue
       }
     }
@@ -1795,19 +2473,19 @@ function placeBlock(
         Object.freeze({
           blockId: block.id,
           atLine: results[k]?.tableBand?.firstLineIndex ?? k,
-          pageIndex: pageIndex + 1,
+          pageIndex: continuationPage(),
         }),
       )
-      closePage()
+      closeSlot()
     }
   }
 
   // SPACE-AFTER: belongs to this block's exit cursor, so the NEXT
   // block's fits account for it (participates in fits). Never closes
-  // a page itself — only a line placement ever closes pages.
+  // a slot itself — only a line placement ever closes slots.
   y += block.spaceAfter ?? 0
 
-  return { lineBoxes, breaks, placedRects, exitState: { pageIndex, y } }
+  return { lineBoxes, breaks, placedRects, exitState: { pageIndex, column, y } }
 }
 
 // ANCHORED FLOAT (E-IMG-3, v1 wrap NONE) — the model, in one breath:
@@ -1926,7 +2604,7 @@ function freezeLineBox(box: LineBox): LineBox {
 }
 
 function sameState(a: WalkState, b: WalkState): boolean {
-  return a.pageIndex === b.pageIndex && a.y === b.y
+  return a.pageIndex === b.pageIndex && a.column === b.column && a.y === b.y
 }
 
 // ─── M-TABLES — TABLE LAYOUT ─────────────────────────────────────────
@@ -2845,9 +3523,9 @@ function validateFloatFlow(doc: SemanticDoc): void {
         `block "${block.id}": floated image carries keepNext/keepPrevious — a float is not in flow and cannot bond; the adapter must validate before sending`,
       )
     }
-    if (flow?.breakBefore === 'page' || flow?.breakAfter === 'page') {
+    if (flow?.breakBefore != null || flow?.breakAfter != null) {
       throw new Error(
-        `block "${block.id}": floated image carries breakBefore/breakAfter — a float must not derive pages; put the forced break on the following text block instead`,
+        `block "${block.id}": floated image carries breakBefore/breakAfter — a float must not derive pages or slots; put the forced break on the following text block instead`,
       )
     }
   }

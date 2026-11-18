@@ -75,7 +75,11 @@ const randInt = (rng: () => number, lo: number, hi: number) =>
   lo + Math.floor(rng() * (hi - lo + 1))
 
 // Flow menu: bonds (keepNext/keepPrevious), forced breaks
-// (breakBefore/breakAfter), keep-together, widow-off, or none.
+// (breakBefore/breakAfter — 'page' AND #74's 'column'), keep-together,
+// widow-off, or none. DELIBERATE CORPUS CHANGE: the column-break
+// spellings join the menu, so the generated sequences differ from the
+// pre-columns corpus by construction — seeds stay 1001+i; parity is
+// re-established by this suite passing.
 const FLOW_MENU: (FlowPolicy | undefined)[] = [
   { keepLines: true },
   { widowControl: false },
@@ -83,7 +87,26 @@ const FLOW_MENU: (FlowPolicy | undefined)[] = [
   { keepPrevious: true },
   { breakBefore: 'page' },
   { breakAfter: 'page' },
+  { breakBefore: 'column' },
+  { breakAfter: 'column' },
   undefined,
+]
+
+// #74 COLUMNS: the document-level default column spec, drawn once per
+// sequence (the whole sequence runs under it) and redrawn by the
+// toggle-columns op (wholesale invalidation — opts rides the context
+// hash). The menu includes the undefined additive shape, equal and
+// custom widths, balance off, and a gutter-eating gap (12px slots —
+// the breaker's char-floor territory). DELIBERATE CORPUS CHANGE (with
+// the FLOW_MENU draws above): seeds stay 1001+i; parity is
+// re-established by this suite passing.
+const COLUMNS_MENU: (LayoutOptions['columns'] | undefined)[] = [
+  undefined,
+  { count: 2, gap: 24 },
+  { count: 3, gap: 48 },
+  { count: 2, gap: 24, widths: [2, 1] },
+  { count: 2, gap: 24, balanced: false },
+  { count: 2, gap: 600 },
 ]
 
 function randomBlock(rng: () => number, id: string): Block {
@@ -181,15 +204,16 @@ interface FuzzState {
   nextId: number
 }
 
-type OpKind = 'insert' | 'delete' | 'edit' | 'swap' | 'toggle-opts'
+type OpKind = 'insert' | 'delete' | 'edit' | 'swap' | 'toggle-opts' | 'toggle-columns'
 
 function pickOp(rng: () => number, len: number): OpKind {
   const r = rng()
   if (r < 0.25) return 'insert'
   if (r < 0.45) return len > 1 ? 'delete' : 'insert'
-  if (r < 0.75) return 'edit'
-  if (r < 0.95) return len >= 2 ? 'swap' : 'insert'
-  return 'toggle-opts' // ~10%: exercises wholesale invalidation
+  if (r < 0.72) return 'edit'
+  if (r < 0.92) return len >= 2 ? 'swap' : 'insert'
+  if (r < 0.96) return 'toggle-columns' // ~4%: redraws the column spec
+  return 'toggle-opts' // ~4%: exercises wholesale invalidation
 }
 
 function applyOp(rng: () => number, state: FuzzState): { kind: OpKind; state: FuzzState } {
@@ -291,6 +315,12 @@ function applyOp(rng: () => number, state: FuzzState): { kind: OpKind; state: Fu
       opts = { ...state.opts, preventWidowsAndOrphans: !state.opts.preventWidowsAndOrphans }
       break
     }
+    case 'toggle-columns': {
+      // #74 — a columns redraw: wholesale invalidation (the spec rides
+      // the opts hash) AND a re-balance under the new grid.
+      opts = { ...state.opts, columns: COLUMNS_MENU[randInt(rng, 0, COLUMNS_MENU.length - 1)] }
+      break
+    }
   }
   // FLOAT-BOND SANITIZE (E-IMG-3): the engine's float flow seam THROWS
   // on any bond or forced break touching a floated image (ruled loud
@@ -379,12 +409,16 @@ const BASE_SEED = 1001 // fixed forever
 // order); the closing it asserts both surfaces were exercised.
 let corpusInlineRuns = 0
 let corpusFloats = 0
+let corpusColumnedOps = 0
 
 describe('parity fuzz: warm engine deep-equals cold engine (parity law)', () => {
   for (let s = 0; s < SEQUENCE_COUNT; s++) {
     const seed = BASE_SEED + s
     it(`sequence ${s} (seed ${seed})`, () => {
       const rng = mulberry32(seed)
+      // #74 — the sequence's initial column spec (whole sequence runs
+      // under it; the toggle-columns op redraws it mid-sequence).
+      const initialColumns = COLUMNS_MENU[Math.floor(rng() * COLUMNS_MENU.length)]
       const state: FuzzState = {
         doc: {
           baseStyle: BASE_STYLE,
@@ -392,7 +426,7 @@ describe('parity fuzz: warm engine deep-equals cold engine (parity law)', () => 
             randomBlock(rng, `b${i}`),
           ),
         },
-        opts: BASE_OPTS,
+        opts: { ...BASE_OPTS, columns: initialColumns },
         nextId: 1000,
       }
       const warm = createLayoutEngine({ metrics: FakeMetrics })
@@ -420,6 +454,7 @@ describe('parity fuzz: warm engine deep-equals cold engine (parity law)', () => 
 
         const warmResult = warm.layout(state.doc, state.opts)
         const coldResult = createLayoutEngine({ metrics: FakeMetrics }).layout(state.doc, state.opts)
+        if (state.opts.columns !== undefined) corpusColumnedOps += 1
 
         expect(
           canonical(warmResult),
@@ -464,8 +499,12 @@ describe('parity fuzz: warm engine deep-equals cold engine (parity law)', () => 
     })
   }
 
-  it('corpus coverage receipt: inline-image runs and floats both exercised', () => {
+  it('corpus coverage receipt: inline-image runs, floats, and columned ops all exercised', () => {
     expect(corpusInlineRuns).toBeGreaterThan(0)
     expect(corpusFloats).toBeGreaterThan(0)
+    // #74 — the columns menu and the toggle-columns op must actually
+    // fire (a silently-narrowed menu would pass parity while
+    // exercising neither the flow slots nor the section-end balance).
+    expect(corpusColumnedOps).toBeGreaterThan(0)
   })
 })

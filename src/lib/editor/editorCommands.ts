@@ -20,6 +20,9 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   // #58 SECTIONS: the split-dance insert (the break seeds the store's
   // pageSetup — nothing changes visually until the dialog edits props).
   insertSectionBreak: (editor) => editor.commands.insertSectionBreak(),
+  // #74 COLUMNS: the manual column break (the page break's twin — the
+  // split-dance insert; the adapter stamps the following block).
+  insertColumnBreak: (editor) => editor.commands.insertColumnBreak(),
   // M-EQ: inserts an empty display equation and NodeSelections it —
   // the selection opens the editor bubble (useEquationEditor).
   insertEquation: (editor) => editor.commands.insertEquation(),

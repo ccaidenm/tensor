@@ -1023,6 +1023,15 @@ export const COMMANDS: CommandAction[] = [
     shortcutId: 'insertSectionBreak',
     keywords: ['section', 'break', 'insert', 'new section'],
   }),
+  // #74 COLUMNS — the manual column break (the page break's twin;
+  // the ribbon button + the palette + a choosable shortcut).
+  editorCommand('insertColumnBreak', {
+    title: 'Insert Column Break',
+    icon: SeparatorHorizontal,
+    group: 'format',
+    shortcutId: 'insertColumnBreak',
+    keywords: ['column', 'break', 'insert', 'columns'],
+  }),
   editorCommand('insertLink', {
     title: 'Insert Hyperlink',
     icon: Link2,
