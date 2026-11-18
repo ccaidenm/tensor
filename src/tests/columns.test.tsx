@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { fireEvent, render, act } from '@testing-library/react';
+import { unzipSync, strToU8 } from 'fflate';
 import { renderTensor, settleLayout } from './harness';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import {
@@ -17,6 +18,43 @@ import { FakeMetrics } from './fakeMetrics';
 import { ColumnsDialog } from '@/components/dialogs/ColumnsDialog';
 import { ArrangeGroup } from '@/components/layout/ribbon/layout/groups/ArrangeGroup';
 import { BreaksGroup } from '@/components/layout/ribbon/insert/groups/BreaksGroup';
+import { buildDocx, type DocxExportInput } from '@/lib/docx/export';
+import { buildPrintDocument } from '@/lib/print/buildDocument';
+import { mapDocxDocument, parseDocxTrees } from '@/lib/docx/import';
+import { BUILTIN_DEFINITIONS } from '@/lib/styles/builtins';
+
+// The DOCX round-trip harness (docx.test.tsx's shapes).
+const TINY_PNG = new Uint8Array(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64',
+  ),
+);
+const SHA = 'c'.repeat(64);
+function doc(...children: import('@tiptap/core').JSONContent[]): import('@tiptap/core').JSONContent {
+  return { type: 'doc', content: children };
+}
+function para(text: string): import('@tiptap/core').JSONContent {
+  return { type: 'paragraph', content: [{ type: 'text', text }] };
+}
+function makeInput(json: import('@tiptap/core').JSONContent, overrides: Partial<DocxExportInput> = {}): DocxExportInput {
+  return {
+    json,
+    pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: 32 } satisfies PageSetup,
+    headerFooter: null,
+    coreProperties: { title: 'Columns Test', creator: 'Tensor' },
+    styleDefinitions: [...BUILTIN_DEFINITIONS],
+    baseStyle: { fontFamily: 'Source Serif 4', fontSize: 16 },
+    media: new Map([[SHA, { bytes: TINY_PNG, ext: 'png' }]]),
+    ...overrides,
+  };
+}
+async function exportParts(input: DocxExportInput) {
+  const { bytes } = await buildDocx(input);
+  const parts = unzipSync(bytes);
+  const decoder = new TextDecoder();
+  return { text: (part: string) => decoder.decode(parts[part]!) };
+}
 
 /**
  * #74 COLUMNS — the shell suite. The ENGINE's laws live in the engine's
@@ -441,5 +479,139 @@ describe('columns — the Columns surfaces (the dialog, the popover, the button)
     const glyph = document.querySelector<HTMLElement>('[data-testid="ruler-tab-stop"]');
     expect(glyph).not.toBeNull();
     expect(parseFloat(glyph!.style.left)).toBeCloseTo(96 + 336 + 100, 0);
+  });
+});
+
+describe('columns — the DOCX round trip (Word’s w:cols + the break runs)', () => {
+  // The import fixtures' local helpers (docx-import.test.tsx's shapes,
+  // re-declared — the section/break arms need only the minimal parts).
+  const W_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const STYLES_XML = `${W_DECL}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`;
+  const body = (children: string) =>
+    `${W_DECL}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${children}</w:body></w:document>`;
+  const runXml = (text: string) => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`;
+  const importParts = (entries: Record<string, string>) => {
+    const parts: Record<string, Uint8Array> = {};
+    for (const [name, value] of Object.entries(entries)) parts[name] = strToU8(value);
+    return mapDocxDocument(parseDocxTrees(parts), { fontPolicy: 'keep', mediaPartToId: new Map() });
+  };
+
+  it('the export spells w:cols (count + spacing in twips; widths as w:col entries)', async () => {
+    const { text } = await exportParts(makeInput(doc(para('a')), {
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: 32, columns: { count: 2, gap: 36 } },
+    }));
+    const documentXml = text('word/document.xml');
+    expect(documentXml).toContain('w:cols');
+    expect(documentXml).toContain('w:num="2"');
+    // 36pt = 720 twips (Word's spacing unit).
+    expect(documentXml).toContain('w:space="720"');
+    // Equal widths: no per-col entries, equalWidth stays true (absent).
+    expect(documentXml).not.toContain('w:equalWidth="0"');
+
+    const { text: custom } = await exportParts(makeInput(doc(para('a')), {
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: 32, columns: { count: 2, gap: 36, widths: [144, 288] } },
+    }));
+    const customXml = custom('word/document.xml');
+    // Word's custom spelling: equalWidth false (ST_OnOff's 0/false) +
+    // the absolute w:col entries (pt → twips: 144pt = 2880tw, 288pt =
+    // 5760tw).
+    expect(customXml).toContain('w:equalWidth="false"');
+    expect(customXml).toContain('w:w="2880"');
+    expect(customXml).toContain('w:w="5760"');
+  });
+
+  it('the export spells the column break run (w:br type="column")', async () => {
+    const { text } = await exportParts(makeInput(doc(para('a'), { type: 'columnBreak' }, para('b'))));
+    expect(text('word/document.xml')).toContain('<w:br w:type="column"/>');
+  });
+
+  it('the import reads w:cols into the setup (twips → pt; custom widths)', () => {
+    const parsed = importParts({
+      'word/document.xml': body(
+        `${runXml('x')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:cols w:num="3" w:space="480"/></w:sectPr>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    // 480 twips = 24pt.
+    expect(parsed.pageSetup.columns).toEqual({ count: 3, gap: 24 });
+    // Custom widths: w:equalWidth="false" + the entries (2880/5760 tw →
+    // 144/288 pt — the engine's weights).
+    const custom = importParts({
+      'word/document.xml': body(
+        `${runXml('x')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +
+        `<w:cols w:num="2" w:space="720" w:equalWidth="0"><w:col w:w="2880"/><w:col w:w="5760"/></w:cols></w:sectPr>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    expect(custom.pageSetup.columns).toEqual({ count: 2, gap: 36, widths: [144, 288] });
+    // Equal entries (no equalWidth="0") ARE the equal spelling — no
+    // widths array.
+    const equal = importParts({
+      'word/document.xml': body(
+        `${runXml('x')}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>` +
+        `<w:cols w:num="2" w:space="720"><w:col w:w="4320"/><w:col w:w="4320"/></w:cols></w:sectPr>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    expect(equal.pageSetup.columns).toEqual({ count: 2, gap: 36 });
+  });
+
+  it('the import maps the column-break runs (own-paragraph node; trailing attr)', () => {
+    // Word's own-paragraph spelling → the columnBreak node.
+    const own = importParts({
+      'word/document.xml': body(
+        `<w:p>${runXml('before')}</w:p><w:p><w:r><w:br w:type="column"/></w:r></w:p><w:p>${runXml('after')}</w:p>`,
+      ),
+      'word/styles.xml': STYLES_XML,
+    });
+    const types = own.json.content!.map((n) => n.type);
+    expect(types).toEqual(['paragraph', 'columnBreak', 'paragraph']);
+
+    // A trailing break rides the paragraph (Word's break-after spelling).
+    const trailing = importParts({
+      'word/document.xml': body(`<w:p>${runXml('content')}<w:r><w:br w:type="column"/></w:r></w:p>`),
+      'word/styles.xml': STYLES_XML,
+    });
+    const only = trailing.json.content![0]!;
+    expect(only.type).toBe('paragraph');
+    expect(only.attrs!.breakAfter).toBe('column');
+  });
+
+  it('THE ROUND TRIP: Tensor → docx → Tensor keeps the spec and the break', async () => {
+    // Export a columned doc with a manual break.
+    const { bytes } = await buildDocx(makeInput(doc(
+      para('a'),
+      { type: 'columnBreak' },
+      para('b'),
+    ), {
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: 32, columns: { count: 2, gap: 36, widths: [144, 288] } },
+    }));
+    const parts = unzipSync(bytes);
+    const parsed = mapDocxDocument(parseDocxTrees(parts as Record<string, Uint8Array>), {
+      fontPolicy: 'keep',
+      mediaPartToId: new Map(),
+    });
+    // The spec: count + gap (tw→pt) + the absolute widths.
+    expect(parsed.pageSetup.columns).toEqual({ count: 2, gap: 36, widths: [144, 288] });
+    // The break: the node survives as the columnBreak block.
+    const types = parsed.json.content!.map((n) => n.type);
+    expect(types).toEqual(['paragraph', 'columnBreak', 'paragraph']);
+  });
+});
+
+describe('columns — print renders the columned flow (the walk is column-blind by construction)', () => {
+  it('print elements land in the second slot’s band (column-offset x)', async () => {
+    useDocumentStore.getState().setPageSetup({ ...LETTER, columns: TWO_COL });
+    // Long enough to spill past column 0's 54-line slot under ANY
+    // metrics (jsdom's canvas measures narrow — the real ones wide).
+    const { editor } = renderTensor('<p>' + 'word '.repeat(3000) + '</p>');
+    await settleLayout();
+    const built = buildPrintDocument(editor);
+    // Column 1's band starts at contentBox.x + slot.x = 96 + 336 = 432:
+    // spilled text elements there carry the column offset.
+    const col2Texts = built.pages[0]!.elements.filter(
+      (e) => e.kind === 'text' && e.x >= 430,
+    );
+    expect(col2Texts.length).toBeGreaterThan(0);
   });
 });

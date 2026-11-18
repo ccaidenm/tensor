@@ -595,6 +595,9 @@ function marksFor(format: RunFormat): { type: string; attrs?: Record<string, unk
 interface RunPieces {
   pieces: JSONContent[];
   pageBreaks: number;
+  /** #74 COLUMNS — the run's column-break brs (the pageBreak counters'
+   *  twin; the same trailing/mid-paragraph mapping rules). */
+  columnBreaks: number;
   hasContent: boolean;
   /**
    * M-FLOW — how many pieces follow the run's LAST page-break br: 0
@@ -603,16 +606,21 @@ interface RunPieces {
    * end; the trailing-break mapping in mapParagraph reads this).
    */
   piecesAfterLastBreak: number;
+  /** #74 COLUMNS — the same counter for the run's last COLUMN-break br. */
+  piecesAfterLastColumnBreak: number;
 }
 
 function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: DocxTrees['rels']): RunPieces {
   const pieces: JSONContent[] = [];
   let textBuffer = '';
   let pageBreaks = 0;
+  let columnBreaks = 0;
   let hasContent = false;
   // Pieces-array length (counting unflushed buffered text as one) at
   // the last page-break br; -1 = no break in this run.
   let piecesAtLastBreak = -1;
+  // #74 — the same counter for the run's last COLUMN-break br.
+  let piecesAtLastColumnBreak = -1;
 
   const flushText = (): void => {
     if (textBuffer) {
@@ -643,6 +651,13 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
           // Text buffered BEFORE the break belongs before it — count it
           // as pre-break content so piecesAfterLastBreak stays honest.
           piecesAtLastBreak = pieces.length + (textBuffer ? 1 : 0);
+        }
+        else if (oat(kid, 'type') === 'column') {
+          // #74 COLUMNS — the column-break br counts its own way (the
+          // page counters' twin; the paragraph mapping decides the
+          // node/attr spelling).
+          columnBreaks += 1;
+          piecesAtLastColumnBreak = pieces.length + (textBuffer ? 1 : 0);
         }
         else { flushText(); pieces.push({ type: 'hardBreak' }); hasContent = true; }
         break;
@@ -721,8 +736,10 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
   return {
     pieces,
     pageBreaks,
+    columnBreaks,
     hasContent,
     piecesAfterLastBreak: piecesAtLastBreak >= 0 ? pieces.length - piecesAtLastBreak : 0,
+    piecesAfterLastColumnBreak: piecesAtLastColumnBreak >= 0 ? pieces.length - piecesAtLastColumnBreak : 0,
   };
 }
 
@@ -875,10 +892,13 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
   const content: JSONContent[] = [];
   const ommlMarkers: ONode[] = [];
   let pageBreaks = 0;
+  let columnBreaks = 0;
   // M-FLOW — content-array length at the LAST page-break run: equal to
   // the final length ⟺ nothing follows the break (Word's break-after
   // spelling). -1 = no break seen.
   let contentAtLastBreak = -1;
+  // #74 COLUMNS — the same counter for the paragraph's last COLUMN-break.
+  let contentAtLastColumnBreak = -1;
   for (const kid of p.kids) {
     switch (kid.tag) {
       case 'pict':
@@ -903,9 +923,13 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         const format = runFormatFromRPr(oSub(kid, 'rPr'), ctx);
         const mapped = mapRunChildren(kid, format, ctx, rels);
         pageBreaks += mapped.pageBreaks;
+        columnBreaks += mapped.columnBreaks;
         content.push(...mapped.pieces);
         if (mapped.pageBreaks > 0) {
           contentAtLastBreak = content.length - mapped.piecesAfterLastBreak;
+        }
+        if (mapped.columnBreaks > 0) {
+          contentAtLastColumnBreak = content.length - mapped.piecesAfterLastColumnBreak;
         }
         break;
       }
@@ -1051,6 +1075,15 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
     attrs.breakAfter = 'page';
     pageBreaks = 0;
   }
+  // #74 COLUMNS — TRAILING column-break runs: the breakAfter 'column'
+  // attr (the page arm's twin — the engine closes the flow slot after
+  // the block; the export re-emits the same trailing run, so the round
+  // trip is stable). A paragraph spelling BOTH kinds maps the page one
+  // (above) — the column counter falls through to lost+counted.
+  if (pageBreaks === 0 && columnBreaks > 0 && contentAtLastColumnBreak === content.length && content.length > 0) {
+    attrs.breakAfter = 'column';
+    columnBreaks = 0;
+  }
 
   // THE HEADING MAPPING: Word spells headings as pStyle HeadingN — the
   // Tensor spelling is the heading NODE with its level. The runs ride
@@ -1073,11 +1106,23 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
     // paragraph — the Tensor spelling is the pageBreak block.
     return { json: { type: 'pageBreak' }, numPr: null };
   }
+  if (columnBreaks > 0 && merged.length === 0) {
+    // #74 COLUMNS — the column break's own-paragraph spelling: the
+    // Tensor spelling is the columnBreak block (the pageBreak arm's
+    // twin; the export re-emits the run, so the round trip is stable).
+    return { json: { type: 'columnBreak' }, numPr: null };
+  }
   if (pageBreaks > 0) {
     // A break with content AFTER it inside the same paragraph: Tensor
     // has no mid-paragraph page break — the break is lost (counted),
     // the content never drops. Rare.
     ctx.report.unknownNodes += pageBreaks;
+    return { json: { type: 'paragraph', attrs, content: merged }, numPr: numId != null ? { numId, ilvl } : null };
+  }
+  if (columnBreaks > 0) {
+    // #74 — the column-break twin: a mid-paragraph column break is lost
+    // (counted), the content never drops. Rare.
+    ctx.report.unknownNodes += columnBreaks;
     return { json: { type: 'paragraph', attrs, content: merged }, numPr: numId != null ? { numId, ilvl } : null };
   }
   return {
@@ -1325,6 +1370,38 @@ function mapSection(sectPr: ONode, ctx: MapContext, trees: DocxTrees): SectionRe
   // #58 — the section START type (Word's w:type; absent = nextPage).
   const startType: 'nextPage' | 'continuous' =
     oat(oSub(sectPr, 'type'), 'val') === 'continuous' ? 'continuous' : 'nextPage';
+
+  // #74 COLUMNS — the section's column spec (Word's w:cols): count +
+  // spacing in twips (→ pt), custom widths from the w:col entries when
+  // Word spells them (w:equalWidth="0" or unequal entries — equal
+  // entries ARE the equalWidth spelling, so no widths array). Word has
+  // no balance spelling (its sections balance implicitly at section
+  // ends) — the engine's default (true) imports; a Tensor balanced:
+  // false round-trips as true (the documented gap, Word-faithful).
+  const cols = oSub(sectPr, 'cols');
+  if (cols) {
+    const colCount = onum(cols, 'num') ?? 1;
+    if (colCount > 1) {
+      const spaceTw = onum(cols, 'space');
+      const colKids = oKids(cols, 'col');
+      const widths = colKids
+        .map((c) => onum(c, 'w'))
+        .filter((v): v is number => v != null)
+        .map((v) => Math.round(v / 20));
+      const equalSplit = widths.every((w) => Math.abs(w - widths[0]!) < 1);
+      // ST_OnOff spells "false" as 0 OR false (Word's newer writer and
+      // the docx lib both use false) — accept either.
+      const equalWidthExplicitOff =
+        oat(cols, 'equalWidth') === '0' || oat(cols, 'equalWidth') === 'false';
+      const custom =
+        widths.length === colCount && widths.every((w) => w > 0) && (equalWidthExplicitOff || !equalSplit);
+      pageSetup.columns = {
+        count: colCount,
+        ...(spaceTw != null ? { gap: Math.round(spaceTw / 20) } : {}),
+        ...(custom ? { widths } : {}),
+      };
+    }
+  }
 
   const lineNumbers: LineNumbersSetting | null = (() => {
     const ln = oSub(sectPr, 'lnNumType');

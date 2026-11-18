@@ -135,12 +135,14 @@ Options are passed fresh on every layout call (L4). Changing them between calls 
 interface LayoutResult {
   pages: PageGeometry[]
   lines: LineBox[]         // document order
-  breaks: FragmentBreak[]  // mid-block page splits — unused by the shell today
+  breaks: FragmentBreak[]  // mid-block slot splits — atLine names the new
+                           //   slot's first line; a column continuation
+                           //   keeps the page (#74)
   version: number          // bumps only when work happened; cheap staleness signal
 }
 ```
 
-`PageGeometry` gives each page's full `size` and its `contentBox` (the margins-inset rectangle where lines may live). The shell reads `version` through a `data-layout-version` attribute on the page stack; it's how the test harness (`settleLayout`) decides a layout has settled.
+`PageGeometry` gives each page's full `size` and its `contentBox` (the margins-inset rectangle where lines may live). #74: a columned page ALSO carries `columns` — the resolved grid (one `ColumnSlot { x, width }` per column, content-box-relative), and each `LineBox`/`PlacedRect` in a columned section carries its `column` slot index; both are omitted on single-column documents (the additive law). The engine folds the column's left edge into `rect.x` itself, so rect-driven consumers stay column-blind; only lane-bounded consumers (the hit-tester's column rule, the painter's column-scoped decor, the ruler's frame) read the facts — never derive them. The shell reads `version` through a `data-layout-version` attribute on the page stack; it's how the test harness (`settleLayout`) decides a layout has settled.
 
 The workhorse is `LineBox`, one placed line:
 
@@ -322,6 +324,10 @@ The contract is pinned in `src/tests/adapter.test.tsx`: reference-identical reus
 ### Page breaks
 
 The PM `pageBreak` node is not part of the semantic IR. It becomes `flow: { breakBefore: 'page' }` on the **following** block, the forced-break spelling the engine consumes. Since that's a sibling fact rather than a node fact, the block is shallow-cloned per call (breaking identity for that one block; forced breaks are rare, so the re-hash cost is negligible). A trailing `pageBreak` with nothing after it is simply skipped. The end-to-end path (Ctrl+Enter in the editor → `PageBreakNode` → adapter → next block starts a fresh page) is the flagship integration test, `src/tests/paginated.test.tsx` (d).
+
+### Columns (#74)
+
+The spec is **page-setup data**: `PageSetup.columns` (count, gap in pt, absolute per-column widths in pt that the engine consumes as relative weights, `balanced`) — the document default rides `toLayoutOptions` into the engine's opts, and per-SECTION specs ride the sectionBreak `attrs.setup` verbatim (the pageColor/watermark precedent) into `geometryOf`'s `SectionGeometry`. The UI surfaces: the ArrangeGroup's Columns popover (document-wide quick presets) + the scoped Columns dialog ("More columns…"), and the manual `columnBreak` node — the pageBreak node's twin (same split-dance; the adapter stamps `flow.breakBefore: 'column'` on the following block; the BreakMarks badge anchors at the anchor line's column). The shell's column-correct rendering hangs off `lineColumnFrame` (positionMap — the ONE frame derivation: align containers, wrap inputs, the middle-selection clamp) and the hit-tester's column-lane rule (`clickColumnOf`). Two documented v1 simplifications: the line-number gutter disables on columned pages (the same-y margin collision), and `balanced: false` has no DOCX spelling (Word's sections balance implicitly — the flag round-trips as true). The engine's laws (the flow slot, the balance, the parity catches) live in the engine's ARCHITECTURE.md §6.7/§7.7.
 
 ---
 
