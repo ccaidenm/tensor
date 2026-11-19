@@ -197,6 +197,17 @@ export function fleschBand(score: number): string {
   return 'Very confusing';
 }
 
+/** The band's tone on the easy→difficult gradient — green for easy
+ *  reading, shading through amber/orange to red for difficult. The
+ *  lib stays presentation-free; the panel maps tones to colors. */
+export function fleschBandTone(score: number): 'positive' | 'neutral' | 'caution' | 'warning' | 'poor' {
+  if (score >= 70) return 'positive';
+  if (score >= 60) return 'neutral';
+  if (score >= 50) return 'caution';
+  if (score >= 30) return 'warning';
+  return 'poor';
+}
+
 export function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
 }

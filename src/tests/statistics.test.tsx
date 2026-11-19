@@ -10,6 +10,7 @@ import {
   fleschReadingEase,
   fleschKincaidGrade,
   fleschBand,
+  fleschBandTone,
 } from '@/lib/editor/documentStats';
 
 /**
@@ -135,6 +136,15 @@ describe('the readability math', () => {
     expect(fleschBand(55)).toBe('Fairly difficult');
     expect(fleschBand(40)).toBe('Difficult');
     expect(fleschBand(10)).toBe('Very confusing');
+  });
+
+  it('the tones shade green → red with the bands (the positivity gradient)', () => {
+    expect(fleschBandTone(95)).toBe('positive');
+    expect(fleschBandTone(75)).toBe('positive');
+    expect(fleschBandTone(65)).toBe('neutral');
+    expect(fleschBandTone(55)).toBe('caution');
+    expect(fleschBandTone(40)).toBe('warning');
+    expect(fleschBandTone(10)).toBe('poor');
   });
 
   it('a real sentence reads as very easy (the pangram)', () => {

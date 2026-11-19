@@ -66,7 +66,7 @@ beforeEach(() => {
   useSettingsDialogStore.setState({ isOpen: false });
   useStyleDialogStore.setState({ open: false, editingId: null, kind: 'paragraph' });
   useSidebarStore.setState({ active: null });
-  useDocumentPropertiesStore.setState({ isOpen: false, statsIsOpen: false });
+  useDocumentPropertiesStore.setState({ isOpen: false });
   useConfigStore.setState((state) => ({
     config: {
       ...state.config,
@@ -447,8 +447,8 @@ describe('dispatch equivalence', () => {
     void getCommand('documentProperties')!.run();
     expect(useDocumentPropertiesStore.getState().isOpen).toBe(true);
 
-    void getCommand('documentStatistics')!.run();
-    expect(useDocumentPropertiesStore.getState().statsIsOpen).toBe(true);
+    void getCommand('statisticsSidebar')!.run();
+    expect(useSidebarStore.getState().active).toEqual({ id: 'statistics', anchor: 'right' });
 
     void getCommand('findSidebar')!.run();
     expect(useSidebarStore.getState().active).toEqual({ id: 'search', anchor: 'right' });

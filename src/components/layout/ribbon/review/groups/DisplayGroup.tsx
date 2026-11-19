@@ -3,8 +3,15 @@ import { NonPrintingCharsToggle } from "../NPCToggle";
 import { BreakMarksToggle } from "../BreakMarksToggle";
 import { IconButton } from "../../../IconButton";
 import { Sparkles } from "lucide-react";
-import { useDocumentPropertiesStore } from "@/lib/document/propertiesStore";
+import { getCommand } from "@/lib/commands/registry";
 
+/**
+ * The Review tab's display toggles + the Document Statistics entry —
+ * born opening the stats DIALOG; the statistics surface is now the
+ * docked dashboard sidebar (cards + region breakdown), so this button
+ * routes to the ONE command body (the registry's law — the palette and
+ * this button can never drift).
+ */
 export function DisplayGroup() {
   return (
     <RibbonGroup showSeparator={false}>
@@ -13,7 +20,9 @@ export function DisplayGroup() {
       <IconButton
         label="Document Statistics"
         icon={<Sparkles size={16} />}
-        onClick={() => useDocumentPropertiesStore.getState().openStats()}
+        onClick={() => {
+          void getCommand("statisticsSidebar")?.run();
+        }}
       />
     </RibbonGroup>
   );

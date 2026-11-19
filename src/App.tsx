@@ -7,11 +7,11 @@ import { AccessibilityCheckPanel } from './components/editor/AccessibilityCheckP
 import { WatermarkPanel } from './components/editor/WatermarkPanel';
 import { TranslatePanel } from './components/editor/TranslatePanel';
 import { TranslateSetupDialog } from './components/dialogs/TranslateSetupDialog';
+import { StatisticsPanel } from './components/editor/StatisticsPanel';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
 import { ColumnsDialog } from './components/dialogs/ColumnsDialog';
 import { PageSetupDialog } from './components/dialogs/PageSetupDialog';
-import { DocumentStatisticsDialog } from './components/dialogs/DocumentStatisticsDialog';
 import { CustomPageSizeDialog } from './components/dialogs/CustomPageSizeDialog';
 import { StyleDialog } from './components/dialogs/StyleDialog';
 import { FontBrowserDialog } from './components/dialogs/FontBrowserDialog';
@@ -205,6 +205,12 @@ function App() {
           <SidebarHost id="translate" anchor="right">
             <TranslatePanel />
           </SidebarHost>
+          {/* STATISTICS — the Review tab's dashboard sidebar: the
+              headline-number cards + the heading-delimited region list,
+              live while open (the StatusBar debounce pattern). */}
+          <SidebarHost id="statistics" anchor="right">
+            <StatisticsPanel />
+          </SidebarHost>
         </div>
         <StatusBar />
       </main>
@@ -238,7 +244,6 @@ function App() {
       <InsertReferenceTableDialog />
       <DocumentPropertiesDialog />
       <Toaster />
-      <DocumentStatisticsDialog />
       <CustomPageSizeDialog />
       {/* #58 — the ONE Page Setup dialog (paper/orientation/margins
           with an Apply-to scope: whole document / this section / this
