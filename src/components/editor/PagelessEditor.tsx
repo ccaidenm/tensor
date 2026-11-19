@@ -8,6 +8,7 @@ import { TooltipProvider } from "../ui/tooltip";
 import { useConfigStore } from "@/lib/config/store";
 import { useDocumentStore } from "@/lib/document/store";
 import { ptToPx } from "@/lib/document/pageSetup";
+import { PagelessRuler } from "./PagelessRuler";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { useFloatingToolbar } from "@/lib/editor/useFloatingToolbar";
 import { applyRightClickSelection } from "@/lib/editor/rightClickSelection";
@@ -45,6 +46,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // the document's page color painting the strip (WHITE default — the
   // strip is the page now; the desk stays muted behind it).
   const margins = useDocumentStore((s) => s.pageSetup.margins);
+  const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   // FULL HEIGHT (the sheet law): the strip fills the desk's visible
   // height — GDocs-pageless posture, the white sheet never ends. The
   // desk scroller's height minus its pt-8/pb-6 breathing room, divided
@@ -201,7 +203,11 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           />
         )}
       </div>
-
+      {/* THE PAGELESS RULER — the read-only horizontal bar (margins
+          bands + ticks) over the strip, portaled into the desk wrapper
+          (the paginated bar's own chrome slot — outside the scroll
+          flow, flush under the ribbon). Gated on the config toggle. */}
+      {showHorizontalRuler && <PagelessRuler containerRef={containerRef} />}
     </TooltipProvider>
   );
 }

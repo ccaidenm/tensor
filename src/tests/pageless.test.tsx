@@ -3,6 +3,8 @@ import { render, act, fireEvent } from '@testing-library/react';
 import { Editor } from '@/components/editor/Editor';
 import { DisplayModeGroup } from '@/components/layout/ribbon/view/groups/DisplayModeGroup';
 import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
+import { measureRulerGeo } from '@/components/editor/PagelessRuler';
+import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
@@ -80,7 +82,7 @@ describe('the pageless strip', () => {
     expect(surface.style.background).toBe('rgb(220, 38, 38)');
   });
 
-  it('the document\'s margins are the strip\'s padding (one margin concept)', async () => {
+  it("the document's margins are the strip's padding (one margin concept)", async () => {
     harness('<p>margins</p>');
     await goPageless();
     const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
@@ -99,7 +101,7 @@ describe('the pageless strip', () => {
     expect(surface.style.padding).toBe('48px');
   });
 
-  it('header/footer bands render ONCE, at the flow\'s ends (the chrome is stylesheet-side)', async () => {
+  it("header/footer bands render ONCE, at the flow's ends (the chrome is stylesheet-side)", async () => {
     harness(
       '<header-block><p>the header words</p></header-block>' +
       '<p>body text</p>' +
@@ -135,4 +137,94 @@ describe('the pageless strip', () => {
   });
 });
 
+describe('the pageless sheet lifecycle', () => {
+  it('the strip fills the desk height (the sheet law — full-height white)', async () => {
+    harness('<p>full height</p>');
+    await goPageless();
+    const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
+    // jsdom's zero-height desk floors at the 200px fallback; the REAL
+    // behavior (desk-height fill, zoom-divided) is the component's
+    // measure law — pinned here as "the component sets an explicit
+    // min-height" (never unstyled).
+    expect(surface.style.minHeight).not.toBe('');
+    expect(parseInt(surface.style.minHeight, 10)).toBeGreaterThanOrEqual(200);
+  });
 
+  it("the Page Setup dialog's layout toggle switches the document mode instantly", async () => {
+    const { editor } = harness('<p>dialog toggle</p>');
+    await goPageless();
+    // Open the dialog (pageless).
+    act(() => {
+      useDocumentPropertiesStore.getState().openPageSetup();
+    });
+    const dialog = document.querySelector('[data-testid="page-setup-mode-toggle"]')!;
+    expect(dialog.textContent).toContain('Paginated');
+    expect(dialog.textContent).toContain('Pageless');
+    const buttons = [...dialog.querySelectorAll('button')];
+    const pagelessBtn = buttons.find((b) => b.textContent === 'Pageless')!;
+    const paginatedBtn = buttons.find((b) => b.textContent === 'Paginated')!;
+    expect(pagelessBtn.getAttribute('aria-pressed')).toBe('true');
+    // Toggle INSIDE the dialog — the document's mode flips instantly
+    // (a mode switch is not a drafted field).
+    act(() => {
+      fireEvent.click(paginatedBtn);
+    });
+    expect(useDocumentStore.getState().pageSetup.viewMode).toBe('pages');
+    expect(useDocumentStore.getState().isDirty).toBe(true);
+    expect(paginatedBtn.getAttribute('aria-pressed')).toBe('true');
+    void editor;
+  });
+});
+
+describe('the pageless ruler geometry (the pure math)', () => {
+  it('the content box = computed padding × the rendered/layout scale; left tracks the strip', () => {
+    const geo = measureRulerGeo(
+      { left: 240, width: 960 }, 960, 200, 96, 96,
+    );
+    expect(geo.left).toBe(40);
+    expect(geo.width).toBe(960);
+    expect(geo.scale).toBe(1);
+    expect(geo.contentL).toBeCloseTo(96, 0);
+    expect(geo.contentR).toBeCloseTo(864, 0);
+  });
+
+  it('zoom scales the content box with the strip (rect/offset ratio)', () => {
+    const geo = measureRulerGeo(
+      { left: 320, width: 480 }, 960, 300, 96, 96,
+    );
+    expect(geo.left).toBe(20);
+    expect(geo.width).toBe(480);
+    expect(geo.scale).toBeCloseTo(0.5, 4);
+    expect(geo.contentL).toBeCloseTo(48, 0);
+    expect(geo.contentR).toBeCloseTo(432, 0);
+  });
+});
+
+describe('the pageless ruler (read-only)', () => {
+  it('renders into the desk wrapper with the canvas tick field (structure; the ink is the paint effect)', async () => {
+    harness('<p>ruler</p>');
+    await goPageless();
+    const wrapper = document.querySelector('[data-desk-wrapper]')!;
+    const ruler = wrapper.querySelector('[data-testid="pageless-ruler"]') as HTMLElement;
+    expect(ruler).not.toBeNull();
+    // THE MIMICRY: the paginated bar's canvas discipline — the tick
+    // field paints on a DPR-scaled canvas over the strip (the overhang
+    // included); jsdom can't rasterize, so the test pins the structure.
+    const canvas = wrapper.querySelector('[data-testid="pageless-ruler-canvas"]') as HTMLCanvasElement;
+    expect(canvas).not.toBeNull();
+    expect(ruler.className).toContain('border-b border-border/60');
+    expect(ruler.className).toContain('bg-card');
+  });
+
+  it('the config toggle hides it (the showHorizontalRuler gate)', async () => {
+    harness('<p>ruler off</p>');
+    act(() => {
+      const cfg = useConfigStore.getState();
+      useConfigStore.setState({
+        config: { ...cfg.config, editor: { ...cfg.config.editor, showHorizontalRuler: false } },
+      });
+    });
+    await goPageless();
+    expect(document.querySelector('[data-testid="pageless-ruler"]')).toBeNull();
+  });
+});
