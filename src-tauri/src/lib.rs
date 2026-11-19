@@ -106,7 +106,11 @@ pub fn run() {
             spell::spell_install_local,
             spell::spell_uninstall_local,
             translate::translate_languages,
-            translate::translate
+            translate::translate,
+            translate::translate_catalog,
+            translate::translate_model_download,
+            translate::translate_model_installed,
+            translate::translate_model_remove
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
