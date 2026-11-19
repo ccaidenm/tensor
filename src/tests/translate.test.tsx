@@ -16,6 +16,16 @@ import { runTranslation, type CancelToken } from '@/lib/editor/translate/run';
 import { applyTranslation, parseBlockHtml } from '@/lib/editor/translate/apply';
 import { useTranslateStore } from '@/lib/editor/translate/store';
 
+// The local engine is mocked here: the local ROUTING is under test —
+// the engine itself has its own suite (translateLocal) and the WASM a
+// real-binary smoke path.
+vi.mock('@/lib/editor/translate/local/engine', () => ({
+  translateHtmlsLocal: vi.fn(async (_installed: unknown, _from: string, _to: string, htmls: string[]) =>
+    htmls.map((h) => h.replace(/Hello/g, 'Hallo')),
+  ),
+  disposeLocalEngine: vi.fn(),
+}));
+
 /** Content-only HTML: the schema's own attrs (blockid, data-style-id,
  *  the style class, link rel) are document plumbing, not content —
  *  stripped so assertions speak content. */
@@ -46,7 +56,7 @@ function makeEditor(html: string): Editor {
   return editor;
 }
 
-function configureTranslation(endpoint = 'https://lt.example', apiKey = '', provider: 'libretranslate' | 'google' | 'deepl' = 'libretranslate'): void {
+function configureTranslation(endpoint = 'https://lt.example', apiKey = '', provider: 'libretranslate' | 'google' | 'deepl' | 'local' = 'libretranslate'): void {
   useConfigStore.setState({
     config: {
       ...DEFAULT_CONFIG,
@@ -175,6 +185,43 @@ describe('the consent gate', () => {
     await runTranslation(editor, { scope: 'document', targetLang: 'en' }, token(), () => {});
     const call = invokeMock.mock.calls.find(([cmd]) => cmd === 'translate')!;
     expect(call[1]).toMatchObject({ provider: 'deepl', endpoint: 'https://lt.example', apiKey: 'k' });
+  });
+
+  it('local runs through the engine with the DOWNLOADED pair — no wire, explicit source', async () => {
+    configureTranslation('', '', 'local');
+    const editor = makeEditor('<p>Hello one</p>');
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === 'translate_model_installed') {
+        return [{ code: 'en-de', from: 'en', to: 'de', files: [{ kind: 'model', path: '/m', size: 1, sha256: 'h' }] }];
+      }
+      throw new Error('unexpected invoke: ' + cmd);
+    });
+    const { translateHtmlsLocal } = await import('@/lib/editor/translate/local/engine');
+    const engineMock = vi.mocked(translateHtmlsLocal);
+    engineMock.mockClear();
+
+    const result = await runTranslation(editor, { scope: 'document', targetLang: 'de', sourceLang: 'en' }, token(), () => {});
+    expect(result.rows[0]!.translatedText).toBe('Hallo one');
+    // No online wire call — the invoke surface only probed the disk.
+    expect(invokeMock.mock.calls.every(([cmd]) => cmd === 'translate_model_installed')).toBe(true);
+    expect(engineMock).toHaveBeenCalledWith(expect.anything(), 'en', 'de', expect.anything());
+
+    // 'auto' is not a source local can honor — the honest error.
+    await expect(
+      runTranslation(editor, { scope: 'document', targetLang: 'de' }, token(), () => {}),
+    ).rejects.toThrow('explicit source');
+  });
+
+  it('local refuses a pair that is not downloaded (disk is the truth)', async () => {
+    configureTranslation('', '', 'local');
+    const editor = makeEditor('<p>Hello one</p>');
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === 'translate_model_installed') return [];
+      throw new Error('unexpected invoke: ' + cmd);
+    });
+    await expect(
+      runTranslation(editor, { scope: 'document', targetLang: 'de', sourceLang: 'en' }, token(), () => {}),
+    ).rejects.toThrow('No downloaded model');
   });
 });
 

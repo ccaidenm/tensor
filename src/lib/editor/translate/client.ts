@@ -23,12 +23,13 @@ export class TranslationNotEnabledError extends Error {
   }
 }
 
-export type TranslationProvider = 'libretranslate' | 'google' | 'deepl';
+export type TranslationProvider = 'libretranslate' | 'google' | 'deepl' | 'local';
 
 /** Reads + validates the config, or throws. The ONLY way past the gate.
  *  Usability per provider: libretranslate needs an endpoint (self-host
  *  = keyless); google/deepl need an API key (deepl's ':fx' suffix
- *  auto-routes to the free host). */
+ *  auto-routes to the free host); local needs nothing but the consent
+ *  itself — downloads happen per pair, on demand, later. */
 export function requireTranslationConfig(): {
   provider: TranslationProvider;
   endpoint: string;
@@ -86,12 +87,13 @@ export async function translateBatch(
 }
 
 /** Human-readable destinations for the privacy line (per provider —
- *  libretranslate names the user's own instance). */
+ *  libretranslate names the user's own instance; local never sends). */
 export function providerDestination(provider: TranslationProvider, endpoint: string): string {
   switch (provider) {
     case 'libretranslate': return endpoint || 'your LibreTranslate instance';
     case 'google': return 'Google Cloud Translation';
     case 'deepl': return 'DeepL';
+    case 'local': return 'this device';
   }
 }
 

@@ -152,14 +152,17 @@ export const ConfigSchema = z.object({
    *  text (or the whole document) is sent to the translation service
    *  the user chose — never a hardcoded default.
    *
-   *  THREE PROVIDERS, ONE CONTRACT (the spell wire law): each speaks
-   *  its own protocol but the Rust layer normalizes every response to
+   *  FOUR PROVIDERS, ONE CONTRACT (the spell wire law): each speaks
+   *  its own protocol but the transport normalizes every response to
    *  the same array-in → array-out shape:
    *    - libretranslate: the open engine; self-hosted = free + keyless
    *      (the privacy-first choice), the hosted instance is paid-key.
    *    - google: Google Cloud Translation v2 — API key + billing.
    *    - deepl: DeepL v2 — free tier (keys ending ':fx' auto-route to
    *      the api-free host; the free tier is 500k chars/month).
+   *    - local: Bergamot/Marian models downloaded per pair from
+   *      Mozilla's registry — translation runs on-device, nothing is
+   *      sent; downloads happen only when the user picks a pair.
    *
    *  `configured` records that the informed choice was MADE (the
    *  ribbon button / palette open the panel only once true — before
@@ -170,7 +173,7 @@ export const ConfigSchema = z.object({
    *  downloaded per pair) — is tracked as its own milestone; the
    *  provider enum grows when it lands. */
   translation: z.object({
-    provider: z.enum(['libretranslate', 'google', 'deepl']).default('libretranslate'),
+    provider: z.enum(['libretranslate', 'google', 'deepl', 'local']).default('libretranslate'),
     configured: z.boolean().default(false),
     endpoint: z.string().default(''),
     apiKey: z.string().default(''),
