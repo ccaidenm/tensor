@@ -34,7 +34,6 @@ beforeEach(() => {
   useDocumentPropertiesStore.setState({
     isOpen: false,
     pageSetupIsOpen: false,
-    statsIsOpen: false,
     customSizeIsOpen: false,
   });
 });

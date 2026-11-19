@@ -4,9 +4,6 @@ interface DocumentPropertiesStore {
   isOpen: boolean;
   open: () => void;
   close: () => void;
-  statsIsOpen: boolean;
-  openStats: () => void;
-  closeStats: () => void;
   customSizeIsOpen: boolean;
   /**
    * #58 — WHO the custom size is for: 'document' (the ribbon's path —
@@ -44,9 +41,6 @@ export const useDocumentPropertiesStore = create<DocumentPropertiesStore>((set) 
   isOpen: false,
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
-  statsIsOpen: false,
-  openStats: () => set({ statsIsOpen: true }),
-  closeStats: () => set({ statsIsOpen: false }),
   customSizeIsOpen: false,
   customSizeTarget: 'document',
   customSizeSeed: null,

@@ -38,7 +38,6 @@ import {
   SeparatorHorizontal,
   Settings,
   Sigma,
-  Sparkles,
   SpellCheck,
   Strikethrough,
   Underline as UnderlineIcon,
@@ -67,6 +66,7 @@ import {
   Printer,
   Proportions,
   Languages,
+  ChartColumn,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -516,14 +516,6 @@ export const COMMANDS: CommandAction[] = [
     run: () => useDocumentPropertiesStore.getState().openPageSetup(),
   },
   {
-    id: 'documentStatistics',
-    title: 'Document Statistics',
-    icon: Sparkles,
-    group: 'navigate',
-    keywords: ['statistics', 'stats', 'words', 'count', 'document'],
-    run: () => useDocumentPropertiesStore.getState().openStats(),
-  },
-  {
     id: 'findSidebar',
     title: 'Find & Replace (Sidebar)',
     icon: FileSearchCorner,
@@ -586,6 +578,20 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['translate', 'translation', 'language', 'libretranslate', 'bilingual', 'review'],
     enablement: () => !!doc().editor,
     run: () => useSidebarStore.getState().open('translate', 'right'),
+  },
+  {
+    // STATISTICS — the Review tab's dashboard sidebar (the
+    // accessibilityCheck twin): headline-number cards + the
+    // heading-delimited region list, live while open. Palette-only —
+    // no menuEventId, zero Rust surface (the tableSidebar precedent).
+    id: 'statisticsSidebar',
+    title: 'Document Statistics (Sidebar)',
+    icon: ChartColumn,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['statistics', 'stats', 'words', 'characters', 'count', 'reading time', 'readability', 'flesch', 'sections', 'review'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('statistics', 'right'),
   },
 
   // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
