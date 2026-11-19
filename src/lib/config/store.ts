@@ -59,6 +59,14 @@ interface ConfigStore {
   /** Accessibility: grammar flags as a double line in addition to
    *  color (the color-blind aid). */
   setGrammarDoubleLine: (value: boolean) => void;
+  /** TRANSLATE: the consent write (the setup flow's commit —
+   *  provider + endpoint + optional key land with it, one write like
+   *  the spell provider choice). */
+  setTranslationConfigured: () => void;
+  setTranslationProvider: (value: Config["translation"]["provider"]) => void;
+  setTranslationEndpoint: (value: string) => void;
+  setTranslationApiKey: (value: string) => void;
+  setTranslationLastTargetLang: (value: string) => void;
   /** M-PRINT: the default folder for PDF/file exports ('' = the OS
    *  save dialog's own default). */
   setDownloadsDir: (value: string) => void;
@@ -405,6 +413,46 @@ setShowHorizontalRuler: (value) =>
       config: {
         ...state.config,
         accessibility: { ...state.config.accessibility, grammarDoubleLine: value },
+      },
+    })),
+
+  setTranslationConfigured: () =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        translation: { ...state.config.translation, configured: true },
+      },
+    })),
+
+  setTranslationProvider: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        translation: { ...state.config.translation, provider: value },
+      },
+    })),
+
+  setTranslationEndpoint: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        translation: { ...state.config.translation, endpoint: value },
+      },
+    })),
+
+  setTranslationApiKey: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        translation: { ...state.config.translation, apiKey: value },
+      },
+    })),
+
+  setTranslationLastTargetLang: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        translation: { ...state.config.translation, lastTargetLang: value },
       },
     })),
 }));
