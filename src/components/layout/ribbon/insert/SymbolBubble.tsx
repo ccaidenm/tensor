@@ -249,7 +249,12 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
   return createPortal(
     <div
       ref={bubbleRef}
-      className="fixed z-[9999] flex flex-col rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
+      // THE Z-LAW (toast.tsx): dialogs/popovers/menus/tooltips cap at
+      // z-50 and toasts sit at z-[100] topmost — a floating bubble
+      // must sit UNDER that layer (its own menus/tooltips, and every
+      // dialog, render above it) while staying above the docked
+      // panels (z-40) and the ruler (z-30).
+      className="fixed z-[45] flex flex-col rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
       style={{ left: pos.left, top: pos.top, width: BUBBLE_WIDTH }}
       onMouseDown={(e) => e.stopPropagation()}
       data-testid="symbol-picker"
