@@ -317,6 +317,17 @@ body {
   --pageless-sheet-bg: inherit;
 }
 
+/* THE SELECTION SYNC (the paginated parity): a configured selection
+   color paints pageless selections at the SAME alpha the paginated
+   SelectionHighlights uses; absent = the theme primary at 25% (the
+   default look — the paginated default paint's CSS spelling). */
+.pageless-strip .ProseMirror ::selection {
+  background: var(
+    --pageless-selection-bg,
+    color-mix(in srgb, var(--color-primary) 25%, transparent)
+  );
+}
+
 /* PAGELESS BAND CHROME — the document's header/footer blocks render
    ONCE at the top/bottom of the continuous flow (the schema pins
    their positions); the muted dashed band makes them read as the

@@ -150,6 +150,40 @@ describe('the pageless sheet lifecycle', () => {
     expect(parseInt(surface.style.minHeight, 10)).toBeGreaterThanOrEqual(200);
   });
 
+  it('CLICK ANYWHERE TO FOCUS — a click in the gutters/tail drops the caret at the end', async () => {
+    const { editor } = harness('<p>the only words</p>');
+    await goPageless();
+    // The caret starts wherever the mount left it; a click on the
+    // STRIP itself (outside .ProseMirror — the gutters or the
+    // full-height tail) focuses the editor, caret at the doc end.
+    const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
+    act(() => {
+      fireEvent.click(surface);
+    });
+    // The caret lands at the DOCUMENT'S END (GDocs' click-below-
+    // content behavior). jsdom's isFocused tracking is unreliable —
+    // the caret position is the real behavior.
+    const end = editor.state.doc.content.size - 1;
+    expect(editor.state.selection.from).toBe(end);
+  });
+
+  it('the configured selection color rides the sheet (the paginated parity)', async () => {
+    const cfg = useConfigStore.getState();
+    useConfigStore.setState({
+      config: {
+        ...cfg.config,
+        editor: { ...cfg.config.editor, selectionColor: '#dc2626' },
+      },
+    });
+    harness('<p>selection tint</p>');
+    await goPageless();
+    const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
+    // The var carries the color at SELECTION_ALPHA (0.35 — the
+    // paginated SelectionHighlights' alpha); the stylesheet's
+    // ::selection rule consumes it.
+    expect(surface.style.getPropertyValue('--pageless-selection-bg')).toBe('rgba(220, 38, 38, 0.35)');
+  });
+
   it("the Page Setup dialog's layout toggle switches the document mode instantly", async () => {
     const { editor } = harness('<p>dialog toggle</p>');
     await goPageless();

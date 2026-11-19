@@ -9,6 +9,7 @@ import { useConfigStore } from "@/lib/config/store";
 import { useDocumentStore } from "@/lib/document/store";
 import { ptToPx } from "@/lib/document/pageSetup";
 import { PagelessRuler } from "./PagelessRuler";
+import { withAlpha } from "@/lib/colorFormat";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { useFloatingToolbar } from "@/lib/editor/useFloatingToolbar";
 import { applyRightClickSelection } from "@/lib/editor/rightClickSelection";
@@ -47,6 +48,14 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // strip is the page now; the desk stays muted behind it).
   const margins = useDocumentStore((s) => s.pageSetup.margins);
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
+  // THE SELECTION SYNC (the paginated parity): a configured selection
+  // background paints the pageless selections at the SAME alpha the
+  // paginated SelectionHighlights uses (0.35 — text under it stays
+  // readable); absent = the theme primary at 25% (the default look).
+  // The strip sets the CSS var; the stylesheet's ::selection rule
+  // consumes it.
+  const selectionColor = useConfigStore((s) => s.config.editor.selectionColor);
+  const selectionBg = selectionColor ? withAlpha(selectionColor, 0.35) : undefined;
   // FULL HEIGHT (the sheet law): the strip fills the desk's visible
   // height — GDocs-pageless posture, the white sheet never ends. The
   // desk scroller's height minus its pt-8/pb-6 breathing room, divided
@@ -123,6 +132,18 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     applyRightClickSelection(editor, coords ? coords.pos : null);
   }
 
+  /** CLICK ANYWHERE TO FOCUS (the paginated parity): the paginated
+   *  sheet IS the ProseMirror element, so clicks anywhere on it land
+   *  in the editor. The pageless strip's gutters and full-height tail
+   *  sit OUTSIDE the ProseMirror DOM — a click there focuses the
+   *  editor and drops the caret at the document's end (GDocs'
+   *  click-below-content behavior). */
+  function handleSurfaceClick(e: React.MouseEvent) {
+    if (!editor) return;
+    if ((e.target as HTMLElement).closest('.ProseMirror')) return;
+    editor.commands.focus('end');
+  }
+
   return (
     <TooltipProvider>
       {/* The bubble mounts OUTSIDE the zoom transform (chrome at 100%
@@ -143,14 +164,18 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
               column (max-width, shrinks on narrow windows), the
               document's margins as padding, the document's page color
               (WHITE default) as the sheet, a shadow to lift it off
-              the muted desk. THE PAGE, infinitely tall. */}
+              the muted desk. THE PAGE, infinitely tall. The selection
+              var rides the style (the stylesheet's ::selection rule
+              consumes it — the paginated selection parity). */}
           <div
             data-testid="pageless-surface"
+            onClick={handleSurfaceClick}
             className={`pageless-strip relative z-10 mx-auto ${showNonPrintingChars ? "show-non-printing" : ""} ${grammarDoubleLine ? "grammar-double-line" : ""}`}
             style={{
               background: pageColor || '#ffffff',
               maxWidth: 960,
               minHeight: stripMinHeight,
+              ...(selectionBg ? { ['--pageless-selection-bg' as string]: selectionBg } : {}),
               padding: `${ptToPx(margins.top)}px ${ptToPx(margins.right)}px ${ptToPx(margins.bottom)}px ${ptToPx(margins.left)}px`,
             }}
           >
