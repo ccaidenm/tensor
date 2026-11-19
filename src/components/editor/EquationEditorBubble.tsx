@@ -297,12 +297,16 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
       data-equation-bubble
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
-      // FIXED + MAX Z at body level: the bubble escapes the editor's
+      // FIXED at body level, z-[45]: the bubble escapes the editor's
       // scroll container (whose overflow clip is what put a dragged
       // bubble under the ribbon — no ancestor z-index can beat a
-      // clip), and z-max keeps it above every app surface while
-      // dragging. Viewport coordinates directly — no container math.
-      className="fixed z-[9999] w-80 rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
+      // clip). THE Z-LAW (toast.tsx): dialogs/popovers/menus/tooltips
+      // cap at z-50 and toasts sit at z-[100] as the topmost layer —
+      // a floating bubble must sit UNDER that layer so its own menus
+      // and tooltips (and every dialog) render above it, above the
+      // docked panels (z-40) and the ruler (z-30). Viewport
+      // coordinates directly — no container math.
+      className="fixed z-[45] w-80 rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
       style={{
         left: anchor.left + dragOffset.x,
         top: anchor.top + dragOffset.y,

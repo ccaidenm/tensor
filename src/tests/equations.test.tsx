@@ -884,7 +884,7 @@ describe('bubble chrome', () => {
     expect(document.body.contains(bubble)).toBe(true);
     expect(bubble.parentElement).toBe(document.body);
     expect(bubble.className).toContain('fixed');
-    expect(bubble.className).toContain('z-[9999]');
+    expect(bubble.className).toContain('z-[45]');
 
     // The input surface (the Source textarea in this fallback
     // environment — the field wrapper carries the same recipe) speaks

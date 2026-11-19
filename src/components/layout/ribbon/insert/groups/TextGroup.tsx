@@ -34,7 +34,7 @@ export function TextGroup({ editor }: { editor: Editor }) {
         disabled={!canMark}
         onClick={() => editor.chain().focus().setIndexEntry().run()}
       />
-      <SymbolButton editor={editor} />
+      <SymbolButton />
       <EquationButton editor={editor} />
       <HorizontalRuleButton editor={editor} />
     </RibbonGroup>

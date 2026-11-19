@@ -1,0 +1,125 @@
+{
+  "groups": [
+    {
+      "id": "currency",
+      "label": "Currency",
+      "lazy": false,
+      "count": 64
+    },
+    {
+      "id": "arrows",
+      "label": "Arrows",
+      "lazy": false,
+      "count": 686
+    },
+    {
+      "id": "emoji",
+      "label": "Emoji & Pictographs",
+      "lazy": false,
+      "count": 1368
+    },
+    {
+      "id": "letterlike",
+      "label": "Letterlike & Shapes",
+      "lazy": false,
+      "count": 2124
+    },
+    {
+      "id": "greek",
+      "label": "Greek & Coptic",
+      "lazy": false,
+      "count": 370
+    },
+    {
+      "id": "cyrillic",
+      "label": "Cyrillic",
+      "lazy": false,
+      "count": 445
+    },
+    {
+      "id": "hebrew",
+      "label": "Hebrew",
+      "lazy": false,
+      "count": 88
+    },
+    {
+      "id": "arabic",
+      "label": "Arabic",
+      "lazy": false,
+      "count": 1189
+    },
+    {
+      "id": "armenian",
+      "label": "Armenian & Georgian",
+      "lazy": false,
+      "count": 225
+    },
+    {
+      "id": "latin",
+      "label": "Latin Extended",
+      "lazy": false,
+      "count": 1304
+    },
+    {
+      "id": "cjk-symbols",
+      "label": "CJK Symbols",
+      "lazy": true,
+      "count": 476
+    },
+    {
+      "id": "cjk-ideographs",
+      "label": "CJK Ideographs",
+      "lazy": true,
+      "count": 20992
+    },
+    {
+      "id": "cjk-ext-a",
+      "label": "CJK Ext. A",
+      "lazy": true,
+      "count": 6592
+    },
+    {
+      "id": "cjk-ext-b",
+      "label": "CJK Ext. B",
+      "lazy": true,
+      "count": 42720
+    },
+    {
+      "id": "cjk-ext-c-j",
+      "label": "CJK Ext. C–J",
+      "lazy": true,
+      "count": 31680
+    },
+    {
+      "id": "cjk-compat",
+      "label": "CJK Compatibility",
+      "lazy": true,
+      "count": 506
+    },
+    {
+      "id": "hangul",
+      "label": "Hangul",
+      "lazy": true,
+      "count": 11625
+    },
+    {
+      "id": "scripts",
+      "label": "Other Scripts",
+      "lazy": false,
+      "count": 31260
+    },
+    {
+      "id": "math",
+      "label": "Math & Technical",
+      "lazy": false,
+      "count": 4463
+    },
+    {
+      "id": "punctuation",
+      "label": "Punctuation",
+      "lazy": false,
+      "count": 687
+    }
+  ],
+  "total": 158864
+}
