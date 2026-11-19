@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor, act } from '@testing-library/react';
 import { SymbolButton } from '@/components/layout/ribbon/insert/SymbolButton';
 import { SymbolBubble } from '@/components/layout/ribbon/insert/SymbolBubble';
+import { CommandPalette } from '@/components/palette/CommandPalette';
+import { usePaletteStore } from '@/lib/palette/store';
 import { useSymbolBubbleStore } from '@/lib/editor/symbols/bubbleStore';
 import { useConfigStore } from '@/lib/config/store';
 import { __resetCatalog, __setDecompressor, getGroupChars, loadedChars, commonChars } from '@/lib/editor/symbols/catalog';
@@ -377,3 +379,46 @@ describe('the symbol picker', () => {
   });
 });
 
+// ─── THE COMMAND PALETTE'S CODEPOINT PATH ─────────────────────────────
+// Typing "U+03A9" surfaces a one-item insert group (the tableDims
+// precedent) — keyboard-first symbol entry.
+
+describe('the command palette codepoint insert', () => {
+  it('typing U+03A9 surfaces the insert item and inserts Ω at the caret', async () => {
+    const { editor } = renderTensor('<p>before</p>');
+    // The palette is NOT part of the Editor harness (App mounts it) —
+    // mount it alongside, then open via the store with editorContext
+    // (the synthetic items require the editor-context guard).
+    render(<CommandPalette />);
+    await act(async () => {
+      usePaletteStore.setState({ isOpen: true, editorContext: true });
+    });
+    const input = document.querySelector('[data-testid="palette-input"]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'U+03A9' } });
+    });
+    const item = document.querySelector('[data-testid="palette-codepoint-insert"]') as HTMLElement | null;
+    expect(item).toBeTruthy();
+    expect(item!.textContent).toContain('Ω');
+    await act(async () => {
+      fireEvent.click(item!);
+    });
+    expect(usePaletteStore.getState().isOpen).toBe(false);
+    expect(editor.getHTML()).toContain('Ω');
+  });
+
+  it('surrogate and out-of-range specs never surface an insert item', async () => {
+    renderTensor('<p>x</p>');
+    render(<CommandPalette />);
+    await act(async () => {
+      usePaletteStore.setState({ isOpen: true, editorContext: true });
+    });
+    const input = document.querySelector('[data-testid="palette-input"]') as HTMLInputElement;
+    for (const bad of ['U+D800', 'U+110000', 'U+ZZZZ']) {
+      await act(async () => {
+        fireEvent.change(input, { target: { value: bad } });
+      });
+      expect(document.querySelector('[data-testid="palette-codepoint-insert"]')).toBeNull();
+    }
+  });
+});

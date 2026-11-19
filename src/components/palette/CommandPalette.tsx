@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, CornerDownLeft, Table } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Omega, Table } from 'lucide-react';
 import { usePaletteStore } from '@/lib/palette/store';
 import { useAppCommands } from '@/lib/commands/useAppCommands';
 import type { CommandAction, CommandGroup as CommandGroupKind } from '@/lib/commands/registry';
@@ -7,6 +7,7 @@ import { useShortcutDisplay } from '@/lib/useShortcutDisplay';
 import { insertTableAtSelection, parseTableDims } from '@/lib/editor/tableInsert';
 import { useDocumentStore } from '@/lib/document/store';
 import { formatShortcutParts } from '@/lib/shortcuts';
+import { parseCodepointQuery } from '@/lib/editor/symbols/catalog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   Command,
@@ -79,6 +80,10 @@ export function CommandPalette() {
   const [search, setSearch] = useState('');
   const tableDims = useMemo(() => parseTableDims(search), [search]);
   const tableEditor = useDocumentStore((s) => s.editor);
+  // THE CODEPOINT PATH (the tableDims precedent): "U+03A9" in the
+  // search surfaces a one-item insert group — keyboard-first symbol
+  // entry, the bubble picker's keyboard sibling.
+  const codepoint = useMemo(() => parseCodepointQuery(search), [search]);
 
   // Close FIRST, then run: close() refocuses the editor while the
   // selection is still intact (editor commands apply to it), and any
@@ -107,6 +112,26 @@ export function CommandPalette() {
         />
         <CommandList>
           <CommandEmpty>No matching commands.</CommandEmpty>
+          {codepoint !== null && tableEditor && editorContext ? (
+            <CommandGroup heading="Insert character">
+              <CommandItem
+                value={`insert character u+${search.trim().replace(/^u\+\s*/i, '').toLowerCase()} u+${codepoint.toString(16).padStart(4, '0')} unicode symbol`}
+                data-testid="palette-codepoint-insert"
+                onSelect={() => {
+                  const editor = useDocumentStore.getState().editor;
+                  if (!editor) return;
+                  usePaletteStore.getState().close();
+                  editor.chain().focus().insertContent(String.fromCodePoint(codepoint)).run();
+                }}
+              >
+                <Omega size={16} className="text-muted-foreground" />
+                Insert U+{codepoint.toString(16).toUpperCase()} “{String.fromCodePoint(codepoint)}”
+                <span className="text-muted-foreground">
+                  — type U+ followed by up to 6 hex digits
+                </span>
+              </CommandItem>
+            </CommandGroup>
+          ) : null}
           {tableDims && tableEditor && editorContext ? (
             <CommandGroup heading="Create table">
               <CommandItem

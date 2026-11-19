@@ -209,3 +209,21 @@ export function __resetCatalog(): void {
   coreSlices.clear();
   pending.clear();
 }
+
+// ─── THE COMMAND PALETTE'S CODEPOINT PATH ──────────────────────────────
+// Typing a codepoint straight into the palette ("U+03A9", "u+2192")
+// inserts that character — the power user's keyboard-first sibling of
+// the bubble picker. THE FORM: 'u+' (case-insensitive) followed by
+// 1–6 hex digits — unambiguous (bare hex would fight the command
+// search), the same shorthand the bubble's search accepts.
+
+/** Parse a palette query into a codepoint, or null (not a codepoint
+ *  spec / out of range / surrogate — fromCodePoint's crash class). */
+export function parseCodepointQuery(query: string): number | null {
+  const m = query.trim().match(/^u\+\s*([0-9a-f]{1,6})$/i);
+  if (!m) return null;
+  const cp = parseInt(m[1]!, 16);
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return null;
+  if (cp >= 0xd800 && cp <= 0xdfff) return null; // lone surrogates render tofu
+  return cp;
+}
