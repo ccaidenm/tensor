@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Omega } from 'lucide-react';
+import { MoreHorizontal, Omega } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfigStore } from '@/lib/config/store';
 import {
   GROUP_INDEX,
@@ -65,6 +67,28 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
   const defaultFamily = useConfigStore((s) => s.config.editor.defaultFontFamily);
   const selectionFont = editor.getAttributes('textStyle')?.fontFamily as string | undefined;
   const fontStack = activeFontStack(selectionFont, defaultFamily);
+  // THE CHIP ROW (the collapse law): Common + the user's recently used
+  // groups (MRU, capped) in the row; every other group lives in the
+  // ellipsis dropdown. Recency is config-persisted — your row keeps
+  // YOUR groups across sessions. FIRST LOAD: with no history, the row
+  // fills with the most common categories (display-only — the user's
+  // own usage replaces it from the first pick; nothing is written).
+  const ROW_LIMIT = 4;
+  const recentsRaw = useConfigStore((s) => s.config.editor.recentSymbolGroups);
+  const setRecentSymbolGroups = useConfigStore((s) => s.setRecentSymbolGroups);
+  const recentGroups = useMemo(() => {
+    // FIRST LOAD: with no history, the row seeds with the most common
+    // categories (display-only — the user's own usage replaces it).
+    const known = new Set(GROUP_INDEX.map((g) => g.id));
+    const defaults = ['math', 'punctuation', 'arrows', 'currency'];
+    const source = recentsRaw.length > 0 ? recentsRaw : defaults;
+    return source.filter((id) => id !== 'common' && known.has(id)).slice(0, ROW_LIMIT);
+  }, [recentsRaw]);
+  const restGroups = useMemo(
+    () => GROUP_INDEX.filter((g) => g.id !== 'common' && !recentGroups.includes(g.id)),
+    [recentGroups],
+  );
+  const groupLabel = (id: string) => GROUP_INDEX.find((g) => g.id === id)?.label ?? id;
 
   const searching = query.trim().length > 0;
 
@@ -95,18 +119,25 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
 
   // THE CLICK-AWAY LAW: while NOT dragged, any pointerdown outside the
   // bubble (and off the trigger) auto-closes. A dragged bubble is a
-  // parked tool — the listener stands down.
+  // parked tool — the listener stands down. TWO MORE GUARDS: the
+  // ellipsis dropdown's items portal OUTSIDE the bubble's DOM (they
+  // must reach their onClick, not die in a click-away), and while the
+  // dropdown is OPEN the bubble never closes from click-away (Base UI
+  // owns the menu's dismissal).
+  const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => {
     if (!open || hasDragged) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (bubbleRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest('[data-testid="symbol-button-trigger"]')) return;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      if (moreOpen) return;
       close();
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [open, hasDragged, close]);
+  }, [open, hasDragged, close, moreOpen]);
 
   function handleHeaderPointerDown(e: React.PointerEvent) {
     if (e.button !== 0) return;
@@ -204,6 +235,11 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
     setQuery('');
     if (gridRef.current) gridRef.current.scrollTop = 0;
     setScrollTop(0);
+    // THE RECENCY WRITE: every browse moves the group to the MRU front
+    // (Common is always pinned in the row — never tracked).
+    if (id !== 'common') {
+      setRecentSymbolGroups([id, ...recentsRaw.filter((r) => r !== id)].slice(0, ROW_LIMIT));
+    }
   }
 
   const activeLabel = GROUP_INDEX.find((g) => g.id === activeGroup)?.label ?? 'Common';
@@ -243,19 +279,46 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
         data-testid="symbol-search"
       />
 
-      {/* Group chips — Common first (always instant), core groups, then
-          the lazy CJK/Hangul chunks (marked ~large). */}
-      <div className="mb-2 flex flex-wrap gap-1" data-testid="symbol-groups">
+      {/* Group chips — THE COLLAPSE LAW: one row of Common + the
+          user's last-used groups; everything else lives in the
+          ellipsis dropdown (picking from it moves the group into the
+          row — config-persisted recency). */}
+      <div className="mb-2 flex flex-wrap items-center gap-1" data-testid="symbol-groups">
         <GroupChip id="common" label="Common" active={activeGroup === 'common'} onClick={() => pickGroup('common')} />
-        {GROUP_INDEX.map((g) => (
-          <GroupChip
-            key={g.id}
-            id={g.id}
-            label={g.lazy ? `${g.label} (~${Math.round(g.count / 1000)}k)` : g.label}
-            active={activeGroup === g.id}
-            onClick={() => pickGroup(g.id)}
-          />
+        {recentGroups.map((id) => (
+          <GroupChip key={id} id={id} label={groupLabel(id)} active={activeGroup === id} onClick={() => pickGroup(id)} />
         ))}
+        <DropdownMenu onOpenChange={setMoreOpen}>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                data-testid="symbol-group-more"
+                aria-label="More character groups"
+                className={cn(
+                  'flex h-6 items-center justify-center rounded border px-1.5 text-muted-foreground transition-colors hover:bg-muted',
+                  restGroups.some((g) => g.id === activeGroup) && 'border-primary text-primary',
+                )}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="start" className="max-h-72 w-52 overflow-y-auto">
+            {restGroups.map((g) => (
+              <DropdownMenuItem
+                key={g.id}
+                data-testid={`symbol-menu-${g.id}`}
+                onClick={() => pickGroup(g.id)}
+              >
+                {g.label}
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {g.lazy ? `~${Math.round(g.count / 1000)}k` : g.count}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* The windowed grid. */}
@@ -304,25 +367,42 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
               >
                 {row.chars.map((s) => {
                   const covered = isGlyphCovered(fontStack, s.char);
+                  // THE TOOLTIP LAW (shadcn native): name + codepoint +
+                  // coverage ride the app's Tooltip, not a title attr.
+                  // Uncovered cells are ARIA-disabled (not the native
+                  // attribute) so hover — and the explanation of WHY
+                  // the cell is dead — still reaches them; insertion
+                  // is guarded in the handler instead.
                   return (
-                    <button
-                      key={s.cp}
-                      type="button"
-                      disabled={!covered}
-                      title={covered ? `${s.name} — U+${s.cp.toString(16).toUpperCase()}` : `${s.name} — not available in ${fontStack}`}
-                      onClick={() => insertSymbol(s.char)}
-                      data-covered={covered}
-                      className={cn(
-                        'flex items-center justify-center rounded border text-base',
-                        covered
-                          ? 'border-transparent hover:bg-muted hover:border-border'
-                          : 'cursor-not-allowed border-transparent opacity-40',
-                      )}
-                      style={{ width: CELL, height: CELL }}
-                      data-testid="symbol-cell"
-                    >
-                      {s.char}
-                    </button>
+                    <Tooltip key={s.cp}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-disabled={!covered}
+                            onClick={() => {
+                              if (covered) insertSymbol(s.char);
+                            }}
+                            data-covered={covered}
+                            className={cn(
+                              'flex items-center justify-center rounded border text-base',
+                              covered
+                                ? 'border-transparent hover:bg-muted hover:border-border'
+                                : 'cursor-not-allowed border-transparent opacity-40',
+                            )}
+                            style={{ width: CELL, height: CELL }}
+                            data-testid="symbol-cell"
+                          >
+                            {s.char}
+                          </button>
+                        }
+                      />
+                      <TooltipContent>
+                        <span className="font-medium">{s.name}</span>
+                        <span className="ml-1 text-muted-foreground">U+{s.cp.toString(16).toUpperCase()}</span>
+                        {!covered && <span className="text-destructive"> — not in {fontStack}</span>}
+                      </TooltipContent>
+                    </Tooltip>
                   );
                 })}
               </div>

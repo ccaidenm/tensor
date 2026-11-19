@@ -24,6 +24,12 @@ export const ConfigSchema = z.object({
     }).default(DEFAULT_MARGINS),
     colorDisplayFormat: z.enum(['hex', 'rgb', 'hsl']).default('hex'),
     customColors: z.array(z.string()).default([]),
+    /** THE SYMBOL PICKER'S CHIP ROW (the collapse law): the user's
+     *  recently used character groups — the row shows Common + these
+     *  (most recent first, capped by the picker), everything else
+     *  lives in the ellipsis dropdown. Session-valued, config-
+     *  persisted: your corner palette keeps YOUR groups. */
+    recentSymbolGroups: z.array(z.string()).default([]),
     showNonPrintingChars: z.boolean().default(false),
     /** M-IMAGES-1: caption DISPLAY toggle (the NPC precedent —
      *  presentation-only ink, both modes; the model is untouched and
@@ -68,6 +74,7 @@ export const ConfigSchema = z.object({
     defaultMargins: DEFAULT_MARGINS,
     colorDisplayFormat: 'hex',
     customColors: [],
+    recentSymbolGroups: [],
     showNonPrintingChars: false,
     /** #58 — the BREAK MARKS toggle (distinct from the character-level
      *  NPCs): the page/section-break badges in the paginated view —

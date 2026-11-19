@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from '@testing-library/react';
 import { SymbolButton } from '@/components/layout/ribbon/insert/SymbolButton';
 import { SymbolBubble } from '@/components/layout/ribbon/insert/SymbolBubble';
 import { useSymbolBubbleStore } from '@/lib/editor/symbols/bubbleStore';
+import { useConfigStore } from '@/lib/config/store';
 import { __resetCatalog, __setDecompressor, getGroupChars, loadedChars, commonChars } from '@/lib/editor/symbols/catalog';
 import { __resetCoverage } from '@/lib/editor/symbols/coverage';
 import { renderTensor } from './harness';
@@ -65,8 +66,13 @@ beforeEach(() => {
   __resetCoverage();
   __setDecompressor(async (bytes) => new TextDecoder().decode(bytes));
   // The bubble's store state must never leak between tests (the mount
-  // lives at App level now — the store is global).
+  // lives at App level now — the store is global); same for the
+  // config-persisted chip recency (earlier tests' picks would leak).
   useSymbolBubbleStore.setState({ open: false, anchor: null });
+  const cfg = useConfigStore.getState();
+  useConfigStore.setState({
+    config: { ...cfg.config, editor: { ...cfg.config.editor, recentSymbolGroups: [] } },
+  });
   vi.restoreAllMocks();
   mockCanvas();
   const fetchSpy = vi.fn(async (url: string) => {
@@ -85,6 +91,19 @@ function openPicker() {
   const trigger = document.querySelector('[data-testid="symbol-button-trigger"]') as HTMLButtonElement;
   fireEvent.click(trigger);
   return trigger;
+}
+
+/** THE UI-REAL GROUP PICK: groups live in one collapsed row — Common +
+ *  recents as chips, the rest in the ellipsis dropdown. This helper
+ *  walks the actual surface (chip when present, menu item otherwise). */
+function pickGroupViaUI(id: string) {
+  const chip = document.querySelector(`[data-testid="symbol-group-${id}"]`);
+  if (chip) {
+    fireEvent.click(chip);
+    return;
+  }
+  fireEvent.click(document.querySelector('[data-testid="symbol-group-more"]')!);
+  fireEvent.click(document.querySelector(`[data-testid="symbol-menu-${id}"]`)!);
 }
 
 /** THE MOUNT PATTERN (App.tsx parity): the picker bubble mounts at the
@@ -152,9 +171,13 @@ describe('the symbol picker', () => {
       expect(greek).not.toBeNull();
     });
     const greek = [...document.querySelectorAll('[data-testid="symbol-cell"]')].find((c) => c.textContent === 'Ω') as HTMLButtonElement;
-    expect(greek.disabled).toBe(true);
+    // ARIA-disabled (not the native attribute): the shadcn tooltip —
+    // the WHY of the dead cell — must still reach hover.
+    expect(greek.getAttribute('aria-disabled')).toBe('true');
     expect(greek.getAttribute('data-covered')).toBe('false');
-    expect(greek.title).toContain('not available in');
+    // Insertion is guarded in the handler, not the attribute.
+    fireEvent.click(greek);
+    expect(editor.getHTML()).not.toContain('Ω');
   });
 
   it('inserting keeps the picker open (multi-insert)', async () => {
@@ -177,7 +200,7 @@ describe('the symbol picker', () => {
     openPicker();
     // 'math' is a core group — its chip must NOT fetch /symbols/math.symbols
     // (a 404); it loads core.symbols and reads the >math slice.
-    fireEvent.click(document.querySelector('[data-testid="symbol-group-math"]')!);
+    pickGroupViaUI('math');
     await waitFor(() => {
       expect(getGroupChars('math')).not.toBeNull();
     });
@@ -193,7 +216,7 @@ describe('the symbol picker', () => {
   it('a CJK group opens its own lazy chunk', async () => {
     mountButton();
     openPicker();
-    fireEvent.click(document.querySelector('[data-testid="symbol-group-cjk-ideographs"]')!);
+    pickGroupViaUI('cjk-ideographs');
     await waitFor(() => {
       expect(getGroupChars('cjk-ideographs')).not.toBeNull();
     });
@@ -207,7 +230,7 @@ describe('the symbol picker', () => {
   it('the windowed grid renders a bounded slice of a 2k-char group', async () => {
     mountButton();
     openPicker();
-    fireEvent.click(document.querySelector('[data-testid="symbol-group-cjk-ideographs"]')!);
+    pickGroupViaUI('cjk-ideographs');
     await waitFor(() => {
       expect(getGroupChars('cjk-ideographs')).not.toBeNull();
     });
@@ -257,6 +280,30 @@ describe('the symbol picker', () => {
     expect(document.querySelector('[data-testid="symbol-picker"]')).toBeNull();
   });
 
+  it('FIRST LOAD fills the row with the most common categories (display-only)', async () => {
+    mountButton();
+    openPicker();
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="symbol-picker"]')).not.toBeNull();
+    });
+    // No history → the row seeds with the classic symbol categories,
+    // all core (instant). Nothing is WRITTEN to config yet. (The row
+    // query also catches the ellipsis trigger — 'more' at the end.)
+    const rowIds = [...document.querySelectorAll('[data-testid^="symbol-group-"]')]
+      .map((el) => el.getAttribute('data-testid')!.replace('symbol-group-', ''));
+    expect(rowIds).toEqual(['common', 'math', 'punctuation', 'arrows', 'currency', 'more']);
+    expect(useConfigStore.getState().config.editor.recentSymbolGroups).toEqual([]);
+    // The user's first real pick takes over the row (defaults yield).
+    pickGroupViaUI('greek');
+    const recents = useConfigStore.getState().config.editor.recentSymbolGroups;
+    expect(recents).toEqual(['greek']);
+    const afterIds = [...document.querySelectorAll('[data-testid^="symbol-group-"]')]
+      .map((el) => el.getAttribute('data-testid')!.replace('symbol-group-', ''));
+    expect(afterIds).toContain('common');
+    expect(afterIds).toContain('greek');
+    expect(afterIds).not.toContain('math'); // display defaults yielded
+  });
+
   it('the header has NO close affordance — closing belongs to Done', () => {
     mountButton();
     openPicker();
@@ -281,6 +328,52 @@ describe('the symbol picker', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-testid="symbol-picker"]')).not.toBeNull();
     });
+  });
+
+  // ─── THE COLLAPSE LAW (the chip row) ─────────────────────────────────
+  // One row of Common + the user's last-used groups; everything else
+  // lives in the ellipsis dropdown. Recency is config-persisted.
+
+  it('picking a group moves it into the row and persists recency in config', async () => {
+    mountButton();
+    openPicker();
+    // Greek is not in the row yet (no recents) — reach it via the dropdown.
+    pickGroupViaUI('greek');
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="symbol-group-greek"]')).not.toBeNull();
+    });
+    // The config now carries the recency (the user ruling: YOUR groups
+    // persist across sessions).
+    const recents = useConfigStore.getState().config.editor.recentSymbolGroups;
+    expect(recents).toEqual(['greek']);
+    // A fresh bubble honors it: reopen shows the Greek chip directly.
+    fireEvent.click(document.querySelector('[data-testid="symbol-button-trigger"]')!); // close
+    fireEvent.click(document.querySelector('[data-testid="symbol-button-trigger"]')!); // reopen
+    expect(document.querySelector('[data-testid="symbol-group-greek"]')).not.toBeNull();
+  });
+
+  it('the row caps at four recents and the rest stay in the dropdown', async () => {
+    mountButton();
+    openPicker();
+    for (const id of ['greek', 'math', 'arrows', 'currency', 'punctuation']) {
+      pickGroupViaUI(id);
+    }
+    // MRU cap: the four most recent are chips; greek (the first pick)
+    // fell off the cap and dropped back to the dropdown.
+    const rowIds = [...document.querySelectorAll('[data-testid^="symbol-group-"]')]
+      .map((el) => el.getAttribute('data-testid')!.replace('symbol-group-', ''));
+    expect(rowIds).toContain('common');
+    expect(rowIds).toContain('punctuation');
+    expect(rowIds).toContain('currency');
+    expect(rowIds).toContain('arrows');
+    expect(rowIds).toContain('math');
+    expect(rowIds).not.toContain('greek');
+    // The dropdown holds the rest — greek back in the menu.
+    fireEvent.click(document.querySelector('[data-testid="symbol-group-more"]')!);
+    expect(document.querySelector('[data-testid="symbol-menu-greek"]')).not.toBeNull();
+    expect(useConfigStore.getState().config.editor.recentSymbolGroups).toEqual([
+      'punctuation', 'currency', 'arrows', 'math',
+    ]);
   });
 });
 

@@ -42,6 +42,9 @@ interface ConfigStore {
   setFetchLinkMetadata: (value: boolean) => void;
   setAutoCheckForUpdates: (value: boolean) => void;
   setAllowFontCatalogs: (value: boolean) => void;
+  /** THE SYMBOL PICKER'S CHIP ROW: the recently used character groups
+   *  (MRU, capped by the picker's row limit). */
+  setRecentSymbolGroups: (groups: string[]) => void;
   /** M-META: the user identity (the default author for new docs). */
   setIdentityAuthor: (value: string) => void;
   /** Spell check: the MASTER gate (ribbon / F7 / palette) — flips BOTH
@@ -344,6 +347,14 @@ setShowHorizontalRuler: (value) =>
       config: {
         ...state.config,
         privacy: { ...state.config.privacy, allowFontCatalogs: value },
+      },
+    })),
+
+  setRecentSymbolGroups: (groups) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, recentSymbolGroups: groups },
       },
     })),
 
