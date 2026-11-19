@@ -296,19 +296,55 @@ body {
   color: inherit;
 }
 
+.pageless-strip {
+  /* THE STRIP (pageless): the continuous sheet — the page color law
+     paints it (white default), the shadow lifts it off the desk. The
+     band/divider chrome key off this variable so their backdrops
+     follow the user's chosen page color. */
+  --pageless-sheet-bg: #ffffff;
+  min-height: 400px; /* the CSS fallback — the component measures the desk for FULL height */
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08), 0 4px 16px rgb(0 0 0 / 0.06);
+}
+
 .page-break-marker {
   height: 1px;
   margin: 1.5rem 0;
   border-top: 2px dashed #94a3b8;
   position: relative;
 }
+
+.pageless-strip[style*="background"] {
+  --pageless-sheet-bg: inherit;
+}
+
+/* PAGELESS BAND CHROME — the document's header/footer blocks render
+   ONCE at the top/bottom of the continuous flow (the schema pins
+   their positions); the muted dashed band makes them read as the
+   document's header/footer, not stray paragraphs. */
+.pageless-strip header-block,
+.pageless-strip footer-block {
+  background: color-mix(in srgb, var(--pageless-sheet-bg) 92%, var(--color-muted));
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pageless-strip footer-block {
+  margin-bottom: 0;
+  margin-top: 0.75rem;
+}
+
 .page-break-marker::after {
   content: 'Page Break';
   position: absolute;
   top: -0.9em;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--color-background);
+  /* THE SHEET LAW: the label chip rides the strip's own background
+     (white default, the user's page color otherwise) — never the app
+     background the strip floats above. */
+  background: var(--pageless-sheet-bg, var(--color-background));
   padding: 0 0.5em;
   font-size: 0.7rem;
   color: #94a3b8;

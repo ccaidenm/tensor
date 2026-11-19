@@ -23,6 +23,7 @@ import { summarizeMarginPreset } from '@/lib/document/pageSetup';
 import {
   MEASUREMENT_UNITS,
   MARGIN_PRESETS,
+  PAGELESS_MARGIN_PRESETS,
   PAGE_SIZES,
   formatPt,
   parseUnitToPt,
@@ -37,6 +38,7 @@ import {
   type PageSetupScope,
   type SectionFacts,
 } from '@/lib/editor/sections';
+import { useViewMode } from '@/lib/document/useViewMode';
 
 /**
  * #58 — THE ONE PAGE SETUP DIALOG (the margins dialog grown up, the
@@ -176,6 +178,16 @@ export function PageSetupDialog() {
   const [facts, setFacts] = useState<SectionFacts | null>(null);
   const [target, setTarget] = useState<SectionFacts | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // THE DIALOG'S MODE TOGGLE (the pageless ruling): Paginated shows the
+  // paper/orientation/scopes machinery; Pageless shows the strip's
+  // fields (margins incl. Full + page background — no paper, no
+  // scopes, no sections). The toggle writes pageSetup.viewMode
+  // INSTANTLY (the View-tab toggle's own law — a mode switch is not a
+  // drafted field); the drafted margins ride across the switch.
+  const resolvedMode = useViewMode();
+  const setPageSetup = useDocumentStore((s) => s.setPageSetup);
+  const [dialogMode, setDialogMode] = useState<'Pages' | 'Pageless'>(resolvedMode);
+  const pagelessDialog = dialogMode === 'Pageless';
   // The individual-section chooser: the chosen ordinals. Selected
   // chips ⇔ the 'sections' scope (toggling a chip switches to it).
   const [sectionSet, setSectionSet] = useState<number[]>([]);
@@ -196,6 +208,10 @@ export function PageSetupDialog() {
     if (!isOpen) return;
     setScope('document');
     setSectionSet([]);
+    setDialogMode(resolvedMode);
+    // resolvedMode rides the OPEN seed only: the dialog's toggle owns
+    // the mode while open (switching mid-dialog must not snap back).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   // Re-seed from the SCOPE'S TARGET: the caret's section facts fix the
@@ -272,9 +288,23 @@ export function PageSetupDialog() {
     );
   }
 
-  /** ONE commit per Apply (the scope's writer — applyPageSetup). */
+  /** ONE commit per Apply (the scope's writer — applyPageSetup).
+   *  PAGELESS: the strip reads the STORE's margins (no sections render
+   *  in the continuous flow) — the commit is the store write ONLY, so
+   *  per-section setups ride untouched (a pageless margin edit never
+   *  clobbers a section override the user will see back in paginated). */
   function apply() {
     const full = draftToSetup(draft!, target!.setup, unit);
+    if (pagelessDialog) {
+      setPageSetup({
+        ...pageSetup,
+        margins: full.margins,
+        pageColor: full.pageColor,
+        viewMode: 'pageless',
+      });
+      closePageSetup();
+      return;
+    }
     // #48 — ONE PAGE STYLE: the bucket alone is live under this
     // scope; '' = CLEAR the entry (back to the section/doc chain).
     if (pageScope) {
@@ -312,14 +342,46 @@ export function PageSetupDialog() {
         <DialogHeader>
           <DialogTitle>Page Setup</DialogTitle>
           <DialogDescription>
-            Modify the setup of your document — paper size, orientation, and margins. Changes
-            apply when you press Done and are saved with the document.
+            {pagelessDialog
+              ? 'Margins and page background for the continuous pageless flow — changes apply when you press Done.'
+              : 'Modify the setup of your document — paper size, orientation, and margins. Changes apply when you press Done and are saved with the document.'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          {/* LEFT — the scope (what the draft applies to). */}
+          {/* LEFT — the LAYOUT MODE TOGGLE (the user's spot: above
+              "Apply to", same stacked-button treatment — the selected
+              mode wears the accent) + the scope (what the draft
+              applies to). PAGELESS: the paginated-only controls below
+              DISABLE (never hide — the dialog holds its size; the
+              ribbon's disabled-but-never-removed law). */}
           <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Layout mode</span>
+              <div className="flex flex-col gap-1" role="group" aria-label="Layout mode" data-testid="page-setup-mode-toggle">
+                {(['Pages', 'Pageless'] as const).map((m) => {
+                  const selected = dialogMode === m;
+                  return (
+                    <Button
+                      key={m}
+                      size="sm"
+                      variant={selected ? 'default' : 'secondary'}
+                      className="h-7 justify-start"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setDialogMode(m);
+                        // INSTANT (the View-tab toggle's law): a mode
+                        // switch is not a drafted field.
+                        setPageSetup({ ...pageSetup, viewMode: m === 'Pages' ? 'pages' : 'pageless' });
+                      }}
+                    >
+                      {m === 'Pages' ? 'Paginated' : 'Pageless'}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex flex-col gap-1">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium text-muted-foreground">Apply to</span>
@@ -337,9 +399,12 @@ export function PageSetupDialog() {
                   group's answer); the others stay gray. */}
               <div className="flex flex-col gap-1" role="group" aria-label="Apply to">
                 {SCOPES.map((s) => {
-                  // A uniform doc disables the section-only scope
-                  // (never hides — the dialog holds its size).
-                  const disabled = !sectioned && s.value === 'section';
+                  // A uniform doc disables the section-only scope;
+                  // PAGELESS disables them ALL (the strip reads the
+                  // store's margins — no sections render in the
+                  // continuous flow). Never hides — the dialog holds
+                  // its size.
+                  const disabled = pagelessDialog || (!sectioned && s.value === 'section');
                   const selected = scope === s.value;
                   return (
                     <Button
@@ -446,7 +511,9 @@ export function PageSetupDialog() {
             </div>
           </div>
 
-          {/* RIGHT — the setup itself. */}
+          {/* RIGHT — the setup itself. PAGELESS: the paginated-only
+              controls DISABLE (never hide — the dialog holds its size);
+              the page background bucket and margins stay live. */}
           <div className="flex flex-col gap-4">
             {/* #48 — PAPER, one section: the size dropdown SPANS the
                 row, the background bucket stands alone at the far
@@ -454,13 +521,14 @@ export function PageSetupDialog() {
                 heading retired). The bucket edits the DRAFT; Done
                 applies it per the scope — the PAGE scope keeps ONLY
                 the bucket live (a page owns its background, never its
-                geometry — the engine's law). */}
+                geometry — the engine's law). PAGELESS: the bucket alone
+                (the continuous flow has no paper). */}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Paper</span>
               <div className="flex items-center gap-2">
               <Select
                 value={draft.pageSize}
-                disabled={pageScope}
+                disabled={pageScope || pagelessDialog}
                 onValueChange={(value) => {
                   if (value == null) return;
                   if (value === 'custom') {
@@ -514,8 +582,8 @@ export function PageSetupDialog() {
                     </SelectItem>
                   ))}
                   <SelectItem value="custom">Custom…</SelectItem>
-                </SelectContent>
-              </Select>
+                  </SelectContent>
+                </Select>
               <ColorPickerButton
                 label="Page background"
                 icon={<PaintBucket size={16} />}
@@ -531,8 +599,8 @@ export function PageSetupDialog() {
 
             {/* Orientation — a heading with the options below (the
                 dialog's own rhythm), the page glyphs aiding the scan.
-                #48: gated under the page scope (geometry is the
-                section's). */}
+                #48: gated under the page scope. PAGELESS: DISABLED —
+                no sheets to orient. */}
             <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Orientation</span>
               <div className="flex gap-1">
@@ -540,6 +608,7 @@ export function PageSetupDialog() {
                   <Button
                     key={o}
                     size="sm"
+                    disabled={pagelessDialog}
                     // Muted gray when selected (the settings toggles'
                     // treatment) — never the accent.
                     variant={draft.orientation === o ? 'secondary' : 'ghost'}
@@ -556,11 +625,13 @@ export function PageSetupDialog() {
             {/* M-FLOW — the document-level widow/orphan default (Word's
                 layout option; off = natural splits everywhere a
                 paragraph doesn't carry its own override). #48: gated
-                under the page scope. */}
+                under the page scope. PAGELESS: DISABLED — the strip is
+                one continuous flow (the engine's pagination option). */}
             <div className={cn('flex items-center justify-between gap-2', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Widow/orphan control</span>
               <Switch
                 size="sm"
+                disabled={pagelessDialog}
                 data-testid="page-setup-widow-control"
                 checked={draft.widowControl}
                 onCheckedChange={(checked: boolean) =>
@@ -604,7 +675,7 @@ export function PageSetupDialog() {
                 </div>
               </TooltipProvider>
               <div className="grid grid-cols-2 gap-1 pt-1" role="group" aria-label="Margin presets">
-                {Object.entries(MARGIN_PRESETS).map(([key, preset]) => {
+                {Object.entries(pagelessDialog ? PAGELESS_MARGIN_PRESETS : MARGIN_PRESETS).map(([key, preset]) => {
                   const matches = draftMatchesPreset(draft, preset.margins, unit);
                   return (
                     <Button

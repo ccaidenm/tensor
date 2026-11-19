@@ -13,7 +13,13 @@ export const ConfigSchema = z.object({
   editor: z.object({
     defaultFontFamily: z.string().default('system-ui'),
     defaultFontSize: z.number().default(16),
-    defaultPageLayout: z.string().default('Pages'),
+    /** THE SCHEMA AUDIT (the pageless issue's implementation note):
+     *  the speculative string tightens to the TWO real values. The
+     *  field is the NEW-DOCUMENT default only — each document owns its
+     *  mode once set (pageSetup.viewMode, the per-document law).
+     *  .catch: a config from a speculative build carrying a stray
+     *  value falls back to Pages instead of rejecting the whole file. */
+    defaultPageLayout: z.enum(['Pages', 'Pageless']).catch('Pages').default('Pages'),
     defaultPageSize: z.string().default('Letter'),
     defaultPageGap: z.number().default(PAGE_GAP),
     defaultMargins: z.object({
@@ -68,7 +74,7 @@ export const ConfigSchema = z.object({
   }).default({
     defaultFontFamily: 'system-ui',
     defaultFontSize: 16,
-    defaultPageLayout: 'Pages',
+    defaultPageLayout: 'Pages' as const,
     defaultPageSize: 'Letter',
     defaultPageGap: PAGE_GAP,
     defaultMargins: DEFAULT_MARGINS,

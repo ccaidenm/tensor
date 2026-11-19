@@ -7,6 +7,7 @@ import { EquationEditorBubble } from "./EquationEditorBubble";
 import { TooltipProvider } from "../ui/tooltip";
 import { useConfigStore } from "@/lib/config/store";
 import { useDocumentStore } from "@/lib/document/store";
+import { ptToPx } from "@/lib/document/pageSetup";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { useFloatingToolbar } from "@/lib/editor/useFloatingToolbar";
 import { applyRightClickSelection } from "@/lib/editor/rightClickSelection";
@@ -37,6 +38,33 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // background paints the paginated SHEETS and this pageless editing
   // SURFACE alike. Absent ('') = no background style.
   const pageColor = useDocumentStore((s) => s.pageSetup.pageColor);
+  // THE STRIP (the pageless law): real margins from the DOCUMENT's
+  // pageSetup (pt → px — the same margins the paginated view's sheets
+  // use, so one margin concept per document, ruled by the Page Setup
+  // dialog), a responsive max-width column (GDocs-pageless style), and
+  // the document's page color painting the strip (WHITE default — the
+  // strip is the page now; the desk stays muted behind it).
+  const margins = useDocumentStore((s) => s.pageSetup.margins);
+  // FULL HEIGHT (the sheet law): the strip fills the desk's visible
+  // height — GDocs-pageless posture, the white sheet never ends. The
+  // desk scroller's height minus its pt-8/pb-6 breathing room, divided
+  // by the zoom (the strip lives inside the zoom transform — the layout
+  // height must undo it so the RENDERED strip fills the desk). jsdom's
+  // zero-height client floors at 200.
+  const [deskHeight, setDeskHeight] = useState(0);
+  useEffect(() => {
+    const scroller = document.querySelector('[data-desk-scroll]');
+    const measure = () => setDeskHeight((scroller as HTMLElement | null)?.clientHeight ?? 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (scroller) ro.observe(scroller);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, []);
+  const stripMinHeight = Math.max(200, (deskHeight - 56) / (zoomLevel / 100));
   // Accessibility: the double-line container class (the descendant CSS
   // rule flips grammar decorations to text-decoration-style: double —
   // live, without rebuilding the decoration set).
@@ -101,7 +129,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
       <div className="relative">
         <div
           ref={containerRef}
-          className="relative mx-auto"
+          className="relative"
           style={{
             transform: `scale(${zoomLevel / 100})`,
             transformOrigin: 'top center',
@@ -109,10 +137,20 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           onContextMenu={handleContextMenu}
           onClick={handleSpellClick}
         >
+          {/* THE STRIP — the continuous sheet: centered responsive
+              column (max-width, shrinks on narrow windows), the
+              document's margins as padding, the document's page color
+              (WHITE default) as the sheet, a shadow to lift it off
+              the muted desk. THE PAGE, infinitely tall. */}
           <div
             data-testid="pageless-surface"
-            className={`relative z-10 ${showNonPrintingChars ? "show-non-printing" : ""} ${grammarDoubleLine ? "grammar-double-line" : ""}`}
-            style={{ ...(pageColor ? { background: pageColor } : {}) }}
+            className={`pageless-strip relative z-10 mx-auto ${showNonPrintingChars ? "show-non-printing" : ""} ${grammarDoubleLine ? "grammar-double-line" : ""}`}
+            style={{
+              background: pageColor || '#ffffff',
+              maxWidth: 960,
+              minHeight: stripMinHeight,
+              padding: `${ptToPx(margins.top)}px ${ptToPx(margins.right)}px ${ptToPx(margins.bottom)}px ${ptToPx(margins.left)}px`,
+            }}
           >
             <EditorContent
               editor={editor}
@@ -163,6 +201,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           />
         )}
       </div>
+
     </TooltipProvider>
   );
 }

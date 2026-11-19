@@ -3,10 +3,11 @@ import { act, render, fireEvent } from '@testing-library/react';
 import { Editor } from '@/components/editor/Editor';
 import { DisplayModeGroup } from '@/components/layout/ribbon/view/groups/DisplayModeGroup';
 import { PageSetupGroup } from '@/components/layout/ribbon/layout/groups/PageSetupGroup';
+import { PageSetupDialog } from '@/components/dialogs/PageSetupDialog';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
-import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
+import { DEFAULT_MARGINS, PAGE_GAP, MARGIN_PRESETS, PAGELESS_MARGIN_PRESETS, summarizeMarginPreset, resolveViewMode } from '@/lib/document/pageSetup';
 import { FakeMetrics } from './fakeMetrics';
 import { settleLayout } from './harness';
 
@@ -48,6 +49,7 @@ function harness(initialHTML?: string) {
       <Editor metrics={FakeMetrics} />
       <DisplayModeGroup />
       <PageSetupGroup />
+      <PageSetupDialog />
     </>
   );
   const editor = useDocumentStore.getState().editor;
@@ -61,7 +63,7 @@ function harness(initialHTML?: string) {
 }
 
 describe('View > Paginated / Pageless toggle', () => {
-  it('flips the mode: paginated surface -> pageless surface -> back', async () => {
+  it('flips the mode: paginated surface -> pageless surface -> back (PER-DOCUMENT)', async () => {
     const { editor } = harness('<p>hello world</p>');
     await settle();
 
@@ -79,7 +81,12 @@ describe('View > Paginated / Pageless toggle', () => {
     });
     await settle();
 
-    expect(useConfigStore.getState().config.editor.defaultPageLayout).toBe('Pageless');
+    // THE PER-DOCUMENT LAW: the toggle writes pageSetup.viewMode (the
+    // setting rides .wpdoc like the rest of pageSetup) and marks the
+    // document dirty — the config field stays the NEW-DOCUMENT default.
+    expect(useDocumentStore.getState().pageSetup.viewMode).toBe('pageless');
+    expect(useDocumentStore.getState().isDirty).toBe(true);
+    expect(useConfigStore.getState().config.editor.defaultPageLayout).toBe('Pages');
     expect(document.querySelector('[data-testid="paginated-root"]')).toBeNull();
     expect(document.querySelector('[data-testid="pageless-surface"]')).not.toBeNull();
 
@@ -88,10 +95,34 @@ describe('View > Paginated / Pageless toggle', () => {
     });
     await settle();
 
+    expect(useDocumentStore.getState().pageSetup.viewMode).toBe('pages');
     expect(useConfigStore.getState().config.editor.defaultPageLayout).toBe('Pages');
     expect(document.querySelector('[data-testid="paginated-root"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="pageless-surface"]')).toBeNull();
     void editor;
+  });
+
+  it('the DOCUMENT choice wins over the config default (the resolver law)', async () => {
+    // A doc carrying viewMode: 'pageless' opens pageless EVEN while the
+    // config default says Pages (the per-document law).
+    useDocumentStore.setState({
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP, viewMode: 'pageless' },
+    });
+    harness('<p>doc-owned mode</p>');
+    await settle();
+    expect(document.querySelector('[data-testid="pageless-surface"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="paginated-root"]')).toBeNull();
+
+    // The doc's absent viewMode falls back to the config default.
+    useDocumentStore.setState({
+      pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP, viewMode: 'pages' },
+    });
+    act(() => {
+      useDocumentStore.getState().setPageInfo(1, 1);
+    });
+    harness('<p>fallback doc</p>');
+    await settle();
+    expect(document.querySelector('[data-testid="paginated-root"]')).not.toBeNull();
   });
 
   it('the document survives the mode flip (one PM instance, content intact)', async () => {
@@ -121,7 +152,7 @@ describe('View > Paginated / Pageless toggle', () => {
 });
 
 describe('Layout tab page-geometry controls in pageless mode', () => {
-  it('pageless: Page Setup / Orientation / Paper Size disabled; Page Background stays live', async () => {
+  it('pageless: Page Setup OPENS the dialog (the layout toggle lives there); Orientation/Paper Size stay disabled', async () => {
     harness('<p>hello world</p>');
     await settle();
 
@@ -135,36 +166,53 @@ describe('Layout tab page-geometry controls in pageless mode', () => {
     });
     await settle();
 
-    // Pageless: the page-geometry controls are disabled, NOT removed.
-    expect(button('Page Setup')!.disabled).toBe(true);
+    // Pageless: the Page Setup button stays LIVE (the dialog's layout
+    // toggle + margins carry the strip); the Orientation and Paper
+    // Size quick controls remain disabled (paginated facts). Page
+    // Background stays live in both.
+    expect(button('Page Setup')!.disabled).toBe(false);
     expect(button('Orientation (whole document)')!.disabled).toBe(true);
     expect(button('Paper Size (whole document)')!.disabled).toBe(true);
     expect(button('Page Background (whole document)')!.disabled).toBe(false);
     expect(button('Page Background (whole document) options')!.disabled).toBe(false);
 
-    // Toggling back re-enables them.
-    act(() => {
-      fireEvent.click(button('Paginated / Pageless')!);
-    });
+    // The dialog opens; its layout toggle is armed on Pageless (the
+    // document's own mode) and the PAGINATED-ONLY controls inside are
+    // DISABLED — never hidden (the dialog holds its size).
+    button('Page Setup')!.click();
     await settle();
-    expect(button('Page Setup')!.disabled).toBe(false);
-    expect(button('Orientation (whole document)')!.disabled).toBe(false);
-    expect(button('Paper Size (whole document)')!.disabled).toBe(false);
+    const toggle = document.querySelector('[data-testid="page-setup-mode-toggle"]');
+    expect(toggle).not.toBeNull();
+    const paginatedBtn = [...toggle!.querySelectorAll('button')].find((b) => b.textContent === 'Paginated')!;
+    const pagelessBtn = [...toggle!.querySelectorAll('button')].find((b) => b.textContent === 'Pageless')!;
+    expect(pagelessBtn.getAttribute('aria-pressed')).toBe('true');
+    // Paper size: disabled in pageless.
+    const paperSelect = document.querySelector('[aria-label="Paper size"]') as HTMLButtonElement;
+    expect(paperSelect.disabled).toBe(true);
+    // The margins row stays live (the strip's fields).
+    expect(document.querySelector('[aria-label="Margin presets"]')).not.toBeNull();
+    void paginatedBtn;
+  });
+});
+
+describe('resolveViewMode (the one view-mode resolver) + the Full preset', () => {
+  it('the document choice wins; absent falls back to the config default', () => {
+    expect(resolveViewMode('pageless', 'Pages')).toBe('Pageless');
+    expect(resolveViewMode('pages', 'Pageless')).toBe('Pages');
+    expect(resolveViewMode(undefined, 'Pageless')).toBe('Pageless');
+    expect(resolveViewMode(undefined, 'Pages')).toBe('Pages');
+    // Garbage (a speculative-build config) falls to the config default.
+    expect(resolveViewMode('Full', 'Pages')).toBe('Pages');
   });
 
-  it('pageless: a disabled Page Setup button opens nothing (the guard holds)', async () => {
-    harness('<p>hello world</p>');
-    await settle();
-    act(() => {
-      fireEvent.click(button('Paginated / Pageless')!);
-    });
-    await settle();
-
-    // jsdom happily "clicks" disabled buttons via .click(), but React
-    // never fires the handler — pin that the dialog stays closed even
-    // under a forced dispatch.
-    button('Page Setup')!.click();
-    expect(useDocumentPropertiesStore.getState().pageSetupIsOpen).toBe(false);
+  it('Full zeroes every side and summarizes as zero margins', () => {
+    // THE PRESET SPLIT: paginated keeps the original four; pageless
+    // gets its own row (Narrow/Normal/Wide/Full — Moderate drops).
+    expect(Object.keys(MARGIN_PRESETS)).toEqual(['Narrow', 'Normal', 'Moderate', 'Wide']);
+    expect(Object.keys(PAGELESS_MARGIN_PRESETS)).toEqual(['Narrow', 'Normal', 'Wide', 'Full']);
+    expect(PAGELESS_MARGIN_PRESETS.Full).toBeDefined();
+    expect(PAGELESS_MARGIN_PRESETS.Full.margins).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+    expect(summarizeMarginPreset(PAGELESS_MARGIN_PRESETS.Full.margins, 'inches')).toContain('0');
   });
 });
 
@@ -180,7 +228,9 @@ describe('Page Background in pageless mode', () => {
 
     const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
     expect(surface).not.toBeNull();
-    expect(surface.style.background).toBe(''); // no color set yet
+    // THE STRIP LAW: the sheet paints WHITE by default (the strip IS
+    // the page now); a picked color replaces it on both surfaces.
+    expect(surface.style.background).toBe('rgb(255, 255, 255)');
 
     // Open the palette (the chevron) and pick a swatch — the real
     // user path in pageless mode.
@@ -212,6 +262,8 @@ describe('Page Background in pageless mode', () => {
     });
     await settle();
     expect(useDocumentStore.getState().pageSetup.pageColor).toBe('');
-    expect((document.querySelector('[data-testid="pageless-surface"]') as HTMLElement).style.background).toBe('');
+    // THE STRIP LAW: cleared = back to the white sheet (never an
+    // empty style — the strip is the page now).
+    expect((document.querySelector('[data-testid="pageless-surface"]') as HTMLElement).style.background).toBe('rgb(255, 255, 255)');
   });
 });
