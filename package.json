@@ -5,17 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "predev": "npm run generate-licenses",
+    "predev": "npm run generate-licenses && npm run copy-bergamot",
     "build": "tsc && vite build",
-    "prebuild": "npm run generate-licenses",
+    "prebuild": "npm run generate-licenses && npm run copy-bergamot",
     "test": "vitest run",
     "lint": "eslint src",
     "generate-licenses": "node scripts/generate-licenses.mjs",
+    "copy-bergamot": "node scripts/copy-bergamot.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@browsermt/bergamot-translator": "^0.4.9",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource/crimson-pro": "^5.3.0",
     "@fontsource/fira-code": "^5.3.0",

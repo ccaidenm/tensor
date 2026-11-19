@@ -144,6 +144,47 @@ export const ConfigSchema = z.object({
       grammar: false,
     })
   ),
+  /** TRANSLATE (#issue — the Review tab's on-demand translation): the
+   *  CONSENT posture, the spell-check precedent carried forward — OFF
+   *  by default and nothing reaches the network until the user
+   *  configures a provider with an informed choice (the setup
+   *  dialog). Translation is inherently an ONLINE feature: the selected
+   *  text (or the whole document) is sent to the translation service
+   *  the user chose — never a hardcoded default.
+   *
+   *  FOUR PROVIDERS, ONE CONTRACT (the spell wire law): each speaks
+   *  its own protocol but the transport normalizes every response to
+   *  the same array-in → array-out shape:
+   *    - libretranslate: the open engine; self-hosted = free + keyless
+   *      (the privacy-first choice), the hosted instance is paid-key.
+   *    - google: Google Cloud Translation v2 — API key + billing.
+   *    - deepl: DeepL v2 — free tier (keys ending ':fx' auto-route to
+   *      the api-free host; the free tier is 500k chars/month).
+   *    - local: Bergamot/Marian models downloaded per pair from
+   *      Mozilla's registry — translation runs on-device, nothing is
+   *      sent; downloads happen only when the user picks a pair.
+   *
+   *  `configured` records that the informed choice was MADE (the
+   *  ribbon button / palette open the panel only once true — before
+   *  that they open the setup dialog). `endpoint` is libretranslate's
+   *  routing fact. `lastTargetLang` is the picker's seed (the print
+   *  dialog's lastDestination pattern — reopening lands where you
+   *  were). A fourth provider — LOCAL MODELS (Bergamot/Marian,
+   *  downloaded per pair) — is tracked as its own milestone; the
+   *  provider enum grows when it lands. */
+  translation: z.object({
+    provider: z.enum(['libretranslate', 'google', 'deepl', 'local']).default('libretranslate'),
+    configured: z.boolean().default(false),
+    endpoint: z.string().default(''),
+    apiKey: z.string().default(''),
+    lastTargetLang: z.string().default(''),
+  }).default({
+    provider: 'libretranslate',
+    configured: false,
+    endpoint: '',
+    apiKey: '',
+    lastTargetLang: '',
+  }),
   accessibility: z.object({
     reduceMotion: z.enum(['system', 'on', 'off']).default('system'),
     /** Grammar flags: double-line in ADDITION to color — the

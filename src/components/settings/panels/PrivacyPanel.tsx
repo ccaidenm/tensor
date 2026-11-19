@@ -1,15 +1,19 @@
 import type { ReactNode } from 'react';
-import { Link2, RefreshCw, SpellCheck, Type } from 'lucide-react';
+import { Globe, Link2, RefreshCw, SpellCheck, Type } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/layout/IconButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { useTranslateStore } from '@/lib/editor/translate/store';
+import { providerDestination } from '@/lib/editor/translate/client';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 
 export const PRIVACY_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'link-previews', label: 'Link Previews' },
   { id: 'fonts', label: 'Fonts' },
   { id: 'spell-check', label: 'Spell Check' },
+  { id: 'translate', label: 'Translate' },
   { id: 'updates', label: 'Updates' },
 ];
 
@@ -25,6 +29,39 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
       </div>
       {children}
     </div>
+  );
+}
+
+/** TRANSLATE — the posture row (the spell-check row's twin): where the
+ *  text goes, stated plainly. The provider/key are MANAGED in
+ *  Proofing; this row documents and opens the consent setup. */
+function TranslateRow() {
+  const configured = useConfigStore((s) => s.config.translation.configured);
+  const provider = useConfigStore((s) => s.config.translation.provider);
+  const endpoint = useConfigStore((s) => s.config.translation.endpoint);
+  const openSetup = useTranslateStore((s) => s.openSetup);
+  const destination = providerDestination(provider, endpoint);
+
+  return (
+    <Row
+      icon={<Globe className="h-4 w-4" />}
+      label="On-demand translation"
+      description={
+        configured
+          ? `The text you translate (a selection or the whole document) is sent to ${destination} each time you press Translate. Nothing is sent otherwise. The provider and key are managed in Proofing.`
+          : 'Off by default — nothing is ever sent until you choose a provider (the Translate panel’s setup dialog). Translation is an online feature: the text you choose to translate leaves this device for the provider you configured. LibreTranslate self-hosted is the free, keyless, privacy-first option; Google Cloud and DeepL are commercial APIs.'
+      }
+    >
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2 text-xs"
+        onClick={openSetup}
+        data-testid="privacy-translate-setup"
+      >
+        {configured ? 'Change provider…' : 'Set up…'}
+      </Button>
+    </Row>
   );
 }
 
@@ -70,6 +107,10 @@ export function PrivacyPanel() {
         >
           <span />
         </Row>
+      </SettingsSection>
+
+      <SettingsSection id="translate" title="Translate">
+        <TranslateRow />
       </SettingsSection>
 
       <SettingsSection id="updates" title="Updates">

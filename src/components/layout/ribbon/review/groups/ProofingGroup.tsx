@@ -1,5 +1,6 @@
 import { RibbonGroup } from "@/components/layout/RibbonGroup";
 import { IconButton } from "../../../IconButton";
+import { getCommand } from "@/lib/commands/registry";
 import { BookA, Info, Languages, SpellCheck } from "lucide-react";
 import { useDocumentPropertiesStore } from "@/lib/document/propertiesStore";
 import { useConfigStore } from "@/lib/config/store";
@@ -33,7 +34,12 @@ export function ProofingGroup() {
         shortcutId="toggleSpellCheck"
       />
       <IconButton label="Dictionary" icon={<BookA size={16} />} onClick={openDictionary} />
-      <IconButton label="Translate" icon={<Languages size={16} />} onClick={() => { }} disabled />
+      {/* TRANSLATE — born a disabled stub with the ProofingGroup; now
+          wired to the ONE command body (the palette + this button can
+          never drift — the registry's law): opens the docked Translate
+          panel, whose runs are on-demand and consented (the setup
+          dialog gates the first use). */}
+      <IconButton label="Translate" icon={<Languages size={16} />} onClick={() => { void getCommand('translateSidebar')?.run(); }} />
       <IconButton
         label="Document Properties"
         icon={<Info size={16} />}

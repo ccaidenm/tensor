@@ -5,6 +5,8 @@ import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
 import { AccessibilityCheckPanel } from './components/editor/AccessibilityCheckPanel';
 import { WatermarkPanel } from './components/editor/WatermarkPanel';
+import { TranslatePanel } from './components/editor/TranslatePanel';
+import { TranslateSetupDialog } from './components/dialogs/TranslateSetupDialog';
 import { SettingsDialog } from './components/settings/SettingsDialog';
 import { DocumentPropertiesDialog } from './components/dialogs/DocumentPropertiesDialog';
 import { ColumnsDialog } from './components/dialogs/ColumnsDialog';
@@ -196,6 +198,13 @@ function App() {
           <SidebarHost id="watermark" anchor="right">
             <WatermarkPanel />
           </SidebarHost>
+          {/* TRANSLATE — the Review tab's on-demand translation: the
+              consented run panel (scope → run → preview → apply),
+              docked beside its Review siblings. The SETUP dialog is
+              store-driven with one mount like its spell twin. */}
+          <SidebarHost id="translate" anchor="right">
+            <TranslatePanel />
+          </SidebarHost>
         </div>
         <StatusBar />
       </main>
@@ -242,6 +251,9 @@ function App() {
           personal dictionary manager (both store-driven, one mount). */}
       <SpellSetupDialog />
       <DictionaryDialog />
+      {/* Translate: the consent surface (the SpellSetupDialog twin) —
+          endpoint + optional key, tested before it can be saved. */}
+      <TranslateSetupDialog />
     </>
   );
 }

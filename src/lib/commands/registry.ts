@@ -66,6 +66,7 @@ import {
   FileText,
   Printer,
   Proportions,
+  Languages,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -571,6 +572,20 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['watermark', 'draft', 'confidential', 'background', 'overlay', 'insert'],
     enablement: () => !!doc().editor,
     run: () => useSidebarStore.getState().open('watermark', 'right'),
+  },
+  {
+    // TRANSLATE — the Review tab's on-demand translation (the
+    // accessibilityCheck twin): opens the docked panel. Palette-only —
+    // no menuEventId, zero Rust surface beyond the translate wire
+    // commands the consented runs invoke.
+    id: 'translateSidebar',
+    title: 'Translate',
+    icon: Languages,
+    group: 'navigate',
+    contexts: ['editor'] as ('app' | 'editor')[],
+    keywords: ['translate', 'translation', 'language', 'libretranslate', 'bilingual', 'review'],
+    enablement: () => !!doc().editor,
+    run: () => useSidebarStore.getState().open('translate', 'right'),
   },
 
   // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
