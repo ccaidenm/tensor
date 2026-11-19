@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Ban, CornerDownRight, Globe, Languages, X } from 'lucide-react';
+import { ArrowRight, Ban, CornerDownRight, Globe, HardDriveDownload, Languages, X } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { useConfigStore } from '@/lib/config/store';
@@ -7,10 +8,13 @@ import { useTranslateStore } from '@/lib/editor/translate/store';
 import { FALLBACK_LANGUAGES, fetchLanguages, providerDestination, requireTranslationConfig } from '@/lib/editor/translate/client';
 import type { TranslationProvider } from '@/lib/editor/translate/client';
 import { blockKindLabel, hasSelection } from '@/lib/editor/translate/walk';
+import { pairLabel, languageName } from '@/lib/editor/translate/local/names';
+import { mb } from '@/lib/editor/spell/localInstall';
+import type { TranslateDownloadProgress } from '@/lib/editor/translate/local/types';
 import type { TranslationLanguage } from '@/lib/editor/translate/types';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/layout/IconButton';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from 'cn';
 
@@ -40,30 +44,60 @@ export function TranslatePanel() {
 
   const scope = useTranslateStore((s) => s.scope);
   const targetLang = useTranslateStore((s) => s.targetLang);
+  const sourceLang = useTranslateStore((s) => s.sourceLang);
   const phase = useTranslateStore((s) => s.phase);
   const rows = useTranslateStore((s) => s.rows);
   const progress = useTranslateStore((s) => s.progress);
   const detectedLanguage = useTranslateStore((s) => s.detectedLanguage);
   const lastError = useTranslateStore((s) => s.lastError);
+  const catalog = useTranslateStore((s) => s.catalog);
+  const catalogError = useTranslateStore((s) => s.catalogError);
+  const installed = useTranslateStore((s) => s.installed);
+  const modelDownload = useTranslateStore((s) => s.modelDownload);
   const setScope = useTranslateStore((s) => s.setScope);
   const setTargetLang = useTranslateStore((s) => s.setTargetLang);
+  const setSourceLang = useTranslateStore((s) => s.setSourceLang);
   const start = useTranslateStore((s) => s.start);
   const cancel = useTranslateStore((s) => s.cancel);
   const apply = useTranslateStore((s) => s.apply);
   const reset = useTranslateStore((s) => s.reset);
   const openSetup = useTranslateStore((s) => s.openSetup);
+  const loadLocalData = useTranslateStore((s) => s.loadLocalData);
+  const downloadPair = useTranslateStore((s) => s.downloadPair);
+  const setModelDownload = useTranslateStore((s) => s.setModelDownload);
+
+  const isLocal = provider === 'local';
 
   // Seed the picker from the remembered choice (the print dialog's
-  // lastDestination law — reopening lands where you were).
+  // lastDestination law — reopening lands where you were). Local mode
+  // picks PAIRS, not targets — no seed there.
   useEffect(() => {
-    if (!isOpen || targetLang) return;
+    if (!isOpen || targetLang || isLocal) return;
     const remembered = useConfigStore.getState().config.translation.lastTargetLang;
     setTargetLang(remembered || 'en');
-  }, [isOpen, targetLang, setTargetLang]);
+  }, [isOpen, targetLang, isLocal, setTargetLang]);
 
   // The instance's own language list — fetched when the panel opens
-  // (configured only); the fallback list covers failures.
-  const languages = useLanguages(isOpen && configured);
+  // (online providers only); the fallback list covers failures.
+  const languages = useLanguages(isOpen && configured && !isLocal);
+
+  // LOCAL MODE: the catalog + the installed pairs (disk truth), loaded
+  // when the panel opens.
+  useEffect(() => {
+    if (!isOpen || !configured || !isLocal) return;
+    void loadLocalData();
+  }, [isOpen, configured, isLocal, loadLocalData]);
+
+  // LOCAL MODE: the download progress events (Rust emits per file).
+  useEffect(() => {
+    if (!isOpen || !isLocal) return;
+    const unlisten = listen<TranslateDownloadProgress>('translate-download-progress', ({ payload }) => {
+      setModelDownload({ ...payload, code: useTranslateStore.getState().modelDownload?.code ?? '' });
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [isOpen, isLocal, setModelDownload]);
 
   // Re-render on every editor transaction so enablement stays HONEST:
   // the Selection scope button reads the live selection (a caret-touches-
@@ -85,6 +119,18 @@ export function TranslatePanel() {
   const translating = phase === 'translating';
   const preview = phase === 'preview';
   const languageList = languages ?? FALLBACK_LANGUAGES;
+
+  // LOCAL MODE derivations: the selected pair, whether it's downloaded,
+  // and its approximate download size (catalog bytes, else the
+  // installed files' total).
+  const selectedPairCode = sourceLang && targetLang ? `${sourceLang}-${targetLang}` : '';
+  const selectedInstalled = installed.find((p) => p.code === selectedPairCode);
+  const selectedCatalog = catalog?.find((p) => p.code === selectedPairCode);
+  const selectedPairBytes =
+    selectedCatalog?.bytes ?? selectedInstalled?.files.reduce((sum, f) => sum + f.size, 0) ?? 0;
+  const targetLabel = isLocal
+    ? languageName(targetLang)
+    : languageList.find((l) => l.code === targetLang)?.name ?? targetLang;
 
   const handleClose = () => {
     useSidebarStore.getState().close();
@@ -150,24 +196,101 @@ export function TranslatePanel() {
             )}
           </div>
 
-          {/* Target language */}
+          {/* Target — a language for online providers, an explicit
+              DIRECTION for local (Bergamot has no auto-detect). */}
           <div className="border-b border-border p-3">
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="translate-target">
-              Translate into
-            </label>
-            <Select value={targetLang} onValueChange={(v) => { if (v != null) setTargetLang(v); }}>
-              <SelectTrigger id="translate-target" className="h-8 w-full text-sm" data-testid="translate-target">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {languageList.map((l) => (
-                  <SelectItem key={l.code} value={l.code}>{l.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="mt-1.5 text-xs text-muted-foreground" data-testid="translate-source-note">
-              Source language is detected automatically{detectedLanguage ? ` (detected: ${detectedLanguage})` : ''}.
-            </p>
+            {isLocal ? (
+              <>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="translate-pair">
+                  Language pair
+                </label>
+                <Select
+                  value={sourceLang && targetLang ? `${sourceLang}-${targetLang}` : ''}
+                  onValueChange={(v) => {
+                    if (v == null) return;
+                    const [from, to] = v.split('-');
+                    setSourceLang(from);
+                    setTargetLang(to);
+                  }}
+                >
+                  <SelectTrigger id="translate-pair" className="h-8 w-full text-sm" data-testid="translate-pair">
+                    <SelectValue placeholder="Pick a direction…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {installed.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel>Downloaded</SelectLabel>
+                        {installed.map((p) => (
+                          <SelectItem key={p.code} value={p.code}>{pairLabel(p)}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {catalog && (
+                      <SelectGroup>
+                        <SelectLabel>Available to download</SelectLabel>
+                        {catalog
+                          .filter((p) => !installed.some((i) => i.code === p.code))
+                          .map((p) => (
+                            <SelectItem key={p.code} value={p.code}>
+                              {pairLabel(p)} (≈{mb(p.bytes)})
+                            </SelectItem>
+                          ))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-xs text-muted-foreground" data-testid="translate-source-note">
+                  Local models translate exact directions — the source is the pair, nothing is sent.
+                </p>
+                {catalogError && (
+                  <p className="mt-1 text-xs text-amber-600" data-testid="translate-catalog-error">
+                    Catalog unavailable ({catalogError}) — downloaded pairs still work.
+                  </p>
+                )}
+                {!catalog && !catalogError && (
+                  <p className="mt-1 text-xs text-muted-foreground" data-testid="translate-catalog-loading">
+                    Loading the model catalog…
+                  </p>
+                )}
+                {modelDownload && (
+                  <div className="mt-2" data-testid="translate-download-progress">
+                    <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
+                      <div
+                        className="h-full bg-primary transition-[width]"
+                        style={{
+                          width:
+                            modelDownload.total > 0
+                              ? `${Math.min(100, (modelDownload.received / modelDownload.total) * 100)}%`
+                              : '8%',
+                        }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Downloading {languageName(modelDownload.code.split('-')[0] ?? '')} → {languageName(modelDownload.code.split('-')[1] ?? '')} ({modelDownload.stage})…
+                    </p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="translate-target">
+                  Translate into
+                </label>
+                <Select value={targetLang} onValueChange={(v) => { if (v != null) setTargetLang(v); }}>
+                  <SelectTrigger id="translate-target" className="h-8 w-full text-sm" data-testid="translate-target">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {languageList.map((l) => (
+                      <SelectItem key={l.code} value={l.code}>{l.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1.5 text-xs text-muted-foreground" data-testid="translate-source-note">
+                  Source language is detected automatically{detectedLanguage ? ` (detected: ${detectedLanguage})` : ''}.
+                </p>
+              </>
+            )}
           </div>
 
           {/* Run */}
@@ -194,12 +317,24 @@ export function TranslatePanel() {
                   </Button>
                 </div>
               </div>
+            ) : isLocal && selectedPairCode && !selectedInstalled ? (
+              // The chosen direction isn't downloaded yet — the download
+              // IS the next action (the spell installer's inline flow).
+              <Button
+                size="sm"
+                className="h-8 w-full"
+                onClick={() => void downloadPair(selectedPairCode)}
+                disabled={preview || !!modelDownload}
+                data-testid="translate-download"
+              >
+                <HardDriveDownload size={14} /> Download model (≈{mb(selectedPairBytes)})
+              </Button>
             ) : (
               <Button
                 size="sm"
                 className="h-8 w-full"
                 onClick={handleTranslate}
-                disabled={preview}
+                disabled={preview || (isLocal && (!selectedPairCode || !!modelDownload))}
                 data-testid="translate-run"
               >
                 <Languages size={14} /> Translate
@@ -226,7 +361,7 @@ export function TranslatePanel() {
                     <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       {blockKindLabel(row.block.nodeType)}
                       <ArrowRight size={11} />
-                      <span className="truncate">{languageList.find((l) => l.code === targetLang)?.name ?? targetLang}</span>
+                      <span className="truncate">{targetLabel}</span>
                       {row.failed && <span className="text-destructive" data-testid="translate-row-failed">— kept original: {row.failed}</span>}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs leading-snug">
@@ -261,9 +396,19 @@ export function TranslatePanel() {
             </div>
           )}
 
-          {/* The privacy line — always visible while configured. */}
+          {/* The privacy line — always visible while configured. Local
+              never sends: the line says so instead of a destination. */}
           <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid="translate-privacy-line">
-            <Globe size={12} className="mr-1 inline-block" /> Sent to <span className="text-foreground/80">{providerDestination(provider as TranslationProvider, endpoint)}</span>
+            {isLocal ? (
+              <>
+                <HardDriveDownload size={12} className="mr-1 inline-block" />
+                <span data-testid="translate-privacy-local">Runs on this device — nothing is sent.</span>
+              </>
+            ) : (
+              <>
+                <Globe size={12} className="mr-1 inline-block" /> Sent to <span className="text-foreground/80">{providerDestination(provider as TranslationProvider, endpoint)}</span>
+              </>
+            )}
           </div>
         </div>
       )}

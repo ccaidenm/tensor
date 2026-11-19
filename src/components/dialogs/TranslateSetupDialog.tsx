@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Globe, Languages, ShieldCheck, Sparkles, Waypoints } from 'lucide-react';
+import { Globe, HardDriveDownload, Languages, ShieldCheck, Sparkles, Waypoints } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -31,12 +31,12 @@ import { cn } from 'cn';
  *   - DeepL: an API key; free tier keys (ending ':fx') auto-route to
  *     the free host; 500k chars/month on the free tier.
  *
- * A fourth card — LOCAL MODELS (Bergamot, downloaded per pair) —
- * arrives with its own milestone; the enum and this list grow then.
- *
- * THE TEST LAW: Connect is refused until the provider tested OK (a
- * half-working destination is worse than none), and any edit to the
- * credentials kills the test result.
+ * A fourth card — LOCAL MODELS — runs translation ON DEVICE through
+ * downloaded per-pair models (Mozilla's registry, ≈25MB each): nothing
+ * is ever sent, downloads happen only when the user picks a pair. Its
+ * Connect needs no test (there is no destination to verify — the card
+ * IS the informed choice; the catalog fetch + pair downloads come
+ * later, on demand).
  */
 
 const PROVIDERS: Array<{
@@ -66,6 +66,13 @@ const PROVIDERS: Array<{
     blurb: 'DeepL API v2 — a free tier (500k chars/month) with a DeepL account.',
     note: 'Text is sent to DeepL. Free-tier keys end with :fx and are routed automatically.',
     icon: Waypoints,
+  },
+  {
+    id: 'local',
+    name: 'On this device',
+    blurb: 'Downloaded models translate OFFLINE — nothing is ever sent.',
+    note: 'Models (≈25MB per language pair) download on demand from Mozilla’s model registry; a small catalog (~0.2MB) loads when the panel opens.',
+    icon: HardDriveDownload,
   },
 ];
 
@@ -119,10 +126,10 @@ export function TranslateSetupDialog() {
   }
 
   function connect() {
-    if (!tested) return;
+    if (needsTest && !tested) return;
     setTranslationProvider(provider);
     setTranslationEndpoint(provider === 'libretranslate' ? endpoint.trim() : '');
-    setTranslationApiKey(apiKey.trim());
+    setTranslationApiKey(needsKey ? apiKey.trim() : '');
     setTranslationConfigured();
     closeSetup();
   }
@@ -130,6 +137,9 @@ export function TranslateSetupDialog() {
   const active = PROVIDERS.find((p) => p.id === provider)!;
   const needsEndpoint = provider === 'libretranslate';
   const needsKey = provider === 'google' || provider === 'deepl';
+  // Local has no destination to verify — the card itself is the
+  // informed choice; the catalog and pair downloads come later.
+  const needsTest = provider !== 'local';
 
   return (
     <Dialog open={open} onOpenChange={(o) => !testing && (o ? null : closeSetup())}>
@@ -205,16 +215,18 @@ export function TranslateSetupDialog() {
             />
           </label>
 
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void test()} disabled={testing || (needsKey && !apiKey.trim()) || (needsEndpoint && !endpoint.trim())} data-testid="translate-setup-test">
-              {testing ? 'Testing…' : 'Test connection'}
-            </Button>
-            {tested && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="translate-setup-tested">
-                <Languages size={13} /> {tested.length} languages available
-              </span>
-            )}
-          </div>
+          {needsTest && (
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void test()} disabled={testing || (needsKey && !apiKey.trim()) || (needsEndpoint && !endpoint.trim())} data-testid="translate-setup-test">
+                {testing ? 'Testing…' : 'Test connection'}
+              </Button>
+              {tested && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="translate-setup-tested">
+                  <Languages size={13} /> {tested.length} languages available
+                </span>
+              )}
+            </div>
+          )}
 
           {error && (
             <div
@@ -235,7 +247,7 @@ export function TranslateSetupDialog() {
           <Button size="sm" variant="outline" onClick={closeSetup} disabled={testing}>
             Cancel
           </Button>
-          <Button size="sm" onClick={connect} disabled={!tested || testing} data-testid="translate-setup-connect">
+          <Button size="sm" onClick={connect} disabled={(needsTest && !tested) || testing} data-testid="translate-setup-connect">
             Connect
           </Button>
         </div>

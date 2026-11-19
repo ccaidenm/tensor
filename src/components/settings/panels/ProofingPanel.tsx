@@ -1,10 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { SpellCheck, BookA, CloudOff, Globe, HardDriveDownload, Languages, Trash2, CircleAlert } from 'lucide-react';
+import { SpellCheck, BookA, CloudOff, Globe, HardDrive, HardDriveDownload, Languages, Trash2, CircleAlert } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/lib/config/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
 import { useTranslateStore } from '@/lib/editor/translate/store';
 import { fetchLanguages, providerDestination } from '@/lib/editor/translate/client';
+import { disposeLocalEngine } from '@/lib/editor/translate/local/engine';
+import { pairLabel } from '@/lib/editor/translate/local/names';
+import { mb } from '@/lib/editor/spell/localInstall';
+import type { InstalledPair } from '@/lib/editor/translate/local/types';
 import { InstallProgressBar, useSpellLocalInstall } from '@/lib/editor/spell/localInstall';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -15,6 +19,7 @@ import type { SettingsSectionDefinition } from '@/lib/settings/types';
 export const PROOFING_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'spelling', label: 'Spelling' },
   { id: 'translate', label: 'Translate' },
+  { id: 'models', label: 'Downloaded Models' },
   { id: 'storage', label: 'Local Runtime & Storage' },
 ];
 
@@ -282,6 +287,81 @@ export function ProofingPanel() {
       <SettingsSection id="translate" title="Translate">
         <TranslateEndpointRow />
       </SettingsSection>
+
+      <SettingsSection id="models" title="Downloaded Models">
+        <InstalledModelsRow />
+      </SettingsSection>
+    </div>
+  );
+}
+
+/** TRANSLATE LOCAL — the pair manager (the spell local-runtime row's
+ *  twin): what's on disk, how much it occupies, and the remove path.
+ *  Disk is the truth — the probe reads Rust's manifests. Removing
+ *  disposes the engine so the next run rebuilds without the pair. */
+function InstalledModelsRow() {
+  const [installed, setInstalled] = useState<InstalledPair[] | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+
+  const probe = async () => {
+    try {
+      setInstalled(await invoke<InstalledPair[]>('translate_model_installed'));
+    } catch {
+      setInstalled(null); // non-Tauri (plain browser) — unknown
+    }
+  };
+
+  useEffect(() => {
+    void probe();
+  }, []);
+
+  async function remove(code: string) {
+    setRemoving(code);
+    try {
+      await invoke('translate_model_remove', { code });
+      disposeLocalEngine();
+      await probe();
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  const totalBytes = installed?.reduce((sum, p) => sum + p.files.reduce((s, f) => s + f.size, 0), 0) ?? 0;
+
+  return (
+    <div className="py-3" data-testid="settings-translate-models">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 text-muted-foreground"><HardDrive className="h-4 w-4" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Translation models</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {installed == null
+              ? 'Unknown — run inside the app to manage downloaded models.'
+              : installed.length === 0
+                ? 'No models downloaded — pick a pair in the Translate panel to download one (≈25MB each, offline after that).'
+                : `${installed.length} pair${installed.length === 1 ? '' : 's'} downloaded, ${mb(totalBytes)} on disk. Each translates one direction, fully offline.`}
+          </p>
+          {installed != null && installed.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {installed.map((p) => (
+                <li key={p.code} className="flex items-center justify-between gap-2 text-xs" data-testid="settings-translate-model">
+                  <span>{pairLabel(p)} <span className="text-muted-foreground">({mb(p.files.reduce((s, f) => s + f.size, 0))})</span></span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs"
+                    disabled={removing === p.code}
+                    onClick={() => void remove(p.code)}
+                    data-testid={`settings-translate-model-remove-${p.code}`}
+                  >
+                    <Trash2 size={11} /> Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -19,6 +19,16 @@ import { renderTensor } from './harness';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+  convertFileSrc: (path: string) => `asset://localhost/${encodeURIComponent(path)}`,
+}));
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => () => {}),
+}));
+vi.mock('@/lib/editor/translate/local/engine', () => ({
+  translateHtmlsLocal: vi.fn(async (_installed: unknown, _from: string, _to: string, htmls: string[]) =>
+    htmls.map((h) => h.replace(/Hello/g, 'Hallo')),
+  ),
+  disposeLocalEngine: vi.fn(),
 }));
 
 import { invoke } from '@tauri-apps/api/core';
@@ -44,7 +54,7 @@ function mountPanel() {
   expect(useSidebarStore.getState().active?.id).toBe('translate');
 }
 
-function configureTranslation(endpoint = 'https://lt.example', apiKey = '', provider: 'libretranslate' | 'google' | 'deepl' = 'libretranslate'): void {
+function configureTranslation(endpoint = 'https://lt.example', apiKey = '', provider: 'libretranslate' | 'google' | 'deepl' | 'local' = 'libretranslate'): void {
   useConfigStore.setState({
     config: {
       ...DEFAULT_CONFIG,
@@ -104,8 +114,8 @@ describe('the unconfigured panel', () => {
     fireEvent.click(document.querySelector('[data-testid="translate-panel-setup-btn"]')!);
     expect(useTranslateStore.getState().setupOpen).toBe(true);
     expect(document.querySelector('[data-testid="translate-setup-dialog"]')).not.toBeNull();
-    // Three provider cards, the trade-offs on the cards themselves.
-    expect(document.querySelectorAll('[data-testid^="translate-setup-card-"]').length).toBe(3);
+    // Four provider cards, the trade-offs on the cards themselves.
+    expect(document.querySelectorAll('[data-testid^="translate-setup-card-"]').length).toBe(4);
 
     // Connect is refused until the provider tested OK (a half-working
     // destination is worse than none).
@@ -256,5 +266,89 @@ describe('the configured panel', () => {
     expect(useTranslateStore.getState().phase).toBe('idle');
     // The language picker kept its fallback list (still a real list).
     expect(document.querySelector('[data-testid="translate-target"]')).not.toBeNull();
+  });
+});
+
+describe('the local panel', () => {
+  function configureLocal(): void {
+    configureTranslation('', '', 'local');
+  }
+
+  /** The disk-backed invoke surface: the pair installs only after the
+   *  download command runs. */
+  function mockDisk(withInstalledPair: boolean): void {
+    const installedNow = vi.fn(() => (withInstalledPair
+      ? [{ code: 'en-de', from: 'en', to: 'de', files: [{ kind: 'model', path: '/m', size: 36_000_000, sha256: 'h' }] }]
+      : []));
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === 'translate_model_installed') return installedNow();
+      if (cmd === 'translate_catalog') {
+        return {
+          pairs: [
+            { code: 'en-de', from: 'en', to: 'de', bytes: 36_719_532 },
+            { code: 'fr-en', from: 'fr', to: 'en', bytes: 30_000_000 },
+          ],
+        };
+      }
+      if (cmd === 'translate_model_download') {
+        withInstalledPair = true;
+        return { code: 'en-de', from: 'en', to: 'de', files: [{ kind: 'model', path: '/m', size: 36_000_000, sha256: 'h' }] };
+      }
+      throw new Error('unexpected invoke: ' + cmd);
+    });
+  }
+
+  it('picks a pair, downloads it on demand, runs offline, and never claims to send', async () => {
+    const { editor } = renderTensor('<p>Hello one</p>');
+    configureLocal();
+    mockDisk(false);
+    mountPanel();
+
+    // The local picker + the offline privacy line.
+    expect(document.querySelector('[data-testid="translate-pair"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="translate-privacy-local"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="translate-privacy-line"]')!.textContent).toContain('Runs on this device');
+    await waitFor(() => expect(document.querySelector('[data-testid="translate-catalog-loading"]')).toBeNull());
+
+    // Choosing an UNINSTALLED pair arms the download (the honest next
+    // action — the run button would be a lie).
+    act(() => {
+      useTranslateStore.setState({ sourceLang: 'en', targetLang: 'de' });
+    });
+    const download = document.querySelector('[data-testid="translate-download"]') as HTMLButtonElement;
+    expect(download).not.toBeNull();
+    expect(download.textContent).toContain('Download model');
+
+    fireEvent.click(download);
+    await flush();
+    await waitFor(() => expect(document.querySelector('[data-testid="translate-download"]')).toBeNull());
+    // Installed: the run button replaces the download affordance.
+    const run = document.querySelector('[data-testid="translate-run"]') as HTMLButtonElement;
+    expect(run).not.toBeNull();
+    expect(run.disabled).toBe(false);
+
+    fireEvent.click(run);
+    await flush();
+    await waitFor(() => expect(document.querySelector('[data-testid="translate-preview"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-testid="translate-apply-replace"]')!);
+    await flush();
+    expect(editor.getHTML()).toContain('Hallo one');
+  });
+
+  it('an already-downloaded pair skips straight to the run', async () => {
+    renderTensor('<p>Hello one</p>');
+    configureLocal();
+    mockDisk(true);
+    mountPanel();
+    await waitFor(() => expect(document.querySelector('[data-testid="translate-catalog-loading"]')).toBeNull());
+    act(() => {
+      useTranslateStore.setState({ sourceLang: 'en', targetLang: 'de' });
+    });
+    expect(document.querySelector('[data-testid="translate-download"]')).toBeNull();
+    const run = document.querySelector('[data-testid="translate-run"]') as HTMLButtonElement;
+    expect(run.disabled).toBe(false);
+    fireEvent.click(run);
+    await flush();
+    await waitFor(() => expect(document.querySelector('[data-testid="translate-preview"]')).not.toBeNull());
   });
 });
