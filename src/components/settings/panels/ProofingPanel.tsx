@@ -1,16 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { SpellCheck, BookA, CloudOff, HardDriveDownload, Trash2, CircleAlert } from 'lucide-react';
+import { SpellCheck, BookA, CloudOff, Globe, HardDriveDownload, Languages, Trash2, CircleAlert } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/lib/config/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
+import { useTranslateStore } from '@/lib/editor/translate/store';
+import { fetchLanguages, providerDestination } from '@/lib/editor/translate/client';
 import { InstallProgressBar, useSpellLocalInstall } from '@/lib/editor/spell/localInstall';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 
 export const PROOFING_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'spelling', label: 'Spelling' },
+  { id: 'translate', label: 'Translate' },
   { id: 'storage', label: 'Local Runtime & Storage' },
 ];
 
@@ -274,6 +278,116 @@ export function ProofingPanel() {
           </div>
         )}
       </SettingsSection>
+
+      <SettingsSection id="translate" title="Translate">
+        <TranslateEndpointRow />
+      </SettingsSection>
+    </div>
+  );
+}
+
+/** TRANSLATE — the provider/key management (the Privacy panel
+ *  documents; this manages). Direct config writes (the measurement
+ *  unit's live-write law) — credentials are validated by the test
+ *  button, never silently mutated by a typo. The provider choice and
+ *  the full informed-consent flow live in the setup dialog
+ *  ("Reconfigure…"); this row edits credentials for the CHOSEN
+ *  provider. */
+function TranslateEndpointRow() {
+  const configured = useConfigStore((s) => s.config.translation.configured);
+  const provider = useConfigStore((s) => s.config.translation.provider);
+  const endpoint = useConfigStore((s) => s.config.translation.endpoint);
+  const apiKey = useConfigStore((s) => s.config.translation.apiKey);
+  const setTranslationEndpoint = useConfigStore((s) => s.setTranslationEndpoint);
+  const setTranslationApiKey = useConfigStore((s) => s.setTranslationApiKey);
+  const openSetup = useTranslateStore((s) => s.openSetup);
+
+  const needsEndpoint = provider === 'libretranslate';
+  const needsKey = provider === 'google' || provider === 'deepl';
+  const [draftEndpoint, setDraftEndpoint] = useState(endpoint);
+  const [draftKey, setDraftKey] = useState(apiKey);
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tested, setTested] = useState(false);
+
+  // The persisted truth is the draft when the panel isn't being edited
+  // (fresh mounts, config reloads).
+  useEffect(() => setDraftEndpoint(endpoint), [endpoint]);
+  useEffect(() => setDraftKey(apiKey), [apiKey]);
+
+  const canTest = needsEndpoint ? draftEndpoint.trim() : draftKey.trim();
+
+  async function test() {
+    setTesting(true);
+    setError(null);
+    setTested(false);
+    try {
+      await fetchLanguages(provider, draftEndpoint.trim() || undefined, draftKey.trim() || undefined);
+      setTested(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  function save() {
+    if (needsEndpoint) setTranslationEndpoint(draftEndpoint.trim());
+    setTranslationApiKey(draftKey.trim());
+    useConfigStore.getState().setTranslationConfigured();
+    setTested(false);
+  }
+
+  return (
+    <div className="py-3" data-testid="settings-translate-endpoint">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 text-muted-foreground"><Globe className="h-4 w-4" /></div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">{providerDestination(provider, endpoint)}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {configured
+              ? 'The provider translation runs against — where the text you translate is sent.'
+              : 'Not set up — the Translate panel’s setup dialog makes the informed choice first.'}
+          </p>
+          <div className="mt-2 flex flex-col gap-2" data-testid="settings-translate-fields">
+            {needsEndpoint && (
+              <Input
+                value={draftEndpoint}
+                onChange={(e) => { setDraftEndpoint(e.target.value); setTested(false); }}
+                placeholder="https://libretranslate.com"
+                className="h-8"
+                aria-label="LibreTranslate instance URL"
+                data-testid="settings-translate-endpoint-input"
+              />
+            )}
+            <Input
+              value={draftKey}
+              onChange={(e) => { setDraftKey(e.target.value); setTested(false); }}
+              placeholder={needsKey ? 'API key (required)' : 'API key (optional)'}
+              className="h-8"
+              aria-label="Translation API key"
+              data-testid="settings-translate-key-input"
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void test()} disabled={testing || !canTest} data-testid="settings-translate-test">
+                {testing ? 'Testing…' : 'Test'}
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={save} disabled={!tested} data-testid="settings-translate-save">
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={openSetup} data-testid="settings-translate-reconfigure">
+                <Languages size={12} /> Change provider…
+              </Button>
+            </div>
+            {tested && <span className="text-xs text-muted-foreground" data-testid="settings-translate-tested">Connection ok — provider reached.</span>}
+            {error && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="settings-translate-error">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
