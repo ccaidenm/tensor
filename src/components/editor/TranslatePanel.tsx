@@ -13,8 +13,9 @@ import { mb } from '@/lib/editor/spell/localInstall';
 import type { TranslateDownloadProgress } from '@/lib/editor/translate/local/types';
 import type { TranslationLanguage } from '@/lib/editor/translate/types';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { IconButton } from '@/components/layout/IconButton';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from 'cn';
 
@@ -56,7 +57,6 @@ export function TranslatePanel() {
   const modelDownload = useTranslateStore((s) => s.modelDownload);
   const setScope = useTranslateStore((s) => s.setScope);
   const setTargetLang = useTranslateStore((s) => s.setTargetLang);
-  const setSourceLang = useTranslateStore((s) => s.setSourceLang);
   const start = useTranslateStore((s) => s.start);
   const cancel = useTranslateStore((s) => s.cancel);
   const apply = useTranslateStore((s) => s.apply);
@@ -99,6 +99,10 @@ export function TranslatePanel() {
     };
   }, [isOpen, isLocal, setModelDownload]);
 
+  // The pair filter (LOCAL MODE) — declared with the other hooks: the
+  // panel early-returns below, and hooks may never follow a return.
+  const [pairFilter, setPairFilter] = useState('');
+
   // Re-render on every editor transaction so enablement stays HONEST:
   // the Selection scope button reads the live selection (a caret-touches-
   // nothing selection keeps it disabled; a real selection enables it).
@@ -121,8 +125,15 @@ export function TranslatePanel() {
   const languageList = languages ?? FALLBACK_LANGUAGES;
 
   // LOCAL MODE derivations: the selected pair, whether it's downloaded,
-  // and its approximate download size (catalog bytes, else the
-  // installed files' total).
+  // its approximate download size, and the FILTERED list (the panel
+  // lists pairs in place — a 115-entry popup is unusable).
+  const filter = pairFilter.trim().toLowerCase();
+  const matches = (p: { code: string; from: string; to: string }) =>
+    !filter || pairLabel(p).toLowerCase().includes(filter) || p.code.includes(filter);
+  const installedVisible = installed.filter(matches);
+  const availableVisible = (catalog ?? [])
+    .filter((p) => !installed.some((i) => i.code === p.code))
+    .filter(matches);
   const selectedPairCode = sourceLang && targetLang ? `${sourceLang}-${targetLang}` : '';
   const selectedInstalled = installed.find((p) => p.code === selectedPairCode);
   const selectedCatalog = catalog?.find((p) => p.code === selectedPairCode);
@@ -197,61 +208,64 @@ export function TranslatePanel() {
           </div>
 
           {/* Target — a language for online providers, an explicit
-              DIRECTION for local (Bergamot has no auto-detect). */}
+              DIRECTION for local (Bergamot has no auto-detect). The
+              local picker is an IN-PANEL list, not a popup: 115 pairs
+              need a filter, and the catalog is visible at a glance. */}
           <div className="border-b border-border p-3">
             {isLocal ? (
               <>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="translate-pair">
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground" htmlFor="translate-pair-filter">
                   Language pair
                 </label>
-                <Select
-                  value={sourceLang && targetLang ? `${sourceLang}-${targetLang}` : ''}
-                  onValueChange={(v) => {
-                    if (v == null) return;
-                    const [from, to] = v.split('-');
-                    setSourceLang(from);
-                    setTargetLang(to);
-                  }}
-                >
-                  <SelectTrigger id="translate-pair" className="h-8 w-full text-sm" data-testid="translate-pair">
-                    <SelectValue placeholder="Pick a direction…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {installed.length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel>Downloaded</SelectLabel>
-                        {installed.map((p) => (
-                          <SelectItem key={p.code} value={p.code}>{pairLabel(p)}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    )}
-                    {catalog && (
-                      <SelectGroup>
-                        <SelectLabel>Available to download</SelectLabel>
-                        {catalog
-                          .filter((p) => !installed.some((i) => i.code === p.code))
-                          .map((p) => (
-                            <SelectItem key={p.code} value={p.code}>
-                              {pairLabel(p)} (≈{mb(p.bytes)})
-                            </SelectItem>
-                          ))}
-                      </SelectGroup>
-                    )}
-                  </SelectContent>
-                </Select>
+                <Input
+                  id="translate-pair-filter"
+                  value={pairFilter}
+                  onChange={(e) => setPairFilter(e.target.value)}
+                  placeholder="Filter languages…"
+                  className="h-8"
+                  data-testid="translate-pair-filter"
+                />
+                <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-border" data-testid="translate-pair-list">
+                  {catalogError && !catalog && (
+                    <p className="p-2 text-xs text-amber-600" data-testid="translate-catalog-error">
+                      Catalog unavailable ({catalogError}) — downloaded pairs still work.
+                    </p>
+                  )}
+                  {catalog === null && !catalogError && (
+                    <p className="p-2 text-xs text-muted-foreground" data-testid="translate-catalog-loading">
+                      Loading the model catalog…
+                    </p>
+                  )}
+                  {catalog !== null && catalog.length === 0 && (
+                    <p className="p-2 text-xs text-muted-foreground" data-testid="translate-catalog-empty">
+                      The catalog returned no models — close and reopen the panel to retry.
+                    </p>
+                  )}
+                  {catalog !== null && catalog.length > 0 && (
+                    <ul>
+                      {installedVisible.length > 0 && (
+                        <li className="border-b border-border px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Downloaded</li>
+                      )}
+                      {installedVisible.map((p) => (
+                        <PairRow key={p.code} pair={p} selected={selectedPairCode === p.code} downloaded />
+                      ))}
+                      {availableVisible.length > 0 && (
+                        <li className="border-b border-border px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">Available to download</li>
+                      )}
+                      {availableVisible.map((p) => (
+                        <PairRow key={p.code} pair={p} selected={selectedPairCode === p.code} />
+                      ))}
+                      {installedVisible.length === 0 && availableVisible.length === 0 && (
+                        <li className="p-2 text-xs text-muted-foreground" data-testid="translate-pair-no-match">
+                          No pairs match “{pairFilter}”.
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
                 <p className="mt-1.5 text-xs text-muted-foreground" data-testid="translate-source-note">
                   Local models translate exact directions — the source is the pair, nothing is sent.
                 </p>
-                {catalogError && (
-                  <p className="mt-1 text-xs text-amber-600" data-testid="translate-catalog-error">
-                    Catalog unavailable ({catalogError}) — downloaded pairs still work.
-                  </p>
-                )}
-                {!catalog && !catalogError && (
-                  <p className="mt-1 text-xs text-muted-foreground" data-testid="translate-catalog-loading">
-                    Loading the model catalog…
-                  </p>
-                )}
                 {modelDownload && (
                   <div className="mt-2" data-testid="translate-download-progress">
                     <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
@@ -438,4 +452,33 @@ function useLanguages(enabled: boolean): TranslationLanguage[] | null {
     };
   }, [enabled]);
   return languages;
+}
+
+/** ONE PAIR ROW — the local picker's unit (the search-results row
+ *  pattern): the direction, its state (Downloaded / ≈size), click =
+ *  select. No popup: the list lives in the panel. */
+function PairRow({ pair, selected, downloaded }: { pair: { code: string; from: string; to: string; bytes?: number }; selected: boolean; downloaded?: boolean }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => {
+          const store = useTranslateStore.getState();
+          store.setSourceLang(pair.from);
+          store.setTargetLang(pair.to);
+        }}
+        className={cn(
+          'flex w-full items-center justify-between gap-2 border-b border-border px-2 py-1.5 text-left text-xs last:border-b-0 hover:bg-muted',
+          selected && 'bg-primary/10',
+        )}
+        data-testid={`translate-pair-row-${pair.code}`}
+        aria-pressed={selected}
+      >
+        <span className="truncate">{pairLabel(pair)}</span>
+        <span className="ml-2 shrink-0 text-muted-foreground">
+          {downloaded ? <span className="text-primary">Downloaded</span> : <>{pair.bytes != null ? `≈${mb(pair.bytes)}` : ''}</>}
+        </span>
+      </button>
+    </li>
+  );
 }

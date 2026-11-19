@@ -305,16 +305,19 @@ describe('the local panel', () => {
     mountPanel();
 
     // The local picker + the offline privacy line.
-    expect(document.querySelector('[data-testid="translate-pair"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="translate-pair-list"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="translate-privacy-local"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="translate-privacy-line"]')!.textContent).toContain('Runs on this device');
     await waitFor(() => expect(document.querySelector('[data-testid="translate-catalog-loading"]')).toBeNull());
+    // The catalog's pairs are IN the panel (no popup to lose).
+    expect(document.querySelectorAll('[data-testid^="translate-pair-row-"]').length).toBe(2);
 
     // Choosing an UNINSTALLED pair arms the download (the honest next
     // action — the run button would be a lie).
-    act(() => {
-      useTranslateStore.setState({ sourceLang: 'en', targetLang: 'de' });
-    });
+    fireEvent.click(document.querySelector('[data-testid="translate-pair-row-en-de"]')!);
+    await flush();
+    expect(useTranslateStore.getState().sourceLang).toBe('en');
+    expect(useTranslateStore.getState().targetLang).toBe('de');
     const download = document.querySelector('[data-testid="translate-download"]') as HTMLButtonElement;
     expect(download).not.toBeNull();
     expect(download.textContent).toContain('Download model');
@@ -341,9 +344,8 @@ describe('the local panel', () => {
     mockDisk(true);
     mountPanel();
     await waitFor(() => expect(document.querySelector('[data-testid="translate-catalog-loading"]')).toBeNull());
-    act(() => {
-      useTranslateStore.setState({ sourceLang: 'en', targetLang: 'de' });
-    });
+    fireEvent.click(document.querySelector('[data-testid="translate-pair-row-en-de"]')!);
+    await flush();
     expect(document.querySelector('[data-testid="translate-download"]')).toBeNull();
     const run = document.querySelector('[data-testid="translate-run"]') as HTMLButtonElement;
     expect(run.disabled).toBe(false);
