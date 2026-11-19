@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useEditor } from "@tiptap/react";
 import type { EquationMetrics, TextMetrics } from "@tensor-editor/engine";
 import { useDocumentStore } from "../../lib/document/store";
+import { useViewMode } from "@/lib/document/useViewMode";
 import { useConfigStore } from "../../lib/config/store";
 import { useStyleRegistryStore } from "@/lib/styles/registry";
 import { resolveNormalBase } from "@/lib/styles/resolve";
@@ -26,7 +27,7 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
   const defaultFontSize = useConfigStore(
     (s) => s.config.editor.defaultFontSize,
   );
-  const mode = useConfigStore((s) => s.config.editor.defaultPageLayout);
+  const mode = useViewMode();
   // baseStyle := resolve('normal') (amendment 6): the pageless
   // container font is the resolved 'normal' style — config defaults
   // when 'normal' is unedited, the registry override when it is not.

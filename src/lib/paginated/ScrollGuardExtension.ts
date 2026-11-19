@@ -2,6 +2,8 @@ import { Extension } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import { useConfigStore } from '@/lib/config/store';
+import { useDocumentStore } from '@/lib/document/store';
+import { resolveViewMode } from '@/lib/document/pageSetup';
 
 /**
  * PM-side translation layer. PM's view.scrollToSelection() fires
@@ -43,7 +45,7 @@ export const ScrollGuardExtension = Extension.create({
       new Plugin({
         props: {
           handleScrollToSelection(view) {
-            if (useConfigStore.getState().config.editor.defaultPageLayout !== 'Pages') {
+            if (resolveViewMode(useDocumentStore.getState().pageSetup.viewMode, useConfigStore.getState().config.editor.defaultPageLayout) !== 'Pages') {
               return false; // pageless: PM's native selection scrolling is correct
             }
             return paintedScrollHandler ? paintedScrollHandler(view) : true;

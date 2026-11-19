@@ -2,6 +2,7 @@ import { Ruler, PanelTop, Droplet, Superscript, SquareDashed, MessageSquareText 
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useConfigStore } from '@/lib/config/store';
+import { useViewMode } from '@/lib/document/useViewMode';
 // M-PRINT (#43): View > Print Preview — the preview modal's menu entry
 // (the palette command + Ctrl+P are its siblings; one registry body).
 
@@ -26,8 +27,7 @@ export function ShowGroup() {
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
   const setBothRulers = useConfigStore((s) => s.setBothRulers);
-  const isPageless =
-    useConfigStore((s) => s.config.editor.defaultPageLayout) !== 'Pages';
+  const isPageless = useViewMode() !== 'Pages';
 
   return (
     <RibbonGroup>

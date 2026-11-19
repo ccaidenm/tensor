@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
-import { useConfigStore } from '@/lib/config/store';
+import { useViewMode } from '@/lib/document/useViewMode';
 import { applyPageSetup } from '@/lib/editor/sections';
 import type { ColumnSetup } from '@/lib/document/pageSetup';
 
@@ -34,7 +34,7 @@ const PRESETS: { label: string; columns: () => ColumnSetup | null }[] = [
 
 export function ColumnsButton() {
   const pageSetup = useDocumentStore((s) => s.pageSetup);
-  const isPageless = useConfigStore((s) => s.config.editor.defaultPageLayout) !== 'Pages';
+  const isPageless = useViewMode() !== 'Pages';
   const [open, setOpen] = useState(false);
   // The ACTIVE preset highlight (a uniform spec matches One/Two/Three;
   // unequal two-column matches Left/Right; anything else matches none).

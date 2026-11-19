@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
-import { useConfigStore } from '@/lib/config/store';
+import { useViewMode } from '@/lib/document/useViewMode';
 import { PAGE_SIZES } from '@/lib/document/pageSetup';
 import { applyPageSetup } from '@/lib/editor/sections';
 
@@ -23,14 +23,17 @@ import { applyPageSetup } from '@/lib/editor/sections';
  * merges a PARTIAL into every section's setup + the store in ONE
  * commit (applyPageSetup('document', …)).
  *
- * PAGELESS MODE disables — but never removes — the PAGE GEOMETRY
- * controls: they are paginated facts with no pageless meaning. Page
- * Background stays LIVE in both modes (one setting, two surfaces).
+ * PAGELESS MODE: the Page Setup button stays LIVE — the dialog grows a
+ * Paginated/Pageless toggle and shows the strip's fields (margins
+ * incl. Full, page background) in pageless mode. The ORIENTATION and
+ * PAPER SIZE quick controls remain disabled — they are paginated
+ * facts with no pageless meaning. Page Background stays LIVE in both
+ * modes (one setting, two surfaces).
  */
 export function PageSetupGroup() {
   const pageSetup = useDocumentStore((s) => s.pageSetup);
   const isLandscape = pageSetup.orientation === 'landscape';
-  const isPageless = useConfigStore((s) => s.config.editor.defaultPageLayout) !== 'Pages';
+  const isPageless = useViewMode() !== 'Pages';
 
   function handlePageSizeChange(value: string) {
     if (isPageless) return;
@@ -57,7 +60,6 @@ export function PageSetupGroup() {
         label="Page Setup"
         icon={<Proportions size={16} />}
         onClick={() => useDocumentPropertiesStore.getState().openPageSetup()}
-        disabled={isPageless}
       />
 
       {/* DOCUMENT-WIDE quick controls. */}

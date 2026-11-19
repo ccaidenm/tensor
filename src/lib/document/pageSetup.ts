@@ -19,6 +19,17 @@ export interface PageSetup {
   pageSize: string;
   margins: Margins;
   pageGap: number;
+  /**
+   * PAGELESS (the view-mode law): the DOCUMENT's preferred rendering
+   * mode — 'pages' (the paginated engine view) or 'pageless' (the
+   * continuous strip). Absent = the app default
+   * (config.editor.defaultPageLayout) governs, so the config field is
+   * the NEW-DOCUMENT default while each document owns its own choice
+   * once set (the toggle writes HERE, marking the doc dirty). Rides
+   * .wpdoc metadata with the rest of pageSetup (wholesale by
+   * construction). resolveViewMode() is the ONE resolver.
+   */
+  viewMode?: 'pages' | 'pageless';
   /** 'landscape' swaps the page size's width/height for layout. */
   orientation?: 'portrait' | 'landscape';
   /** Per-document page background; '' = white. Persisted in .wpdoc metadata. */
@@ -346,6 +357,38 @@ export const MARGIN_PRESETS: Record<string, MarginPreset> = {
     margins: { top: 72, bottom: 72, left: 144, right: 144 },
   },
 };
+
+/**
+ * PAGELESS — the strip's own preset row (the user ruling: Narrow /
+ * Normal / Wide / Full — Moderate's tapered sides mean little edge-
+ * to-edge). Full zeroes every side: the content spans the strip.
+ * Narrow/Normal/Wide reuse the paginated presets' margins (ONE margin
+ * concept per document — the values are the same numbers).
+ */
+export const PAGELESS_MARGIN_PRESETS: Record<string, MarginPreset> = {
+  Narrow: MARGIN_PRESETS.Narrow,
+  Normal: MARGIN_PRESETS.Normal,
+  Wide: MARGIN_PRESETS.Wide,
+  Full: {
+    label: 'Full',
+    margins: { top: 0, bottom: 0, left: 0, right: 0 },
+  },
+};
+
+/**
+ * PAGELESS — the ONE view-mode resolver: the document's own choice
+ * when set, else the app default (config.editor.defaultPageLayout —
+ * the new-document default). Pure so non-React consumers
+ * (ScrollGuardExtension) resolve through the same law.
+ */
+export function resolveViewMode(
+  docViewMode: string | undefined,
+  configDefault: string,
+): 'Pages' | 'Pageless' {
+  if (docViewMode === 'pageless') return 'Pageless';
+  if (docViewMode === 'pages') return 'Pages';
+  return configDefault === 'Pageless' ? 'Pageless' : 'Pages';
+}
 
 export function toLayoutOptions(pageSetup: PageSetup): LayoutOptions {
   let widthPt: number;
