@@ -25,6 +25,7 @@ import { PrintContainer } from '@/lib/print/PrintContainer';
 import { InsertReferenceTableDialog } from './components/dialogs/InsertReferenceTableDialog';
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
+import { SymbolBubble } from './components/layout/ribbon/insert/SymbolBubble';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
@@ -47,6 +48,10 @@ function App() {
   useAutosave();
   useMenuEvents();
   useAppShortcuts();
+  // THE SYMBOL BUBBLE'S EDITOR HANDLE: the floating picker mounts at
+  // App level (not inside the Insert tab) so it persists across ribbon
+  // tab switches — park it in a corner, switch tabs, keep inserting.
+  const editor = useDocumentStore((s) => s.editor);
   // M-STYLES: load the global registry (appConfigDir/styles.json) once
   // at bootstrap — merges over the code builtins; first run seeds the
   // file (hyperlink custom, builtins.ts). Doc layers apply on open.
@@ -244,6 +249,7 @@ function App() {
       <InsertReferenceTableDialog />
       <DocumentPropertiesDialog />
       <Toaster />
+      {editor && <SymbolBubble editor={editor} />}
       <CustomPageSizeDialog />
       {/* #58 — the ONE Page Setup dialog (paper/orientation/margins
           with an Apply-to scope: whole document / this section / this

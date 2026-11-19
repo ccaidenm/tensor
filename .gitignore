@@ -16,3 +16,4 @@ dist-ssr
 src/generated
 src/generated/*
 public/bergamot
+public/symbols
