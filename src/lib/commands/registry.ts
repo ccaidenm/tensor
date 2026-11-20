@@ -78,7 +78,8 @@ import { focusedTextControl } from '@/lib/editor/domUtils';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { saveRecoveryCopy } from '@/lib/document/recovery';
 import { useDocumentStore } from '@/lib/document/store';
-import { useSidebarStore } from '@/lib/layout/sidebarStore';
+import { useSidebarStore } from "@/lib/layout/sidebarStore";
+import { useFocusStore } from "@/lib/layout/focusStore";
 import { useConfigStore } from '@/lib/config/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { usePaletteStore } from '@/lib/palette/store';
@@ -977,6 +978,26 @@ export const COMMANDS: CommandAction[] = [
     group: 'navigate',
     keywords: ['zoom', 'reset', '100', 'normal', 'default'],
     run: () => cfg().setZoomLevel(100),
+  },
+  {
+    // FOCUS MODE — the View tab's toggle, F11, and the palette all
+    // dispatch through THIS one body (the registry's law). The run
+    // re-focuses the editor on exit: the View-tab button unmounts
+    // out from under the caret when the chrome hides, and PM's
+    // selection survives the unmount — focus just needs a nudge back
+    // (the caret reappears without moving — the acceptance criterion).
+    id: 'toggleFocusMode',
+    title: 'Toggle Focus Mode',
+    icon: Maximize,
+    group: 'navigate',
+    keywords: ['focus', 'distraction', 'free', 'zen', 'hide', 'chrome', 'immersive'],
+    shortcutId: 'toggleFocusMode',
+    run: () => {
+      useFocusStore.getState().toggle();
+      if (!useFocusStore.getState().active) {
+        useDocumentStore.getState().editor?.commands.focus();
+      }
+    },
   },
 
   // ── Format (editor-context commands — shared ShortcutsExtension

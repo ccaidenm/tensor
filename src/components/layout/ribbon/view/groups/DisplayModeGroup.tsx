@@ -3,6 +3,8 @@ import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useDocumentStore } from '@/lib/document/store';
 import { useViewMode } from '@/lib/document/useViewMode';
+import { useFocusStore } from '@/lib/layout/focusStore';
+import { getCommand } from '@/lib/commands/registry';
 
 /**
  * View > Display Mode: the Paginated/Pageless toggle — the ONE switch
@@ -18,6 +20,7 @@ export function DisplayModeGroup() {
   const isPaginated = mode === 'Pages';
   const setPageSetup = useDocumentStore((s) => s.setPageSetup);
   const currentPageSetup = useDocumentStore((s) => s.pageSetup);
+  const focusActive = useFocusStore((s) => s.active);
 
   function toggle() {
     const next = isPaginated ? 'pageless' : 'pages';
@@ -32,11 +35,17 @@ export function DisplayModeGroup() {
         active={isPaginated}
         onClick={toggle}
       />
+      {/* FOCUS MODE — born a disabled stub with the View tab; now wired
+          to the ONE command body (the registry's law: the ribbon, F11,
+          and the palette share it). The command re-focuses the editor
+          on exit — the caret survives the toggle. */}
       <IconButton
         label="Focus Mode"
         icon={<Maximize size={16} />}
-        onClick={() => {}}
-        disabled
+        active={focusActive}
+        onClick={() => {
+          void getCommand('toggleFocusMode')?.run();
+        }}
       />
       <IconButton
         label="Reading Mode"

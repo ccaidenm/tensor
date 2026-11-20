@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditorState } from '@tiptap/react';
 import { useDocumentStore } from '../../lib/document/store';
 import { useSidebarStore } from '../../lib/layout/sidebarStore';
+import { useFocusStore } from '../../lib/layout/focusStore';
 import { getDocumentStats, getCursorPosition, type DocumentStats, type CursorPosition } from '../../lib/editor/documentStats';
 
 export function StatusBar() {
@@ -44,7 +45,10 @@ export function StatusBar() {
     };
   }, [rawStats]);
 
-  if (!editor) return null;
+  // FOCUS MODE: the bar owns its own hide (unmount — the bench
+  // trigger, the live counters, everything stops with it).
+  const focusActive = useFocusStore((s) => s.active);
+  if (!editor || focusActive) return null;
 
   return (
     <div

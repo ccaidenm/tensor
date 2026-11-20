@@ -6,6 +6,7 @@ import { useEquationEditor } from "@/lib/editor/useEquationEditor";
 import { EquationEditorBubble } from "./EquationEditorBubble";
 import { TooltipProvider } from "../ui/tooltip";
 import { useConfigStore } from "@/lib/config/store";
+import { useFocusStore } from "@/lib/layout/focusStore";
 import { useDocumentStore } from "@/lib/document/store";
 import { ptToPx } from "@/lib/document/pageSetup";
 import { PagelessRuler } from "./PagelessRuler";
@@ -47,7 +48,12 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // the document's page color painting the strip (WHITE default — the
   // strip is the page now; the desk stays muted behind it).
   const margins = useDocumentStore((s) => s.pageSetup.margins);
-  const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
+  // THE HOOK LAW: both subscriptions run UNCONDITIONALLY (an `&&` on a
+  // selector would short-circuit the second hook call — the hook count
+  // would flip with the toggle). Combine after both have run.
+  const showHorizontalRulerConfig = useConfigStore((s) => s.config.editor.showHorizontalRuler);
+  const focusActive = useFocusStore((s) => s.active);
+  const showHorizontalRuler = showHorizontalRulerConfig && !focusActive;
   // THE SELECTION SYNC (the paginated parity): a configured selection
   // background paints the pageless selections at the SAME alpha the
   // paginated SelectionHighlights uses (0.35 — text under it stays
@@ -232,6 +238,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           bands + ticks) over the strip, portaled into the desk wrapper
           (the paginated bar's own chrome slot — outside the scroll
           flow, flush under the ribbon). Gated on the config toggle. */}
+      {/* FOCUS MODE: the ruler is chrome — it hides with the rest. */}
       {showHorizontalRuler && <PagelessRuler containerRef={containerRef} />}
     </TooltipProvider>
   );

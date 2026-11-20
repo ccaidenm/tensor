@@ -39,6 +39,7 @@ import { ShowGroup } from "./ribbon/view/groups/ShowGroup";
 import { ModeGroup } from "./ribbon/view/groups/ModeGroup";
 import { WindowGroup } from "./ribbon/view/groups/WindowGroup";
 import { useConfigStore } from "@/lib/config/store";
+import { useFocusStore } from "@/lib/layout/focusStore";
 import { useSettingsDialogStore } from "@/lib/settings/store";
 import { useReducedMotion } from "@/lib/accessibility/useReducedMotion";
 import { useRibbonContextStore } from "@/lib/ribbon/contextStore";
@@ -69,6 +70,11 @@ export function Ribbon() {
   // exit — the trigger lingers in the strip while the selection kind
   // persists, and a fresh enter re-focuses it.
   const activeContext = useRibbonContextStore((s) => s.active);
+  // FOCUS MODE: the ribbon owns its own hide (unmount, not CSS — the
+  // contextual producers, tooltips, everything stops with it). The
+  // component-level gate means ANY mount context hides correctly, not
+  // just App's.
+  const focusActive = useFocusStore((s) => s.active);
   const reduceMotion = useReducedMotion();
   const previousTabRef = useRef<ActiveTab | null>(null);
   const lastContextRef = useRef<RibbonContextId | null>(null);
@@ -92,7 +98,7 @@ export function Ribbon() {
   // M-CONTEXTUAL-RIBBON — the selection producers (table / image;
   // header/footer stubs until its milestone).
   useSelectionContexts(editor);
-  if (!editor) return null;
+  if (!editor || focusActive) return null;
 
   return (
     <TooltipProvider delay={300} closeDelay={0}>
