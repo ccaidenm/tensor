@@ -30,6 +30,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // (context 'app': the toggle fires with ANYTHING focused — including
   // mid-focus-mode, where the ribbon button has unmounted).
   { id: 'toggleFocusMode', label: 'Toggle Focus Mode', keys: 'f11', context: 'app', category: 'View' },
+  // #COMMENTS — Word's comment convention (context 'editor': a caret
+  // action; the non-empty-selection guard lives in the command body).
+  { id: 'addComment', label: 'Add Comment', keys: 'ctrl+alt+m', context: 'editor', category: 'Review' },
 
   { id: 'find', label: 'Find & Replace', keys: 'ctrl+f', context: 'editor', category: 'Search' },
 

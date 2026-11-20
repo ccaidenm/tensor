@@ -68,9 +68,17 @@ interface CommentStore {
   activeThreadId: string | null;
   /** Resolved threads hidden by default; the gutter's show toggle. */
   showResolved: boolean;
+  /** The in-flight DRAFT (session-only): the thread the user just
+   *  anchored and is composing the first entry for. Its card renders
+   *  as a composer; submit fills the text, cancel deletes the thread
+   *  (and its mark). The GDocs comment flow. */
+  draftThreadId: string | null;
 
   /** The open-path seam: replaces ALL thread state (stale ghosts from
-   *  the previously-open document must never survive an open). */
+   *  the previously-open document must never survive an open). Threads
+   *  whose entries are ALL empty text are IN-FLIGHT DRAFTS — they do
+   *  not survive a reopen (the GDocs discard-on-close behavior; the
+   *  empty-anchor mark is janitor-stripped as part of the same rule). */
   hydrate: (threads: CommentThread[]) => void;
   /** The tracking plugin's doc-scan write (anchored membership). */
   setAnchoredIds: (ids: ReadonlySet<string>) => void;
@@ -81,6 +89,12 @@ interface CommentStore {
    *  calls this BEFORE setMark (the WRITE-ORDER law: the janitor must
    *  never observe a mark whose thread is not yet in the store). */
   addThread: (threadId: string, text: string) => void;
+  /** The comment flow: an anchored draft (an empty first entry) the
+   *  composer fills. Submit fills the entry text and clears the draft
+   *  flag; cancel deletes the thread AND its mark. */
+  startDraft: (threadId: string) => void;
+  submitDraft: (threadId: string, text: string) => void;
+  cancelDraft: (threadId: string) => void;
   addReply: (threadId: string, text: string) => void;
   editEntry: (threadId: string, entryId: string, text: string) => void;
   /** Deleting the thread's LAST entry deletes the thread (and its
@@ -92,7 +106,10 @@ interface CommentStore {
   setResolved: (threadId: string, resolved: boolean) => void;
 
   /** The save seam: threads as an ordered array (absent-when-empty is
-   *  the caller's job — assembleDocumentFile spreads conditionally). */
+   *  the caller's job — assembleDocumentFile spreads conditionally).
+   *  In-flight drafts write WITH their empty entry (session data — a
+   *  crash mid-draft keeps the anchor; a REOPEN prunes empty threads,
+   *  see hydrate). */
   threadsForSave: () => CommentThread[];
 }
 
@@ -123,13 +140,20 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
   anchoredIds: new Set<string>(),
   activeThreadId: null,
   showResolved: false,
+  draftThreadId: null,
 
   hydrate: (threads) => {
     const record: Record<string, CommentThread> = {};
-    for (const t of threads) record[t.id] = t;
+    for (const t of threads) {
+      // In-flight drafts (ALL entries empty) do not survive a reopen —
+      // the GDocs discard-on-close behavior; the janitor strips their
+      // now-unknown marks as part of the same rule.
+      if (t.entries.every((e) => e.text.trim() === '')) continue;
+      record[t.id] = t;
+    }
     // activeThreadId resets (the caret's thread belongs to the OLD
     // document); showResolved is session-only and deliberately rides.
-    set({ threads: record, anchoredIds: new Set<string>(), activeThreadId: null });
+    set({ threads: record, anchoredIds: new Set<string>(), activeThreadId: null, draftThreadId: null });
   },
 
   setAnchoredIds: (ids) => {
@@ -157,6 +181,39 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
     const thread: CommentThread = { id: threadId, entries: [entry], resolved: false };
     set((state) => ({ threads: { ...state.threads, [threadId]: thread } }));
     useDocumentStore.getState().markDirty();
+  },
+
+  startDraft: (threadId) => {
+    const entry: CommentEntry = {
+      id: nanoid(),
+      author: currentAuthor(),
+      text: '',
+      createdAt: new Date().toISOString(),
+    };
+    const thread: CommentThread = { id: threadId, entries: [entry], resolved: false };
+    set((state) => ({ threads: { ...state.threads, [threadId]: thread }, draftThreadId: threadId }));
+    useDocumentStore.getState().markDirty();
+  },
+
+  submitDraft: (threadId, text) => {
+    set((state) => {
+      const thread = state.threads[threadId];
+      if (!thread || state.draftThreadId !== threadId) return state;
+      return {
+        threads: {
+          ...state.threads,
+          [threadId]: { ...thread, entries: thread.entries.map((e, i) => (i === 0 ? { ...e, text } : e)) },
+        },
+        draftThreadId: null,
+      };
+    });
+    useDocumentStore.getState().markDirty();
+  },
+
+  cancelDraft: (threadId) => {
+    if (get().draftThreadId !== threadId) return;
+    set({ draftThreadId: null });
+    get().deleteThread(threadId);
   },
 
   addReply: (threadId, text) => {

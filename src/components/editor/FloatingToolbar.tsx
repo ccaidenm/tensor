@@ -17,6 +17,7 @@ import { CellSelection } from '@tiptap/pm/tables';
 import { Separator } from '@/components/ui/separator';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
 import { selectionHasMergedCells } from '@/lib/editor/TableExtensions';
+import { getCommand } from '@/lib/commands/registry';
 
 import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { ColorPickerButton } from '../layout/ribbon/ColorPickerButton';
@@ -64,6 +65,14 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       // caret in a cell never sees it: merge is meaningless on one cell.
       isCellSelection: ctx.editor?.state.selection instanceof CellSelection,
       hasMergedCells: ctx.editor?.state ? selectionHasMergedCells(ctx.editor.state) : false,
+      // #COMMENTS — commentable = a non-empty TEXT selection (a caret
+      // is a no-op; an image NodeSelection is out of scope — the image
+      // strip's own button stays a disabled stub). The toolbar button
+      // disables in sync with the command body's guards.
+      canComment: (() => {
+        const sel = ctx.editor?.state.selection;
+        return !!sel && !sel.empty && !(sel instanceof NodeSelection);
+      })(),
     }),
   });
 
@@ -192,11 +201,16 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       <Separator orientation="vertical" className="mx-1 h-6" />
 
       <LinkButton editor={editor} />
+      {/* #COMMENTS — dispatches the ONE command body (the registry's
+          law: the toolbar, Ctrl+Alt+M, and the palette share
+          EDITOR_COMMAND_MAP.addComment). Disabled for a bare caret —
+          the command needs a non-empty text selection. */}
       <IconButton
         label="Insert Comment"
         icon={<MessageSquarePlus size={16} />}
-        onClick={() => { }}
-        disabled
+        disabled={!attrs?.canComment}
+        shortcutId="addComment"
+        onClick={() => getCommand('addComment')?.run()}
       />
       <ClearFormattingButton editor={editor} />
           </>

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act } from '@testing-library/react';
+import { act, render, fireEvent } from '@testing-library/react';
+import { NodeSelection } from '@tiptap/pm/state';
 import { renderTensor } from './harness';
 import { settleLayout } from './harness';
 import { pmDocToSemantic } from '@/lib/paginated/adapter';
@@ -9,6 +10,13 @@ import {
 } from '@/lib/document/fileOperations';
 import { DocumentFileSchema } from '@/lib/document/schema';
 import { useDocumentStore } from '@/lib/document/store';
+import { runEditorCommand } from '@/lib/editor/editorCommands';
+import { getCommand } from '@/lib/commands/registry';
+import { ShowGroup } from '@/components/layout/ribbon/view/groups/ShowGroup';
+import { FloatingToolbar } from '@/components/editor/FloatingToolbar';
+import { useConfigStore } from '@/lib/config/store';
+import { DEFAULT_CONFIG } from '@/lib/config/schema';
+import { toast } from '@/components/ui/toast';
 
 /**
  * #COMMENTS — commit 1: the two-half model. The ANCHORING half is the
@@ -68,7 +76,9 @@ beforeEach(() => {
     anchoredIds: new Set<string>(),
     activeThreadId: null,
     showResolved: false,
+    draftThreadId: null,
   });
+  useConfigStore.setState({ config: DEFAULT_CONFIG });
 });
 
 describe('#COMMENTS: the anchor (comment mark)', () => {
@@ -324,8 +334,7 @@ describe('#COMMENTS: the thread store', () => {
   });
 });
 
-describe('#COMMENTS: layout invisibility (the recognized-quiet law)', () => {
-  it('the adapter converts comment-marked docs without a dropped-attr warning and identical flow', async () => {
+describe('#COMMENTS: layout invisibility (the recognized-quiet law)', () => {  it('the adapter converts comment-marked docs without a dropped-attr warning and identical flow', async () => {
     const { editor } = renderTensor();
     await settleLayout();
 
@@ -370,5 +379,214 @@ describe('#COMMENTS: layout invisibility (the recognized-quiet law)', () => {
       expect(r.style).toEqual(plainStyle);
     }
     warnSpy.mockRestore();
+  });
+});
+
+describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () => {
+  it('addComment: a text selection opens the draft flow; a caret is a no-op', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    // Caret → refused, nothing written.
+    act(() => {
+      editor.commands.setTextSelection(3);
+    });
+    expect(runEditorCommand('addComment')).toBe(false);
+    expect(Object.keys(useCommentStore.getState().threads)).toHaveLength(0);
+
+    // Text selection → the draft flow: anchor + empty first entry +
+    // the draft flag (the composer's signal).
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+    expect(runEditorCommand('addComment')).toBe(true);
+    const state = useCommentStore.getState();
+    const tid = state.draftThreadId!;
+    expect(tid).toBeTruthy();
+    expect(Object.keys(state.threads)).toHaveLength(1);
+    expect(state.threads[tid]!.entries[0]!.text).toBe('');
+    expect(state.anchoredIds.has(tid)).toBe(true);
+    expect(markedRanges(editor)).toEqual([{ threadId: tid, text: 'hello' }]);
+
+    // Submit fills the entry and clears the draft flag.
+    act(() => {
+      useCommentStore.getState().submitDraft(tid, 'my comment');
+    });
+    expect(useCommentStore.getState().threads[tid]!.entries[0]!.text).toBe('my comment');
+    expect(useCommentStore.getState().draftThreadId).toBeNull();
+  });
+
+  it('addComment refuses an image/node selection (non-text anchors out of scope)', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    act(() => {
+      const sel = NodeSelection.create(editor.state.doc, 0);
+      editor.view.dispatch(editor.state.tr.setSelection(sel));
+    });
+    expect(runEditorCommand('addComment')).toBe(false);
+    expect(Object.keys(useCommentStore.getState().threads)).toHaveLength(0);
+  });
+
+  it('addComment refuses band selections with a LOUD toast (the referenceTable precedent)', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+    const toastSpy = vi.spyOn(toast, 'add');
+
+    act(() => {
+      editor.commands.setContent({
+        type: 'doc',
+        content: [
+          {
+            type: 'headerBlock',
+            attrs: { variant: 'first' },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'band text' }] }],
+          },
+        ],
+      });
+    });
+    let bandPos = 1;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'band text') {
+        bandPos = pos;
+        return false;
+      }
+      return true;
+    });
+    // A NON-EMPTY selection inside the band (a bare caret is refused by
+    // the empty-guard first — and the UI never reaches it: the toolbar
+    // disables itself and the palette's enablement is false).
+    act(() => {
+      editor.commands.setTextSelection({ from: bandPos, to: bandPos + 4 });
+    });
+    // Handled (the toast IS the outcome) — but no anchor, no thread.
+    expect(runEditorCommand('addComment')).toBe(true);
+    expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+    expect(markedRanges(editor)).toEqual([]);
+    expect(Object.keys(useCommentStore.getState().threads)).toHaveLength(0);
+    toastSpy.mockRestore();
+  });
+
+  it('cancelDraft removes the draft thread AND its anchor (an unsent draft leaves nothing)', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+      runEditorCommand('addComment');
+    });
+    const tid = useCommentStore.getState().draftThreadId!;
+    expect(markedRanges(editor)).toHaveLength(1);
+    act(() => {
+      useCommentStore.getState().cancelDraft(tid);
+    });
+    expect(markedRanges(editor)).toEqual([]);
+    expect(useCommentStore.getState().threads[tid]).toBeUndefined();
+    expect(useCommentStore.getState().draftThreadId).toBeNull();
+  });
+
+  it('Ctrl+Alt+M runs the SAME body through the real keymap pipeline', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+    act(() => {
+      editor.view.dom.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'm', ctrlKey: true, altKey: true, bubbles: true }),
+      );
+    });
+    expect(useCommentStore.getState().draftThreadId).toBeTruthy();
+    expect(markedRanges(editor)).toHaveLength(1);
+  });
+
+  it('the palette dispatches the SAME body, with selection-gated enablement', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    const cmd = getCommand('addComment')!;
+    act(() => {
+      editor.commands.setTextSelection(3); // caret
+    });
+    expect(cmd.enablement?.()).toBe(false);
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+    expect(cmd.enablement?.()).toBe(true);
+    act(() => {
+      cmd.run();
+    });
+    expect(useCommentStore.getState().draftThreadId).toBeTruthy();
+    expect(markedRanges(editor)).toHaveLength(1);
+  });
+
+  it('the floating toolbar comment button: caret-disabled, selection-wired to the one body', async () => {
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+
+    const position = { left: 100, top: 100, bottom: 120, placement: 'above' as const, gap: 8 };
+    act(() => {
+      editor.commands.setTextSelection(3); // bare caret
+    });
+    const { rerender } = render(
+      <FloatingToolbar editor={editor} position={position} containerTop={0} containerLeft={0} />,
+    );
+    let btn = document.querySelector('button[aria-label="Insert Comment"]') as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(true);
+
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+    rerender(
+      <FloatingToolbar editor={editor} position={position} containerTop={0} containerLeft={0} />,
+    );
+    btn = document.querySelector('button[aria-label="Insert Comment"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    act(() => {
+      fireEvent.click(btn);
+    });
+    expect(useCommentStore.getState().draftThreadId).toBeTruthy();
+    expect(markedRanges(editor)).toHaveLength(1);
+  });
+});
+
+describe('#COMMENTS: the boundary-content toggle (the rewired Show Margins stub)', () => {
+  it('the command flips the persisted flag; the View-tab button shows and toggles', async () => {
+    renderTensor('<p>x</p>');
+    await settleLayout();
+
+    expect(useConfigStore.getState().config.editor.showBoundaryContent).toBe(true);
+    act(() => {
+      getCommand('toggleBoundaryContent')!.run();
+    });
+    expect(useConfigStore.getState().config.editor.showBoundaryContent).toBe(false);
+
+    render(<ShowGroup />);
+    const btn = document.querySelector(
+      'button[aria-label="Show Boundary Content"]',
+    ) as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    expect(btn.disabled).toBe(false); // both modes — pageless has boundary space too
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    act(() => {
+      fireEvent.click(btn);
+    });
+    expect(useConfigStore.getState().config.editor.showBoundaryContent).toBe(true);
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('in-flight drafts never survive a reopen (hydrate prunes all-empty threads)', () => {
+    useCommentStore.getState().hydrate([
+      thread('t1', 'a real note'),
+      {
+        id: 'draft1',
+        entries: [{ id: 'e', author: 'A', text: '', createdAt: '2026-01-01T00:00:00.000Z' }],
+        resolved: false,
+      },
+    ]);
+    expect(useCommentStore.getState().threads['t1']).toBeDefined();
+    expect(useCommentStore.getState().threads['draft1']).toBeUndefined();
   });
 });

@@ -1,9 +1,14 @@
 import type { Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
+import { nanoid } from 'nanoid';
 import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { useSearchStore } from '@/lib/editor/search/store';
 import { useLinkEditorStore } from '@/lib/editor/linkEditorStore';
 import { stepFontSize } from '@/lib/editor/fontSize';
 import { useDocumentStore } from '@/lib/document/store';
+import { selectionInBand } from '@/lib/editor/headerFooterCommands';
+import { useCommentStore } from '@/lib/comments/store';
+import { toast } from '@/components/ui/toast';
 
 /**
  * The single editor-command path. Consumed by BOTH keydown surfaces —
@@ -50,6 +55,36 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   insertLink: () => {
     useLinkEditorStore.getState().requestInsert();
     return true;
+  },
+  // #COMMENTS — THE ONE COMMENT BODY: the floating toolbar, Ctrl+Alt+M,
+  // and the palette all land here (the ShortcutsExtension + registry
+  // dispatch through this map; nothing re-implements a piece of it).
+  // Guards: a non-empty TEXT selection (a caret is a no-op — the
+  // toolbar disables itself in sync); an image NodeSelection is refused
+  // (non-text anchors are out of scope — the image strip keeps its own
+  // stub disabled); headers/footers are refused with a TOAST (the
+  // referenceTable band precedent — bands are separate editor
+  // instances, and a loud no beats a silent half-anchored comment).
+  // THE WRITE-ORDER LAW: startDraft (store record) BEFORE setMark —
+  // the tracking plugin's janitor must never observe a mark whose
+  // thread is not yet in the store. The mark is inclusive, so the
+  // anchor rides PM from here (edges extend it; deleting the range
+  // orphans the thread — the defined states).
+  addComment: (editor) => {
+    const { selection } = editor.state;
+    if (selection.empty) return false;
+    if (selection instanceof NodeSelection) return false;
+    if (selectionInBand(editor)) {
+      toast.add({
+        title: 'Comments are not available here',
+        description: 'Headers and footers cannot carry comments yet.',
+        type: 'warning',
+      });
+      return true;
+    }
+    const threadId = nanoid();
+    useCommentStore.getState().startDraft(threadId);
+    return editor.commands.setComment(threadId);
   },
 
   // Style application (built-in paragraph styles) — no keybinding, but

@@ -1,6 +1,7 @@
 import { Mark } from '@tiptap/core';
 import type { EditorState } from '@tiptap/pm/state';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform';
 import { useCommentStore } from '@/lib/comments/store';
 
 /**
@@ -145,20 +146,36 @@ export const CommentMark = Mark.create({
           // a comment mark? Old ranges catch deletions (the marks are
           // gone from the new doc); new ranges catch setMark/paste. An
           // ordinary keystroke touches no comment marks → null return,
-          // zero work. Multi-step transactions are the conservative
-          // exception: per-step coords live in intermediate docs, so
-          // they trip unconditionally (they are rare — composites,
+          // zero work. Mark steps count too — Add/RemoveMarkStep leave
+          // docChanged FALSE (content untouched) but ARE anchor changes
+          // (setComment, the strip, undo of either). Multi-step
+          // transactions are the conservative exception: per-step
+          // coords live in intermediate docs, so they trip
+          // unconditionally (they are rare — composites,
           // multi-removeMark strips, undo batches — and a false trip
           // costs one scan, while a miss would stale the orphan state).
-          const docChanged = transactions.filter((tr) => tr.docChanged);
-          if (docChanged.length === 0) return null;
+          const relevant = transactions.filter(
+            (tr) =>
+              tr.docChanged ||
+              tr.steps.some((s) => s instanceof AddMarkStep || s instanceof RemoveMarkStep),
+          );
+          if (relevant.length === 0) return null;
           const oldMarkType = oldState.schema.marks.comment;
           const newMarkType = newState.schema.marks.comment;
           if (!oldMarkType || !newMarkType) return null;
-          let touched = docChanged.some((tr) => tr.steps.length !== 1);
+          let touched = relevant.some((tr) => tr.steps.length !== 1);
           if (!touched) {
-            for (const tr of docChanged) {
+            for (const tr of relevant) {
               const step = tr.steps[0]!;
+              // Mark steps DON'T move positions — their map is identity
+              // (map.forEach yields nothing), so the range check below
+              // never fires for them. Their own from/to IS the touched
+              // range; only COMMENT-mark steps trip (bold/highlight
+              // steps never change anchored membership).
+              if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+                if (step.mark.type === oldMarkType || step.mark.type === newMarkType) touched = true;
+                continue;
+              }
               const map = step.getMap();
               map.forEach((oldStart, oldSize, newStart, newSize) => {
                 let oldHas = false;

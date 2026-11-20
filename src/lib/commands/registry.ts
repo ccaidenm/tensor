@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { NodeSelection } from '@tiptap/pm/state';
 import {
   AlignCenter,
   AlignJustify,
@@ -67,6 +68,8 @@ import {
   Proportions,
   Languages,
   ChartColumn,
+  MessageSquarePlus,
+  SquareDashed,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -1003,6 +1006,22 @@ export const COMMANDS: CommandAction[] = [
       }
     },
   },
+  {
+    // #COMMENTS — the BOUNDARY CONTENT toggle (the rewired "Show
+    // Margins" stub): the outside space around the sheets — the comments
+    // gutter today, future boundary content later. One body for the
+    // View-tab button and the palette; persisted like the ruler
+    // toggles. Hiding never reflows the document (desk-level space
+    // reservation — the engine never sees it).
+    id: 'toggleBoundaryContent',
+    title: 'Show Boundary Content',
+    icon: SquareDashed,
+    group: 'navigate',
+    keywords: ['boundary', 'margin', 'margins', 'outside', 'comments', 'gutter', 'annotations'],
+    run: () => {
+      cfg().setShowBoundaryContent(!cfg().config.editor.showBoundaryContent);
+    },
+  },
 
   // ── Format (editor-context commands — shared ShortcutsExtension
   //    dispatch path; the palette never re-implements one) ──────────
@@ -1084,6 +1103,21 @@ export const COMMANDS: CommandAction[] = [
     group: 'format',
     shortcutId: 'insertLink',
     keywords: ['link', 'hyperlink', 'url', 'insert'],
+  }),
+  // #COMMENTS — the ONE comment body lives in EDITOR_COMMAND_MAP
+  // (editorCommands.ts); this entry is the palette/metadata face of it.
+  // Enablement: a non-empty TEXT selection (cheap + sync — the same
+  // facts the command body re-guards).
+  editorCommand('addComment', {
+    title: 'Add Comment',
+    icon: MessageSquarePlus,
+    group: 'actions',
+    shortcutId: 'addComment',
+    enablement: () => {
+      const sel = doc().editor?.state.selection;
+      return !!sel && !sel.empty && !(sel instanceof NodeSelection);
+    },
+    keywords: ['comment', 'note', 'annotate', 'remark', 'feedback', 'review', 'margin'],
   }),
   editorCommand('insertEquation', {
     title: 'Insert Equation',

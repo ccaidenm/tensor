@@ -62,6 +62,13 @@ export const ConfigSchema = z.object({
      *  page geometry to rule). Defaults: visible, matching Word/GDocs. */
     showHorizontalRuler: z.boolean().default(true),
     showVerticalRuler: z.boolean().default(true),
+    /** #COMMENTS — the BOUNDARY CONTENT toggle (the rewired "Show
+     *  Margins" stub): governs the OUTSIDE space around the sheets —
+     *  the comments gutter today, whatever else lands there later. A
+     *  persisted view preference like the ruler toggles (default ON);
+     *  hiding it never reflows the document (the gutter is desk-level
+     *  space reservation, the engine never sees it). Both modes. */
+    showBoundaryContent: z.boolean().default(true),
     zoomLevel: z.number().default(100),
     /** Painted-selection background; '' = theme primary at selection
      * opacity (the default look). */
@@ -92,6 +99,7 @@ export const ConfigSchema = z.object({
     showWatermark: true,
     showHorizontalRuler: true,
     showVerticalRuler: true,
+    showBoundaryContent: true,
     zoomLevel: 100,
     selectionColor: '',
     measurementUnit: 'inches',
