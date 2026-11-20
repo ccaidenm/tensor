@@ -77,6 +77,7 @@ import { runEditorCommand } from '@/lib/editor/editorCommands';
 import { focusedTextControl } from '@/lib/editor/domUtils';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { saveRecoveryCopy } from '@/lib/document/recovery';
+import { useCommentStore } from '@/lib/comments/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSidebarStore } from "@/lib/layout/sidebarStore";
 import { useFocusStore } from "@/lib/layout/focusStore";
@@ -456,6 +457,9 @@ export const COMMANDS: CommandAction[] = [
           lineNumbers,
           coreProperties,
           headerFooter,
+          // #COMMENTS: the snapshot parity law — threads ride like the
+          // rest of the metadata bundle.
+          commentThreads: useCommentStore.getState().threadsForSave(),
         });
       }
       getCurrentWindow().close();

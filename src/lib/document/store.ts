@@ -16,6 +16,7 @@ import type { PageSetup, PageStyles } from './pageSetup';
 import type { LineNumbersSetting } from './schema';
 import type { HeaderFooterSettings } from './headerFooter';
 import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProperties';
+import { useCommentStore } from '@/lib/comments/store';
 
 function defaultPageSetup(): PageSetup {
   const { config } = useConfigStore.getState();
@@ -159,7 +160,16 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       }
       return;
     }
-    await saveDocument(editor, filePath, { pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter });
+    await saveDocument(editor, filePath, {
+      pageSetup,
+      pageStyles,
+      lineNumbers,
+      coreProperties,
+      headerFooter,
+      // #COMMENTS: the threads ride .wpdoc metadata (the lineNumbers
+      // precedent) — read fresh from the comment store at save time.
+      commentThreads: useCommentStore.getState().threadsForSave(),
+    });
     await clearRecoveryCopy(filePath);
     set({ isDirty: false });
   },
@@ -184,7 +194,14 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       }
       return;
     }
-    await saveDocument(editor, path, { pageSetup, pageStyles, lineNumbers, coreProperties, headerFooter });
+    await saveDocument(editor, path, {
+      pageSetup,
+      pageStyles,
+      lineNumbers,
+      coreProperties,
+      headerFooter,
+      commentThreads: useCommentStore.getState().threadsForSave(),
+    });
     await clearRecoveryCopy(filePath);
     set({ filePath: path, isDirty: false });
   },

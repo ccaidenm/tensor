@@ -9,6 +9,7 @@ import { normalizeCoreProperties, type DocumentCoreProperties } from './coreProp
 import { openWpdoc, saveWpdoc } from './wpdoc';
 import { isLegacyHeaderFooter, type HeaderFooterSettings } from './headerFooter';
 import { migrateLegacyHeaderFooter } from '@/lib/editor/headerFooterCommands';
+import { useCommentStore, type CommentThread } from '@/lib/comments/store';
 
 const FILE_FILTERS = [
   { name: 'Word Processor Document', extensions: ['wpdoc'] },
@@ -35,13 +36,17 @@ export interface SaveDocumentOptions {
    *  file (the lineNumbers conditional-spread precedent: absent means
    *  "never set", empty strings never write). */
   coreProperties?: DocumentCoreProperties | null;
+  /** #COMMENTS — the threads' content half; absent/null when the
+   *  document carries none (the lineNumbers precedent). The anchors
+   *  ride docJSON (the comment mark); the ids join them in the file. */
+  commentThreads?: CommentThread[] | null;
   /** Recovery snapshots only: the snapshot's back-pointer. */
   originalPath?: string | null;
 }
 
 /** THE metadata assembly (single source — see SaveDocumentOptions). */
 export function assembleDocumentFile(editor: Editor, options: SaveDocumentOptions): DocumentFile {
-  const { pageSetup, pageStyles, lineNumbers, headerFooter, coreProperties, originalPath } = options;
+  const { pageSetup, pageStyles, lineNumbers, headerFooter, coreProperties, commentThreads, originalPath } = options;
   return {
     version: CURRENT_DOCUMENT_VERSION,
     docJSON: editor.getJSON(),
@@ -61,6 +66,8 @@ export function assembleDocumentFile(editor: Editor, options: SaveDocumentOption
       ...(lineNumbers ? { lineNumbers } : {}),
       // M-HEADER-FOOTER: same precedent — absent until first enabled.
       ...(headerFooter ? { headerFooter } : {}),
+      // #COMMENTS: same precedent — absent until the first thread.
+      ...(commentThreads && commentThreads.length > 0 ? { commentThreads } : {}),
       // M-META: absent means "never set" — whitespace-only values
       // drop out (normalizeCoreProperties).
       ...normalizeCoreProperties(coreProperties),
@@ -124,6 +131,11 @@ export interface OpenDocumentResult {
   /** M-HEADER-FOOTER: the file's header/footer settings; null = the
    *  file predates them (or never enabled them) — headers/footers off. */
   headerFooter: HeaderFooterSettings | null;
+  /** #COMMENTS — the file's comment threads ([] = predates them or
+   *  carries none). ALREADY HYDRATED into the comment store by the
+   *  time this returns (the open path hydrates BEFORE setContent —
+   *  the load-order law; the media-store precedent). */
+  commentThreads: CommentThread[];
 }
 
 export async function openDocument(editor: Editor): Promise<OpenDocumentResult | null> {
@@ -147,6 +159,12 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
   // posture's document-side spelling).
   const file = await openWpdoc(path);
 
+  // #COMMENTS — THE LOAD-ORDER LAW: hydrate BEFORE setContent. The
+  // tracking plugin's janitor strips marks whose threadId has no store
+  // record; a late hydrate would destroy the freshly-loaded document's
+  // anchors. (The media-store precedent: openV2 feeds the MediaStore
+  // during open.)
+  useCommentStore.getState().hydrate(file.metadata.commentThreads ?? []);
   editor.commands.setContent(file.docJSON);
   // M-HEADER-FOOTER-2: the v1→v2 migration — a legacy metadata shape's
   // per-region content docs translate into doc-level band containers
@@ -178,6 +196,7 @@ export async function openDocument(editor: Editor): Promise<OpenDocumentResult |
     lineNumbers: file.metadata.lineNumbers ?? null,
     coreProperties: normalizeCoreProperties({ title, author, subject, keywords, comments }),
     headerFooter: settings,
+    commentThreads: file.metadata.commentThreads ?? [],
   };
 }
 
@@ -223,6 +242,11 @@ async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocum
   const { importDocxFile } = await import('@/lib/docx/importFlow');
   const name = path.split(/[\\/]/).pop() ?? 'Untitled';
   const result = await importDocxFile(path, name.replace(/\.docx$/i, ''));
+  // #COMMENTS — the load-order law (the wpdoc path's comment): a Word
+  // file carries no Tensor threads until the comments.xml importer
+  // lands; hydrate empty so the previous document's threads never
+  // survive as ghosts.
+  useCommentStore.getState().hydrate([]);
   editor.commands.setContent(result.json);
   return {
     path,
@@ -234,12 +258,18 @@ async function openDocxDocument(editor: Editor, path: string): Promise<OpenDocum
     coreProperties: normalizeCoreProperties({ ...result.coreProperties, title: result.title }),
     headerFooter: result.headerFooter,
     importNotices: result.notices,
+    // #COMMENTS: the DOCX importer fills this in a follow-up commit.
+    commentThreads: [],
   };
 }
 
 async function openMarkdownDocument(editor: Editor, path: string): Promise<OpenDocumentResult> {
   const { importMarkdown } = await import('@/lib/markdown/importMarkdown');
   const { json, skippedImages } = await importMarkdown(path);
+  // #COMMENTS — the load-order law: markdown carries no threads (the
+  // documented exclusion), so this is also the stale-state wipe — the
+  // previously-open document's threads must never survive as ghosts.
+  useCommentStore.getState().hydrate([]);
   editor.commands.setContent(json);
   // M-IMAGES-1: markdown carries no dimensions — the standard dim
   // backfill measures them (the same fire-and-forget pass above).
@@ -257,5 +287,7 @@ async function openMarkdownDocument(editor: Editor, path: string): Promise<OpenD
     coreProperties: { title: name.replace(/\.(md|markdown)$/i, '') },
     headerFooter: null,
     skippedImages,
+    // Markdown carries no comment threads (the documented exclusion).
+    commentThreads: [],
   };
 }
