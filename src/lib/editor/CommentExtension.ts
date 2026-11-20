@@ -1,6 +1,8 @@
 import { Mark } from '@tiptap/core';
 import type { EditorState } from '@tiptap/pm/state';
+import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform';
 import { useCommentStore } from '@/lib/comments/store';
 
@@ -43,6 +45,49 @@ import { useCommentStore } from '@/lib/comments/store';
 
 export const COMMENT_MARK_NAME = 'comment';
 
+/** One anchored span of a thread — PM positions (the spell plugin's
+ *  position spelling: ranges survive edits by mapping/rebuilding, so
+ *  both view modes project from ONE state). Adjacent same-thread runs
+ *  merge; a thread spanning blocks/columns/sections is several ranges. */
+export interface CommentRange {
+  threadId: string;
+  from: number;
+  to: number;
+}
+
+export interface CommentTrackingState {
+  ranges: CommentRange[];
+}
+
+/** The tracking plugin's key — PaginatedView's projection reads the
+ *  same state the pageless decorations render (the spellPluginKey
+ *  pattern: one state, two projections). */
+export const commentTrackingKey = new PluginKey<CommentTrackingState>('commentTracking');
+
+/** All comment-marked spans of the doc, merged into per-thread ranges.
+ *  Full-doc walk — called on doc/mark-affecting transactions only (the
+ *  same gating family as the appendTransaction scan; relayout already
+ *  does heavier work per keystroke). */
+export function collectCommentRanges(doc: PMNode): CommentRange[] {
+  const out: CommentRange[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true;
+    const m = node.marks.find((mk) => mk.type.name === COMMENT_MARK_NAME);
+    if (!m?.attrs.threadId) return true;
+    const threadId = m.attrs.threadId as string;
+    const last = out[out.length - 1];
+    // Adjacent same-thread runs merge (one logical anchor, N text
+    // nodes); runs in different blocks never merge (position jump).
+    if (last && last.threadId === threadId && last.to === pos) {
+      last.to = pos + node.nodeSize;
+    } else {
+      out.push({ threadId, from: pos, to: pos + node.nodeSize });
+    }
+    return true;
+  });
+  return out;
+}
+
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     comment: {
@@ -69,6 +114,25 @@ function threadAtPos(state: EditorState, pos: number): string | null {
     if (m?.attrs.threadId) return m.attrs.threadId as string;
   }
   return null;
+}
+
+/** The ACTIVE-thread decorations (the pageless visual tier): the
+ *  caret's thread's ranges get `.tensor-comment-active` on top of the
+ *  mark spans' base tint. Live-composed from the cached ranges + the
+ *  LIVE activeThreadId (the caret's thread changes on selection moves,
+ *  which carry no doc change and must not dispatch) — the spell
+ *  decorations are cached state, this tier is a read. Exported for the
+ *  tests (the plugin's props wire it directly). */
+export function activeCommentDecorations(state: EditorState): DecorationSet {
+  const activeId = useCommentStore.getState().activeThreadId;
+  if (!activeId) return DecorationSet.empty;
+  const ranges = commentTrackingKey.getState(state)?.ranges ?? [];
+  const spans = ranges.filter((r) => r.threadId === activeId);
+  if (spans.length === 0) return DecorationSet.empty;
+  return DecorationSet.create(
+    state.doc,
+    spans.map((r) => Decoration.inline(r.from, r.to, { class: 'tensor-comment-active' })),
+  );
 }
 
 export const CommentMark = Mark.create({
@@ -140,7 +204,30 @@ export const CommentMark = Mark.create({
   addProseMirrorPlugins() {
     return [
       new Plugin({
-        key: new PluginKey('commentTracking'),
+        key: commentTrackingKey,
+        // THE SPELL LIFECYCLE (SpellExtension's law): ranges live in PM
+        // positions so edits map them for free; membership changes
+        // (mark steps) rebuild. The ACTIVE-TINT decorations are NOT
+        // cached state — they compose the cached ranges with the LIVE
+        // activeThreadId read at decoration time (the caret's thread
+        // changes on selection moves, which carry no doc change and
+        // must not dispatch).
+        state: {
+          init: (_, state) => ({ ranges: collectCommentRanges(state.doc) }),
+          apply: (tr, prev) => {
+            const membershipChanged = tr.steps.some(
+              (s) => s instanceof AddMarkStep || s instanceof RemoveMarkStep,
+            );
+            if (!tr.docChanged && !membershipChanged) return prev;
+            // Rebuild on ANY doc change (not a remap): typing at an
+            // edge CARRIES the mark to the inserted text (inclusive) —
+            // a remap of the old range would miss the grown extent.
+            return { ranges: collectCommentRanges(tr.doc) };
+          },
+        },
+        props: {
+          decorations: activeCommentDecorations,
+        },
         appendTransaction(transactions, oldState, newState) {
           // ── THE GATE: did any changed range (old OR new coords) touch
           // a comment mark? Old ranges catch deletions (the marks are

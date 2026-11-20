@@ -12,6 +12,7 @@ import { DocumentFileSchema } from '@/lib/document/schema';
 import { useDocumentStore } from '@/lib/document/store';
 import { runEditorCommand } from '@/lib/editor/editorCommands';
 import { getCommand } from '@/lib/commands/registry';
+import { commentTrackingKey, activeCommentDecorations } from '@/lib/editor/CommentExtension';
 import { ShowGroup } from '@/components/layout/ribbon/view/groups/ShowGroup';
 import { FloatingToolbar } from '@/components/editor/FloatingToolbar';
 import { useConfigStore } from '@/lib/config/store';
@@ -588,5 +589,137 @@ describe('#COMMENTS: the boundary-content toggle (the rewired Show Margins stub)
     ]);
     expect(useCommentStore.getState().threads['t1']).toBeDefined();
     expect(useCommentStore.getState().threads['draft1']).toBeUndefined();
+  });
+});
+
+describe('#COMMENTS: highlights — one state, two projections', () => {
+  it('collectCommentRanges merges adjacent runs and keeps block-spanning pieces apart-joined', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+
+    act(() => {
+      useCommentStore.getState().hydrate([thread('t1'), thread('t2')]);
+      editor.commands.setContent({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              // Three adjacent same-thread runs → ONE range.
+              { type: 'text', text: 'aa', marks: [{ type: 'comment', attrs: { threadId: 't1' } }] },
+              { type: 'text', text: 'bb', marks: [{ type: 'comment', attrs: { threadId: 't1' } }] },
+              { type: 'text', text: 'cc', marks: [{ type: 'comment', attrs: { threadId: 't1' } }] },
+              { type: 'text', text: 'gap' },
+              { type: 'text', text: 'dd', marks: [{ type: 'comment', attrs: { threadId: 't2' } }] },
+            ],
+          },
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'ee', marks: [{ type: 'comment', attrs: { threadId: 't1' } }] },
+            ],
+          },
+        ],
+      });
+    });
+    const ranges = commentTrackingKey.getState(editor.state)!.ranges;
+    expect(ranges).toEqual([
+      { threadId: 't1', from: 1, to: 7 }, // aa+bb+cc merged
+      { threadId: 't2', from: 10, to: 12 },
+      { threadId: 't1', from: 14, to: 16 }, // the second paragraph's piece
+    ]);
+  });
+
+  it('typing at the edge grows the RANGE (the visible anchor extension)', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+
+    act(() => {
+      useCommentStore.getState().hydrate([thread('t1')]);
+      editor.commands.setContent(markedDoc('t1')); // 'hello' = [1, 6)
+    });
+    expect(commentTrackingKey.getState(editor.state)!.ranges).toEqual([
+      { threadId: 't1', from: 1, to: 6 },
+    ]);
+    act(() => {
+      editor.view.dispatch(editor.state.tr.insertText('X', 6));
+    });
+    expect(commentTrackingKey.getState(editor.state)!.ranges).toEqual([
+      { threadId: 't1', from: 1, to: 7 },
+    ]);
+  });
+
+  it('the paginated overlay: per-thread tinted rects, the active tier on the caret\'s thread', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+
+    act(() => {
+      useCommentStore.getState().hydrate([thread('t1')]);
+      editor.commands.setContent(markedDoc('t1'));
+    });
+    await settleLayout();
+    // The base tier painted for the anchored thread.
+    const rects = document.querySelectorAll('[data-testid="comment-rect"]');
+    expect(rects.length).toBeGreaterThan(0);
+    expect(rects[0]!.getAttribute('data-comment-thread')).toBe('t1');
+    // No active tier yet (the caret is not in the thread).
+    expect(document.querySelectorAll('[data-testid="comment-rect-active"]').length).toBe(0);
+
+    // Caret into the thread → the active tier paints; out → it clears.
+    act(() => {
+      editor.commands.setTextSelection(3);
+    });
+    await settleLayout();
+    expect(document.querySelectorAll('[data-testid="comment-rect-active"]').length).toBeGreaterThan(0);
+    act(() => {
+      editor.commands.setTextSelection(9);
+    });
+    await settleLayout();
+    expect(document.querySelectorAll('[data-testid="comment-rect-active"]').length).toBe(0);
+  });
+
+  it('the pageless active-tier decoration: the caret\'s thread only, cleared on leave', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+
+    act(() => {
+      useCommentStore.getState().hydrate([thread('t1')]);
+      editor.commands.setContent(markedDoc('t1'));
+    });
+    // No active thread → empty decorations.
+    expect(activeCommentDecorations(editor.state).find()).toHaveLength(0);
+    act(() => {
+      editor.commands.setTextSelection(3);
+    });
+    const decos = activeCommentDecorations(editor.state).find();
+    expect(decos).toHaveLength(1);
+    expect(decos[0]!.from).toBe(1);
+    expect(decos[0]!.to).toBe(6);
+    expect(
+      (decos[0] as unknown as { type: { attrs: { class: string } } }).type.attrs.class,
+    ).toBe('tensor-comment-active');
+    act(() => {
+      editor.commands.setTextSelection(9);
+    });
+    expect(activeCommentDecorations(editor.state).find()).toHaveLength(0);
+  });
+
+  it('orphaning clears the paint: the full-range delete leaves no rects', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+
+    act(() => {
+      useCommentStore.getState().hydrate([thread('t1')]);
+      editor.commands.setContent(markedDoc('t1'));
+    });
+    await settleLayout();
+    expect(document.querySelectorAll('[data-testid="comment-rect"]').length).toBeGreaterThan(0);
+    act(() => {
+      editor.commands.deleteRange({ from: 1, to: 6 });
+    });
+    await settleLayout();
+    expect(document.querySelectorAll('[data-testid="comment-rect"]').length).toBe(0);
+    // The thread survives (the orphaned state — the gutter's job later).
+    expect(useCommentStore.getState().threads['t1']).toBeDefined();
   });
 });
