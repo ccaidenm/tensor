@@ -26,6 +26,7 @@ import { InsertReferenceTableDialog } from './components/dialogs/InsertReference
 import { SpellSetupDialog } from './components/dialogs/SpellSetupDialog';
 import { DictionaryDialog } from './components/dialogs/DictionaryDialog';
 import { SymbolBubble } from './components/layout/ribbon/insert/SymbolBubble';
+import { ExitFocusButton } from './components/layout/ExitFocusButton';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
@@ -167,6 +168,9 @@ function App() {
   return (
     <>
       <main data-screen-chrome className="flex h-screen flex-col bg-background text-foreground">
+        {/* FOCUS MODE — the ribbon and status bar own their own hides
+            (component-level gates: any mount context unmounts them;
+            nothing hidden keeps running). */}
         <Ribbon />
         {/* data-desk-wrapper: the M-RULER portal target — the ruler bar
             mounts here as static overlay chrome (flush under the Ribbon,
@@ -250,6 +254,9 @@ function App() {
       <DocumentPropertiesDialog />
       <Toaster />
       {editor && <SymbolBubble editor={editor} />}
+      {/* THE EXIT BUTTON — Focus Mode's floating affordance (the same
+          command body as every other surface). */}
+      <ExitFocusButton />
       <CustomPageSizeDialog />
       {/* #58 — the ONE Page Setup dialog (paper/orientation/margins
           with an Apply-to scope: whole document / this section / this

@@ -62,6 +62,7 @@ import { useDocumentStore } from '@/lib/document/store';
 import { selectionInBand } from '@/lib/editor/headerFooterCommands';
 import { HeaderFooterSlots } from './paginated/HeaderFooterSlots';
 import { useConfigStore } from '@/lib/config/store';
+import { useFocusStore } from '@/lib/layout/focusStore';
 import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
 import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
@@ -334,9 +335,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // M-IMAGES-1: caption display toggle (NPC precedent — ink only).
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
   // M-RULER: per-axis display gates (the command palette owns the
-  // granular show/hide; the ribbon button toggles both).
-  const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
-  const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
+  // granular show/hide; the ribbon button toggles both). FOCUS MODE:
+  // both bars hide with the chrome (the user ruling). THE HOOK LAW:
+  // the focus subscription is UNCONDITIONAL — an `&&` on the config
+  // selector would short-circuit the hook call itself, flipping the
+  // component's hook count with the toggle (the 'Should have a queue'
+  // crash). Combine AFTER both hooks have run.
+  const showHorizontalRulerConfig = useConfigStore((s) => s.config.editor.showHorizontalRuler);
+  const showVerticalRulerConfig = useConfigStore((s) => s.config.editor.showVerticalRuler);
+  const focusActive = useFocusStore((s) => s.active);
+  const showHorizontalRuler = showHorizontalRulerConfig && !focusActive;
+  const showVerticalRuler = showVerticalRulerConfig && !focusActive;
   // #WATERMARK — the display toggle (the captions NPC precedent):
   // INK-ONLY — a hidden watermark gives back no space and triggers no
   // relayout (unlike showHeadersFooters below, which rides layout).

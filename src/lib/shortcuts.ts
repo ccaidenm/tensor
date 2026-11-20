@@ -26,6 +26,10 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // Word's spelling shortcut, kept as the convention (context 'app':
   // the toggle is a document-wide setting, not a caret action).
   { id: 'toggleSpellCheck', label: 'Toggle Spell Check', keys: 'f7', context: 'app', category: 'Review' },
+  // F11 — the universal "distraction-free/fullscreen" convention
+  // (context 'app': the toggle fires with ANYTHING focused — including
+  // mid-focus-mode, where the ribbon button has unmounted).
+  { id: 'toggleFocusMode', label: 'Toggle Focus Mode', keys: 'f11', context: 'app', category: 'View' },
 
   { id: 'find', label: 'Find & Replace', keys: 'ctrl+f', context: 'editor', category: 'Search' },
 
