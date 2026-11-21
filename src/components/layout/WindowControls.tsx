@@ -53,7 +53,7 @@ export function WindowControls() {
   };
 
   const buttonClass =
-    'flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+    'flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-muted hover:text-foreground';
 
   return (
     <div className="flex h-10 flex-none items-stretch" role="group" aria-label="Window controls">
@@ -82,7 +82,7 @@ export function WindowControls() {
         data-testid="window-close"
         // The close hover: the universal destructive red with WHITE ink
         // (the muted ink on red read as black-on-red — the user's call).
-        className="flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors hover:bg-destructive hover:text-white"
+        className="flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-destructive hover:text-white"
         onClick={close}
       >
         <X size={15} />

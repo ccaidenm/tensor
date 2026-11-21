@@ -1,9 +1,8 @@
 import type { ReactNode } from 'react';
-import { Globe, Link2, RefreshCw, SpellCheck, Type } from 'lucide-react';
+import { Globe, Link2, SpellCheck, Type } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { IconButton } from '@/components/layout/IconButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { useTranslateStore } from '@/lib/editor/translate/store';
 import { providerDestination } from '@/lib/editor/translate/client';
@@ -68,8 +67,6 @@ function TranslateRow() {
 export function PrivacyPanel() {
   const fetchLinkMetadata = useConfigStore((s) => s.config.privacy.fetchLinkMetadata);
   const setFetchLinkMetadata = useConfigStore((s) => s.setFetchLinkMetadata);
-  const autoCheckForUpdates = useConfigStore((s) => s.config.privacy.autoCheckForUpdates);
-  const setAutoCheckForUpdates = useConfigStore((s) => s.setAutoCheckForUpdates);
   const allowFontCatalogs = useConfigStore((s) => s.config.privacy.allowFontCatalogs);
   const setAllowFontCatalogs = useConfigStore((s) => s.setAllowFontCatalogs);
 
@@ -113,29 +110,6 @@ export function PrivacyPanel() {
         <TranslateRow />
       </SettingsSection>
 
-      <SettingsSection id="updates" title="Updates">
-        <Row
-          icon={<RefreshCw className="h-4 w-4" />}
-          label="Automatically Check for Updates"
-          description="Periodically contacts GitHub Releases to check for a newer version. Not yet implemented (tracked in #65) — this only saves your preference for when it is."
-        >
-          <Switch checked={autoCheckForUpdates} onCheckedChange={setAutoCheckForUpdates} />
-        </Row>
-        <div className="flex items-center justify-between py-3">
-          <div>
-            <div className="text-sm font-medium">Check Now</div>
-            <div className="text-xs text-muted-foreground">Not yet implemented — requires a signed release pipeline (#65)</div>
-          </div>
-          <span className="inline-flex">
-            <IconButton
-              label="Check for updates — not yet implemented"
-              icon={<RefreshCw className="h-4 w-4" />}
-              disabled
-              onClick={() => {}}
-            />
-          </span>
-        </div>
-      </SettingsSection>
     </div>
   );
 }

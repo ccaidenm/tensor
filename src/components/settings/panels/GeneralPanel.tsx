@@ -183,7 +183,7 @@ export function GeneralPanel() {
                       data-testid={`accent-${option.id}`}
                       onClick={() => setAccent(option.id as AccentId)}
                       className={cn(
-                        'h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110',
+                        'h-6 w-6 rounded-full border border-black/10 transition-transform outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:scale-110',
                         accent === option.id &&
                           'ring-2 ring-ring ring-offset-2 ring-offset-background',
                       )}

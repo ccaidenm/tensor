@@ -1,4 +1,4 @@
-import { FileStack, Maximize, BookOpen, ScrollText } from 'lucide-react';
+import { FileStack, Maximize, ScrollText } from 'lucide-react';
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useDocumentStore } from '@/lib/document/store';
@@ -47,12 +47,8 @@ export function DisplayModeGroup() {
           void getCommand('toggleFocusMode')?.run();
         }}
       />
-      <IconButton
-        label="Reading Mode"
-        icon={<BookOpen size={16} />}
-        onClick={() => {}}
-        disabled
-      />
+      {/* #101 — Reading Mode returns with the reading experience. */}
+
     </RibbonGroup>
   );
 }

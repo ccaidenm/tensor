@@ -382,9 +382,10 @@ describe('Layout tab (ArrangeGroup) + palette commands', () => {
     // real toggle. M-HEADER-FOOTER: Show Headers & Footers is LIVE too
     // (the captions NPC precedent). #WATERMARK: Show Watermark is LIVE
     // as well; #COMMENTS rewired the Show Margins placeholder into the
-    // LIVE Show Boundary Content toggle — the ONE remaining placeholder
-    // is Show Footnotes & Endnotes.
-    expect(document.querySelectorAll('button[disabled]').length).toBe(1);
+    // LIVE Show Boundary Content toggle. #101: the last placeholder
+    // (Show Footnotes & Endnotes) was hidden — the View tab ships
+    // ZERO disabled buttons.
+    expect(document.querySelectorAll('button[disabled]').length).toBe(0);
     const rulers = document.querySelector('button[aria-label="Show Rulers"]') as HTMLButtonElement;
     expect(rulers.disabled).toBe(false);
     const hf = document.querySelector('button[aria-label="Show Headers & Footers"]') as HTMLButtonElement;

@@ -16,10 +16,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { RibbonGroup } from "../../../RibbonGroup";
 import { IconButton } from "../../../IconButton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDocumentStore } from "@/lib/document/store";
 import { FontSizeInput } from "../FontSizeInput";
 import { useConfigStore } from "@/lib/config/store";
@@ -91,7 +96,6 @@ export function FontGroup() {
   const openFontBrowser = useFontBrowserStore((s) => s.open);
 
   const [open, setOpen] = useState(false);
-  const [weightsOpenFor, setWeightsOpenFor] = useState<string | null>(null);
 
   const sorted = [...entries].sort((a, b) => a.displayName.localeCompare(b.displayName));
   const byFamily = new Map(entries.map((e) => [e.family, e]));
@@ -145,7 +149,6 @@ export function FontGroup() {
       return; // axis stops beyond the engine's reach stay disabled
     }
     useFontRegistryStore.getState().noteRecentFont(entry.family);
-    setWeightsOpenFor(null);
     setOpen(false);
   }
 
@@ -164,54 +167,57 @@ export function FontGroup() {
       >
         {entry.displayName}
       </button>
-      <button
-        data-testid={`font-picker-weights-${entry.family}`}
-        className="ml-1 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent"
-        aria-label={`Weights for ${entry.displayName}`}
-        onClick={() => setWeightsOpenFor(weightsOpenFor === entry.family ? null : entry.family)}
-      >
-        <ChevronsUpDown size={12} />
-      </button>
-      {weightsOpenFor === entry.family && (
-        <div
-          data-testid={`font-picker-weight-list-${entry.family}`}
-          className="absolute left-[calc(100%-4px)] top-0 z-50 w-36 rounded-lg border bg-popover p-1 shadow-md"
-        >
-          <div className="px-1.5 py-1 text-[10px] font-medium uppercase text-muted-foreground">
-            {entry.displayName}
-          </div>
-          {availableWeights(entry).map((weight) => {
-            const selectable = weight === 400 || weight === 700;
-            const item = (
+      {/* #101 — GDOCS LAW: the weights affordance exists ONLY when the
+          font carries stops beyond Normal/Bold (a 400/700-only font
+          needs no menu — the Bold button covers it). The menu is a
+          small anchored context menu listing the font's REAL stops:
+          Regular/Bold applicable, the other axis stops visible-but-
+          disabled (the engine renders two weights today — picking
+          Light would render Regular, the accepted-input lie). */}
+      {availableWeights(entry).some((w) => w !== 400 && w !== 700) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
               <button
-                key={weight}
-                data-testid={`font-picker-weight-${entry.family}-${weight}`}
-                className={`flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm ${
-                  selectable ? 'hover:bg-muted' : 'cursor-not-allowed opacity-40'
-                }`}
-                disabled={!selectable}
-                onClick={() => applyWeight(entry, weight)}
+                type="button"
+                data-testid={`font-picker-weights-${entry.family}`}
+                className="ml-1 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent"
+                aria-label={`Weights for ${entry.displayName}`}
               >
-                <span>{weightLabel(weight)}</span>
-                <span className="text-xs text-muted-foreground">{weight}</span>
+                <ChevronsUpDown size={12} />
               </button>
-            );
-            if (selectable) return item;
-            return (
-              <Tooltip key={weight}>
-                <TooltipTrigger render={item} />
-                <TooltipContent>Coming soon — needs engine weight support</TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-36">
+            <DropdownMenuItem
+              disabled
+              className="text-[10px] font-medium uppercase text-muted-foreground"
+            >
+              {entry.displayName}
+            </DropdownMenuItem>
+            {availableWeights(entry).map((weight) => {
+              const selectable = weight === 400 || weight === 700;
+              return (
+                <DropdownMenuItem
+                  key={weight}
+                  data-testid={`font-picker-weight-${entry.family}-${weight}`}
+                  disabled={!selectable}
+                  onClick={() => applyWeight(entry, weight)}
+                >
+                  <span>{weightLabel(weight)}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{weight}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );
 
   return (
     <RibbonGroup>
-      <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setWeightsOpenFor(null); }}>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
             <Button
@@ -230,7 +236,7 @@ export function FontGroup() {
             </Button>
           }
         />
-        <PopoverContent className="flex max-h-150 w-64 flex-col p-1" align="start">
+        <PopoverContent className="relative flex max-h-150 w-64 flex-col p-1" align="start">
           {/* The font list scrolls; the Browse action is a FOOTER —
               always anchored to the bottom, never scrolled away. */}
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -248,6 +254,9 @@ export function FontGroup() {
             </div>
             {sorted.map((entry) => row(entry, 'all'))}
           </div>
+          {/* #101 — the old in-place overlay panel is gone too: the
+              weights affordance is now a small anchored context menu on
+              the row's chevron (the GDocs law above). */}
           <div className="border-t">
             <button
               data-testid="font-picker-browse"

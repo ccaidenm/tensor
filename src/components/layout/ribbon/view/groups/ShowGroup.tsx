@@ -1,4 +1,4 @@
-import { Ruler, PanelTop, Droplet, Superscript, SquareDashed, MessageSquareText } from 'lucide-react';
+import { Ruler, PanelTop, Droplet, SquareDashed, MessageSquareText } from 'lucide-react';
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useConfigStore } from '@/lib/config/store';
@@ -75,12 +75,6 @@ export function ShowGroup() {
         active={showWatermark}
         onClick={() => setShowWatermark(!showWatermark)}
         disabled={isPageless}
-      />
-      <IconButton
-        label="Show Footnotes & Endnotes"
-        icon={<Superscript size={16} />}
-        onClick={() => {}}
-        disabled
       />
     </RibbonGroup>
   );

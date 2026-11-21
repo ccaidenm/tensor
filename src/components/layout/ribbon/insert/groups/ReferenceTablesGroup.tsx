@@ -1,4 +1,4 @@
-import { List, BookOpen, Image as ImageIcon, Table2, ScrollText, Library } from 'lucide-react';
+import { List, BookOpen, Image as ImageIcon } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '../../../IconButton';
@@ -34,10 +34,7 @@ export function ReferenceTablesGroup({ editor }: { editor: Editor }) {
         icon={<BookOpen size={16} />}
         onClick={() => insertReferenceTableAtSelection(editor, 'index')}
       />
-      {/* M3 stubs — disabled until their scanners ship. */}
-      <IconButton label="Table of Tables" icon={<Table2 size={16} />} onClick={() => {}} disabled />
-      <IconButton label="Table of Authorities" icon={<ScrollText size={16} />} onClick={() => { }} disabled />
-      <IconButton label="References" icon={<Library size={16} />} onClick={() => {}} disabled />
-    </RibbonGroup>
+      {/* #101 — the M3 kinds (Tables/Authorities/References) return
+          with their scanners; the registry keeps their entries. */}    </RibbonGroup>
   );
 }

@@ -34,12 +34,10 @@ import { TensorLogo } from "../icons/TensorIcon";
 import { ProofingGroup } from "./ribbon/review/groups/ProofingGroup";
 import { AccessibilityGroup } from "./ribbon/review/groups/AccessibilityGroup";
 import { SearchGroup } from "./ribbon/review/groups/SearchGroup";
-import { TrackingGroup } from "./ribbon/review/groups/TrackingGroup";
 import { DisplayGroup } from "./ribbon/review/groups/DisplayGroup";
 import { DisplayModeGroup } from "./ribbon/view/groups/DisplayModeGroup";
 import { ZoomGroup } from "./ribbon/view/groups/ZoomGroup";
 import { ShowGroup } from "./ribbon/view/groups/ShowGroup";
-import { ModeGroup } from "./ribbon/view/groups/ModeGroup";
 import { WindowGroup } from "./ribbon/view/groups/WindowGroup";
 import { useConfigStore } from "@/lib/config/store";
 import { useFocusStore } from "@/lib/layout/focusStore";
@@ -269,7 +267,6 @@ export function Ribbon() {
             <ProofingGroup />
             <AccessibilityGroup />
             <SearchGroup />
-            <TrackingGroup />
             <DisplayGroup />
           </div>
         </TabsContent>
@@ -279,7 +276,6 @@ export function Ribbon() {
             <DisplayModeGroup />
             <ZoomGroup />
             <ShowGroup />
-            <ModeGroup />
             <WindowGroup />
           </div>
         </TabsContent>

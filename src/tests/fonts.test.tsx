@@ -667,17 +667,37 @@ describe('Font Browser + entry points', () => {
     expect(allSection).not.toContain('Geist Variable');
     expect(allSection.some((n) => /\.?\s*Variable$/.test(n ?? ''))).toBe(false);
 
-    // Weight flyout: variable Geist offers axis stops; only 400/700
-    // selectable (the engine's two worlds), the rest disabled.
+    // Weight menu (GDOCS LAW): the affordance exists ONLY for fonts
+    // with stops beyond Normal/Bold — Geist Variable has them, Open
+    // Sans (400/700 only) must NOT. The menu lists the font's REAL
+    // stops; Regular/Bold applicable, the other axis stops visible-
+    // but-disabled (the engine renders two weights today).
     const geistRow = document.querySelector('[data-testid="font-picker-row-Geist Variable"]') as HTMLElement;
     expect(geistRow.textContent).toContain('Geist'); // display name only
+    expect(geistRow.querySelector('button[aria-label="Weights for Geist"]')).not.toBeNull();
     act(() => {
       fireEvent.click(geistRow.querySelector('button[aria-label="Weights for Geist"]')!);
     });
-    const light = document.querySelector('[data-testid="font-picker-weight-Geist Variable-300"]') as HTMLButtonElement;
-    expect(light.disabled).toBe(true);
-    const boldBtn = document.querySelector('[data-testid="font-picker-weight-Geist Variable-700"]') as HTMLButtonElement;
-    expect(boldBtn.disabled).toBe(false);
+    // The extra stops are SUGGESTED, disabled (picking Light would
+    // render Regular — the accepted-input lie):
+    const light = document.querySelector('[data-testid="font-picker-weight-Geist Variable-300"]') as HTMLElement;
+    expect(light).not.toBeNull();
+    // Menu items are divs — the disabled spelling is base-ui's:
+    expect(light.getAttribute('aria-disabled')).toBe('true');
+    const boldBtn = document.querySelector('[data-testid="font-picker-weight-Geist Variable-700"]') as HTMLElement;
+    expect(boldBtn).not.toBeNull();
+    // The enabled item carries no aria-disabled at all (base-ui omits it).
+    expect(boldBtn.hasAttribute('aria-disabled')).toBe(false);
+    expect(boldBtn.hasAttribute('data-disabled')).toBe(false);
+
+    // Close the menu by re-clicking its trigger (a toggle — the
+    // picker stays open; Escape would close the whole popover).
+
+    // The GDOCS LAW's other half: a 400/700-only font carries NO
+    // weights affordance (the Bold button covers it) — asserted while
+    // the picker is still open:
+    expect(document.querySelector('[data-testid="font-picker-row-Open Sans"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="font-picker-weights-Open Sans"]')).toBeNull();
 
     // Applying a font records it as recently used:
     act(() => {

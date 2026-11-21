@@ -1,4 +1,4 @@
-import { Image as ImageIcon, PaintbrushVertical } from 'lucide-react';
+import { Image as ImageIcon } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { IconButton } from '../../../IconButton';
@@ -19,12 +19,8 @@ export function IllustrationsGroup({ editor }: { editor: Editor }) {
           size, click to insert; "Insert Table…" opens the exact-dimension
           dialog. */}
       <TableGridPicker />
-      <IconButton
-        label="Drawing"
-        icon={<PaintbrushVertical size={16} />}
-        onClick={() => { }}
-        disabled
-        />
+      {/* #101 — Drawing returns with the drawing canvas. */}
+
     </RibbonGroup>
   );
 }
