@@ -206,6 +206,7 @@
           "path": "$HOME/**"
         }
       ]
-    }
+    },
+    "core:window:allow-set-icon"
   ]
 }

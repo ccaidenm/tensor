@@ -8,7 +8,11 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = Object.fromEntries(
 );
 
 export const ConfigSchema = z.object({
-  theme: z.enum(['light', 'dark']).default('light'),
+  /** #102 — 'system' follows the OS (matchMedia; the store's writer
+   *  resolves it synchronously + listens). The NEW-INSTALL default is
+   *  system (modern expectation); persisted light/dark values ride
+   *  untouched. */
+  theme: z.enum(['light', 'dark', 'system']).default('system'),
   /** #97 — the brand accent (one hex per accent, both modes; the
    *  config store's writer retunes --primary + the foreground ink;
    *  the catalog is the one source — see lib/branding/accents). */
