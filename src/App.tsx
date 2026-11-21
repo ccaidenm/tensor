@@ -34,7 +34,6 @@ import { useConfigPersistence } from './lib/config/useConfigPersistence';
 import './index.css';
 import { useAppShortcuts } from './lib/shortcuts/useAppShortcuts';
 import { useAutosave } from './lib/document/useAutosave';
-import { useMenuEvents } from './lib/menu/useMenuEvents';
 import { useStyleRegistryStore } from './lib/styles/registry';
 import { useFontRegistryStore } from './lib/fonts/registry';
 import { prefetchCatalogs } from './lib/fonts/catalogs';
@@ -47,7 +46,6 @@ import { useDocumentStore } from './lib/document/store';
 function App() {
   useConfigPersistence();
   useAutosave();
-  useMenuEvents();
   useAppShortcuts();
   // THE SYMBOL BUBBLE'S EDITOR HANDLE: the floating picker mounts at
   // App level (not inside the Insert tab) so it persists across ribbon

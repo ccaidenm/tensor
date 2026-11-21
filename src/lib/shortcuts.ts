@@ -16,6 +16,11 @@ export interface ShortcutDefinition {
 
 export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'save', label: 'Save', keys: 'ctrl+s', context: 'app', category: 'General' },
+  // #100 — the native menu's accelerators, absorbed web-side (the menu
+  // is gone; these were its only spellings). 'new' (Ctrl+N) lands with
+  // #103 — a shortcut on a stub is the accepted-input-did-nothing sin.
+  { id: 'open', label: 'Open', keys: 'ctrl+o', context: 'app', category: 'General' },
+  { id: 'quit', label: 'Quit', keys: 'ctrl+q', context: 'app', category: 'General' },
   { id: 'openSettings', label: 'Open Settings', keys: 'ctrl+,', context: 'app', category: 'General' },
   { id: 'palette', label: 'Command Palette', keys: 'ctrl+shift+p', context: 'app', category: 'General' },
   // Word's print-preview convention (context 'app': the preview is a

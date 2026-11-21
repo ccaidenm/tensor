@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Bug, Lightbulb, ScrollText, Users, ExternalLink, ChevronDown, FolderGit2 } from 'lucide-react';
+import { Bug, Heart, Lightbulb, ScrollText, Users, ExternalLink, ChevronDown, FolderGit2 } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { TensorLogo } from '@/components/icons/TensorIcon';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 import licensesData from '@/generated/licenses.json';
+import { APP_VERSION } from '@/generated/version';
 import { cn } from 'cn';
 
 export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
@@ -16,9 +17,10 @@ export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'licenses', label: 'Third-Party Licenses' },
 ];
 
-// TODO: replace with the real GitHub org/repo once decided.
-const GITHUB_REPO_URL = 'https://github.com/aestriex/word-processor';
-const APP_VERSION = '0.1.0'; // TODO: wire to actual package.json/Cargo.toml version at build time
+// #97 — the repo is the app (the git remote is the source of truth);
+// the version is single-sourced from tauri.conf.json at build time
+// (src/generated/version.ts, the generate-licenses pattern).
+const GITHUB_REPO_URL = 'https://github.com/ccaidenm/tensor';
 const LICENSE = 'AGPL-3.0';
 
 interface LicenseEntry {
@@ -102,7 +104,13 @@ export function AboutPanel() {
         <div>
           <p className="mb-3 text-xs text-muted-foreground">
             Tensor is built with {licenses.length} open-source packages — thank you to their authors and
-            maintainers! Tensor couldn't be built without you. 🧡
+            maintainers! Tensor couldn't be built without you.{' '}
+            {/* #97 — the heart speaks the accent (text-primary follows the
+                brand token; the old hardcoded 🧡 emoji couldn't). */}
+            <Heart
+              className="inline h-3.5 w-3.5 fill-current text-primary align-text-bottom"
+              aria-hidden="true"
+            />
           </p>
 
           <Collapsible open={licensesOpen} onOpenChange={setLicensesOpen}>

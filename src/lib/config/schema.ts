@@ -1,13 +1,26 @@
 import { z } from 'zod';
 import { PAGE_GAP, DEFAULT_MARGINS } from '../document/pageSetup';
 import { SHORTCUTS } from '../shortcuts';
+import { ACCENT_IDS, DEFAULT_ACCENT_ID } from '../branding/accents';
 
 const DEFAULT_KEYBINDINGS: Record<string, string> = Object.fromEntries(
   SHORTCUTS.filter((s) => s.context !== 'os').map((s) => [s.id, s.keys]),
 );
 
 export const ConfigSchema = z.object({
-  theme: z.enum(['light', 'dark']).default('light'),
+  /** #102 — 'system' follows the OS (matchMedia; the store's writer
+   *  resolves it synchronously + listens). The NEW-INSTALL default is
+   *  system (modern expectation); persisted light/dark values ride
+   *  untouched. */
+  theme: z.enum(['light', 'dark', 'system']).default('system'),
+  /** #97 — the brand accent (one hex per accent, both modes; the
+   *  config store's writer retunes --primary + the foreground ink;
+   *  the catalog is the one source — see lib/branding/accents). */
+  accent: z.enum(ACCENT_IDS).default(DEFAULT_ACCENT_ID),
+  /** #100 — which side the custom window controls sit on (the merged
+   *  titlebar row). Linux/Windows only — macOS keeps its native
+   *  traffic lights (Overlay) regardless. */
+  windowControlsSide: z.enum(['right', 'left']).default('right'),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({

@@ -246,7 +246,7 @@ describe('M-A11Y: the Review tab trigger', () => {
     const command = getCommand('accessibilityCheck');
     expect(command).toBeDefined();
     expect(command!.title).toBe('Check Accessibility');
-    // No menuEventId: palette-only, zero Rust surface (the orphan law).
-    expect(command!.menuEventId).toBeUndefined();
+    // #100 — the menu field is GONE with the native menu: palette-only,
+    // zero Rust surface (the orphan law, now structural).
   });
 });

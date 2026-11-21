@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "./schema";
 import { SHORTCUTS } from "../shortcuts";
+import { ACCENTS_BY_ID, DEFAULT_ACCENT_ID, accentLogoPath } from "../branding/accents";
+import { inTauriWindow } from "../window/tauriEnv";
 
 export const ZOOM_MIN = 50;
 export const ZOOM_MAX = 200;
@@ -9,6 +11,10 @@ interface ConfigStore {
   config: Config;
 
   setTheme: (theme: Config["theme"]) => void;
+  /** #97 — the brand accent (the writer below retunes the tokens). */
+  setAccent: (accent: Config["accent"]) => void;
+  /** #100 — the window controls' side (Linux/Windows lane). */
+  setWindowControlsSide: (side: Config["windowControlsSide"]) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -96,6 +102,16 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setTheme: (theme) =>
     set((state) => ({
       config: { ...state.config, theme },
+    })),
+
+  setAccent: (accent) =>
+    set((state) => ({
+      config: { ...state.config, accent },
+    })),
+
+  setWindowControlsSide: (side) =>
+    set((state) => ({
+      config: { ...state.config, windowControlsSide: side },
     })),
 
   setDownloadsDir: (value) =>
@@ -492,12 +508,84 @@ setShowHorizontalRuler: (value) =>
 // mounted after a persisted dark config loaded would take its FIRST
 // paint against the stale (light) class — white knockouts on a dark
 // bar — and, with no later theme change firing, never repaint.
+// #102 — 'system' resolves against the OS scheme. matchMedia is a
+// SYNCHRONOUS read (the synchronous-writer law holds) — taken LAZILY
+// per apply (a module-level capture would freeze the test env's query
+// AND miss a hot media state); the change listener binds once, on the
+// first query, and re-applies while the theme is 'system'.
+function systemQuery(): MediaQueryList | null {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+}
+
 function applyThemeClass(theme: Config["theme"]): void {
-  document.documentElement.classList.toggle("dark", theme === "dark");
+  const q = systemQuery();
+  document.documentElement.classList.toggle(
+    "dark",
+    theme === "system" ? (q?.matches ?? false) : theme === "dark",
+  );
+  if (q && !systemListenerBound) {
+    systemListenerBound = true;
+    q.addEventListener("change", () => {
+      applyThemeClass(useConfigStore.getState().config.theme);
+    });
+  }
+}
+let systemListenerBound = false;
+
+// #97 — THE ACCENT WRITER (the theme-class law's twin): the brand
+// tokens retune SYNCHRONOUSLY with every accent value, including the
+// very first, from this module — one writer, registered before any
+// component subscribes, so chrome that paints from computed styles
+// never takes a first paint against the default accent when a
+// persisted selection exists. Inline on <html>: beats :root and .dark
+// — ONE mechanism, both modes (one hex per accent, the catalog's
+// model). The echoes (--ring, --sidebar-primary, --color-search-
+// current) resolve through var(--primary) in index.css, so ONE
+// variable carries the brand; the foreground ink is the catalog's
+// luminance-picked per-accent value (the pale accents keep readable
+// button text).
+function applyAccent(accentId: Config["accent"]): void {
+  const accent = ACCENTS_BY_ID[accentId] ?? ACCENTS_BY_ID[DEFAULT_ACCENT_ID];
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--primary", accent.hex);
+  rootStyle.setProperty(
+    "--primary-foreground",
+    accent.foreground === "white" ? "oklch(1 0 0)" : "oklch(0.18 0.01 285)",
+  );
+  // #102 — THE PARITY SWEEP (the user's list): the favicon follows the
+  // accent (the browser-tab/dev surface; the real window icon below).
+  const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (favicon) favicon.href = accentLogoPath(accentId);
+}
+
+/** #102 — the OS window icon (taskbar/alt-tab) follows the accent too:
+ *  each accent's 1024px logo fetched from the bundled assets and set as
+ *  the window icon. Best-effort and async (the CSS writer above owns
+ *  the synchronous law — the icon is not paint-critical); no-ops
+ *  outside a Tauri window. */
+async function followAccentWindowIcon(accentId: Config["accent"]): Promise<void> {
+  if (!inTauriWindow()) return;
+  try {
+    const res = await fetch(accentLogoPath(accentId));
+    if (!res.ok) return;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setIcon(bytes);
+  } catch {
+    // Best-effort: a failed fetch/permission never breaks the accent.
+  }
 }
 applyThemeClass(useConfigStore.getState().config.theme);
+applyAccent(useConfigStore.getState().config.accent);
+void followAccentWindowIcon(useConfigStore.getState().config.accent);
 useConfigStore.subscribe((state, prev) => {
   if (state.config.theme !== prev.config.theme) {
     applyThemeClass(state.config.theme);
+  }
+  if (state.config.accent !== prev.config.accent) {
+    applyAccent(state.config.accent);
+    void followAccentWindowIcon(state.config.accent);
   }
 });

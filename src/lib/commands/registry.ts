@@ -102,10 +102,10 @@ import { spellCheckActive } from '@/lib/config/schema';
 
 /**
  * M-PALETTE. The declarative app command registry — the single source
- * of truth for app actions, consumed by BOTH the native menu
- * (useMenuEvents dispatches menu-event payloads through here) and the
- * command palette. Menu and palette cannot drift: they run the same
- * run() bodies.
+ * of truth for app actions, consumed by the command palette and the
+ * web-side shortcut system. (The native menu — their old third
+ * consumer — was absorbed into the app at #100; the Ribbon's Tensor
+ * dropdown and the palette own its items.)
  *
  * Editor commands are NOT re-implemented here — each entry dispatches
  * through the shared EDITOR_COMMAND_MAP path (editorCommands.ts), the
@@ -123,16 +123,12 @@ export interface CommandAction {
    *  'editor' = only while the editor surface had focus at palette
    *  open time. */
   contexts?: ('app' | 'editor')[];
-  /** The Tauri native-menu item this action backs (menu-event
-   *  payload id, src-tauri/src/lib.rs). Present = the menu dispatches
-   *  this same registry entry. */
-  menuEventId?: string;
   /** SHORTCUTS id whose LIVE binding (user-rebindable) the palette
    *  renders as a hint via getEffectiveKeybinding. */
   shortcutId?: string;
   keywords: string[];
-  /** Palette VISIBILITY filter only — run() and menu dispatch ignore
-   *  it, so a hidden action still fires from the menu. */
+  /** Palette VISIBILITY filter only — run() ignores
+   *  it, so a hidden action still fires from its shortcut. */
   hidden?: () => boolean;
   /** Destructive surface marker (quit; 'new' once real): run() must
    *  first persist a recovery snapshot of unsaved work via the
@@ -220,15 +216,14 @@ function writeImageAttrsRef(writes: Record<string, unknown>, kind?: 'image' | 'i
 }
 
 export const COMMANDS: CommandAction[] = [
-  // ── Actions (menu-seeded — the useMenuEvents receipts) ────────────
+  // ── Actions (the old native menu's items, now palette/shortcut-only) ──
   {
     id: 'new',
     title: 'New Document',
     icon: FileStack,
     group: 'navigate',
-    menuEventId: 'menu-new',
     keywords: ['new', 'document', 'window', 'blank'],
-    // Stub receipt (useMenuEvents): "New Document not yet implemented" —
+    // Stub receipt (the old menu item): "New Document not yet implemented" —
     // a console.warn no-op that would LOOK broken in a palette. Hidden
     // from the palette until real; the menu still dispatches it.
     // When implemented: unhide AND add requiresSafeQuit (unsaved work
@@ -243,7 +238,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Open Document',
     icon: FolderOpen,
     group: 'actions',
-    menuEventId: 'menu-open',
     keywords: ['open', 'file', 'load', 'document'],
     run: () => void doc().openFile(),
   },
@@ -284,7 +278,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Save',
     icon: Save,
     group: 'actions',
-    menuEventId: 'menu-save',
     shortcutId: 'save',
     keywords: ['save', 'store', 'write', 'disk'],
     enablement: isDirty,
@@ -295,7 +288,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Save As',
     icon: SaveAll,
     group: 'actions',
-    menuEventId: 'menu-save-as',
     keywords: ['save', 'save as', 'export', 'rename', 'file'],
     run: () => void doc().saveAs(),
   },
@@ -338,7 +330,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Undo',
     icon: Undo2,
     group: 'actions',
-    menuEventId: 'menu-undo',
     shortcutId: 'undo',
     keywords: ['undo', 'revert', 'history'],
     enablement: canUndo,
@@ -359,7 +350,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Redo',
     icon: Redo2,
     group: 'actions',
-    menuEventId: 'menu-redo',
     shortcutId: 'redo',
     keywords: ['redo', 'repeat', 'history'],
     enablement: canRedo,
@@ -377,7 +367,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Cut',
     icon: Scissors,
     group: 'actions',
-    menuEventId: 'menu-cut',
     keywords: ['cut', 'clipboard', 'selection'],
     // TODO(Clipboard API): document.execCommand is deprecated but
     // universally supported — replacing it is not this milestone.
@@ -390,7 +379,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Copy',
     icon: Copy,
     group: 'actions',
-    menuEventId: 'menu-copy',
     keywords: ['copy', 'clipboard', 'duplicate'],
     // TODO(Clipboard API): see cut — execCommand v1, not this milestone.
     run: () => {
@@ -402,7 +390,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Paste',
     icon: ClipboardPaste,
     group: 'actions',
-    menuEventId: 'menu-paste',
     keywords: ['paste', 'clipboard'],
     // Enablement omitted by law: clipboard emptiness is not cheaply/
     // synchronously readable (async + permission-gated) — never guess.
@@ -416,7 +403,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Toggle Dark Mode',
     icon: Moon,
     group: 'actions',
-    menuEventId: 'menu-toggle-dark-mode',
     keywords: ['dark', 'light', 'theme', 'mode', 'night'],
     run: () => {
       const { config, setTheme } = cfg();
@@ -443,7 +429,6 @@ export const COMMANDS: CommandAction[] = [
     title: 'Quit',
     icon: LogOut,
     group: 'actions',
-    menuEventId: 'menu-quit',
     keywords: ['quit', 'exit', 'close', 'shutdown'],
     requiresSafeQuit: true,
     run: async () => {
@@ -547,8 +532,8 @@ export const COMMANDS: CommandAction[] = [
   {
     // M-A11Y — the Accessibility Check panel: the document-content
     // checker (missing alt text, heading hierarchy, color contrast),
-    // on-demand from the Review tab or the palette. Palette-only — no
-    // menuEventId, zero Rust surface (the tableSidebar precedent).
+    // on-demand from the Review tab or the palette. Palette-only,
+    // zero Rust surface (the tableSidebar precedent).
     id: 'accessibilityCheck',
     title: 'Check Accessibility',
     icon: PersonStanding,
@@ -575,7 +560,7 @@ export const COMMANDS: CommandAction[] = [
   {
     // TRANSLATE — the Review tab's on-demand translation (the
     // accessibilityCheck twin): opens the docked panel. Palette-only —
-    // no menuEventId, zero Rust surface beyond the translate wire
+    // zero Rust surface beyond the translate wire
     // commands the consented runs invoke.
     id: 'translateSidebar',
     title: 'Translate',
@@ -590,7 +575,7 @@ export const COMMANDS: CommandAction[] = [
     // STATISTICS — the Review tab's dashboard sidebar (the
     // accessibilityCheck twin): headline-number cards + the
     // heading-delimited region list, live while open. Palette-only —
-    // no menuEventId, zero Rust surface (the tableSidebar precedent).
+    // zero Rust surface (the tableSidebar precedent).
     id: 'statisticsSidebar',
     title: 'Document Statistics (Sidebar)',
     icon: ChartColumn,
@@ -1228,8 +1213,4 @@ export function setImageRadiusOnSelection(value: number): number | null {
 
 export function getCommand(id: string): CommandAction | undefined {
   return COMMANDS.find((c) => c.id === id);
-}
-
-export function getCommandByMenuEvent(menuEventId: string): CommandAction | undefined {
-  return COMMANDS.find((c) => c.menuEventId === menuEventId);
 }
