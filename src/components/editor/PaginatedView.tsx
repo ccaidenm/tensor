@@ -65,6 +65,7 @@ import { useConfigStore } from '@/lib/config/store';
 import { useFocusStore } from '@/lib/layout/focusStore';
 import { useCommentStore } from '@/lib/comments/store';
 import { commentTrackingKey } from '@/lib/editor/CommentExtension';
+import { CommentsGutter, useCommentsGutterVisible } from '@/components/comments/CommentsGutter';
 import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
 import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
@@ -343,6 +344,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const styleEpoch = useStyleRegistryStore((s) => s.epoch);
   const zoomLevel = useConfigStore((s) => s.config.editor.zoomLevel);
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
+  // #COMMENTS — the shared visibility law: the gutter renders and the
+  // desk reserves the same width iff this is true (one selector, the
+  // two can never drift).
+  const boundaryVisible = useCommentsGutterVisible();
   // Display-only ink (M6): NPCs paint on screen; never a layout fact.
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   const showBreakMarks = useConfigStore((s) => s.config.editor.showBreakMarks);
@@ -2543,7 +2548,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
               base tier for every anchored thread, the active tier on
               top for the caret's thread). Document ink — visible
               regardless of the boundary toggle; the toggle governs the
-              gutter + space reservation only. */}
+              gutter only. */}
           {commentPaint && (
             <CommentHighlights threads={commentPaint.threads} active={commentPaint.active} />
           )}
@@ -2598,6 +2603,33 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 </div>
               );
             })()}
+          {/* #COMMENTS — the boundary gutter (the anchored thread cards).
+              A sibling of the stack in the UNSCALED zoom-wrapper: cards
+              render at 100% chrome size while their anchors read stack
+              coordinates × zoom (the getAnchorTop contract). left-full
+              attaches at the sheet's right edge — THE OVERLAY RULING:
+              the document never moves (no reservation); the column
+              overlays whatever whitespace exists. */}
+          {boundaryVisible && editor && (
+            <CommentsGutter
+              getAnchorTop={(threadId) => {
+                const st = commentTrackingKey.getState(editor.state);
+                if (!st || !layoutRef.current || !metricsRef.current) return null;
+                const span = st.ranges.find((r) => r.threadId === threadId);
+                if (!span) return null;
+                const rects = textRangeTextExtents(
+                  layoutRef.current.blocks,
+                  layoutRef.current.result,
+                  span.from,
+                  span.to,
+                  metricsRef.current,
+                  gap,
+                );
+                return rects[0] ? rects[0].top * z : null;
+              }}
+              scale={1}
+            />
+          )}
         </div>
       </div>
       {/* The link bubble anchors at PAINTED coords (linkCoordsFor) —

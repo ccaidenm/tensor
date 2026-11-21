@@ -55,6 +55,40 @@ export interface CommentRange {
   to: number;
 }
 
+/** A word character for the caret fallback (letters, digits, and
+ *  in-word apostrophes — both spellings). Not the spell layer's
+ *  segmentation (that's LanguageTool's); this is "what a user means
+ *  by the word the cursor is in". */
+const WORD_CHAR = /[\p{L}\p{N}'’]/u;
+
+/**
+ * #COMMENTS — the caret fallback: the word around a position, or null
+ * when the caret sits in no word (whitespace / an empty block — the
+ * caller toasts). A caret at a word/space boundary reads the word on
+ * its text side (the space belongs to no word) — before, inside, and
+ * after a word all mean that word, the selection intuition.
+ */
+export function wordAround(doc: PMNode, pos: number): { from: number; to: number } | null {
+  const $pos = doc.resolve(pos);
+  let from = pos;
+  let to = pos;
+  const before = $pos.nodeBefore;
+  if (before?.isText && before.text) {
+    for (let i = before.text.length - 1; i >= 0; i--) {
+      if (!WORD_CHAR.test(before.text[i]!)) break;
+      from--;
+    }
+  }
+  const after = $pos.nodeAfter;
+  if (after?.isText && after.text) {
+    for (let i = 0; i < after.text.length; i++) {
+      if (!WORD_CHAR.test(after.text[i]!)) break;
+      to++;
+    }
+  }
+  return from === to ? null : { from, to };
+}
+
 export interface CommentTrackingState {
   ranges: CommentRange[];
 }
@@ -177,7 +211,12 @@ export const CommentMark = Mark.create({
       setComment:
         (threadId: string) =>
         ({ state, tr, dispatch }) => {
-          const { selection } = state;
+          // tr.selection (NOT state.selection): a chained
+          // setTextSelection() (the caret→word fallback path) updates
+          // the TRANSACTION's selection — reading the state's would
+          // anchor the pre-selection range. Unchained calls are
+          // identical (no prior steps).
+          const { selection } = tr;
           if (selection.empty) return false;
           if (dispatch) {
             tr.addMark(selection.from, selection.to, state.schema.marks.comment.create({ threadId }));

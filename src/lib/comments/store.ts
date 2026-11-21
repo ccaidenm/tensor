@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
+import { announce } from '@/lib/accessibility/announce';
 
 /**
  * #COMMENTS — the thread-content store, beside the document store.
@@ -208,6 +209,9 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
       };
     });
     useDocumentStore.getState().markDirty();
+    // THE SR LAW: thread state changes are announced (the aria-live
+    // region — polite, never assertive).
+    announce('Comment added');
   },
 
   cancelDraft: (threadId) => {
@@ -234,6 +238,7 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
       };
     });
     useDocumentStore.getState().markDirty();
+    announce('Reply posted');
   },
 
   editEntry: (threadId, entryId, text) => {
@@ -305,6 +310,7 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
       };
     });
     useDocumentStore.getState().markDirty();
+    announce('Comment deleted');
   },
 
   setResolved: (threadId, resolved) => {
@@ -321,6 +327,7 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
       };
     });
     useDocumentStore.getState().markDirty();
+    announce(resolved ? 'Comment thread resolved' : 'Comment thread reopened');
   },
 
   threadsForSave: () => Object.values(get().threads),

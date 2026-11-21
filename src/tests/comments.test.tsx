@@ -384,16 +384,9 @@ describe('#COMMENTS: layout invisibility (the recognized-quiet law)', () => {  i
 });
 
 describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () => {
-  it('addComment: a text selection opens the draft flow; a caret is a no-op', async () => {
+  it('addComment: a selection anchors it; a CARET anchors the word under it (the always-enabled ruling)', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settleLayout();
-
-    // Caret → refused, nothing written.
-    act(() => {
-      editor.commands.setTextSelection(3);
-    });
-    expect(runEditorCommand('addComment')).toBe(false);
-    expect(Object.keys(useCommentStore.getState().threads)).toHaveLength(0);
 
     // Text selection → the draft flow: anchor + empty first entry +
     // the draft flag (the composer's signal).
@@ -415,6 +408,59 @@ describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () 
     });
     expect(useCommentStore.getState().threads[tid]!.entries[0]!.text).toBe('my comment');
     expect(useCommentStore.getState().draftThreadId).toBeNull();
+
+    // THE CARET FALLBACK: park the caret INSIDE 'world' (pos 8) with
+    // no selection → the command anchors exactly that word, selects
+    // it (the user sees what got anchored), and opens the draft.
+    act(() => {
+      editor.commands.setTextSelection(8);
+    });
+    expect(runEditorCommand('addComment')).toBe(true);
+    const tid2 = useCommentStore.getState().draftThreadId!;
+    expect(tid2).toBeTruthy();
+    expect(tid2).not.toBe(tid);
+    expect(editor.state.selection.from).toBe(7);
+    expect(editor.state.selection.to).toBe(12); // 'world' selected
+    expect(markedRanges(editor)).toEqual([
+      { threadId: tid, text: 'hello' },
+      { threadId: tid2, text: 'world' },
+    ]);
+  });
+
+  it('addComment with a caret in NO word toasts the guidance and writes nothing', async () => {
+    const { editor } = renderTensor();
+    await settleLayout();
+    const toastSpy = vi.spyOn(toast, 'add');
+
+    // An EMPTY paragraph: the caret sits in no word.
+    act(() => {
+      editor.commands.setContent({
+        type: 'doc',
+        content: [{ type: 'paragraph' }],
+      });
+      editor.commands.setTextSelection(1);
+    });
+    expect(runEditorCommand('addComment')).toBe(true); // handled (the toast)
+    expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'info' }));
+    expect(markedRanges(editor)).toEqual([]);
+    expect(Object.keys(useCommentStore.getState().threads)).toHaveLength(0);
+    expect(useCommentStore.getState().draftThreadId).toBeNull();
+    toastSpy.mockRestore();
+  });
+
+  it('wordAround reads the word on the caret\'s text side at boundaries', async () => {
+    // NOTE: PM's DOM parsing normalizes whitespace (runs collapse —
+    // 'hello  world' parses as 'hello world'), so the boundary truth
+    // here is single-spelled.
+    const { editor } = renderTensor('<p>hello world</p>');
+    await settleLayout();
+    const { wordAround } = await import('@/lib/editor/CommentExtension');
+    const doc = editor.state.doc;
+    expect(wordAround(doc, 3)).toEqual({ from: 1, to: 6 }); // inside 'hello'
+    expect(wordAround(doc, 6)).toEqual({ from: 1, to: 6 }); // caret ON the space — the word on its text side
+    expect(wordAround(doc, 7)).toEqual({ from: 7, to: 12 }); // before 'world'
+    expect(wordAround(doc, 12)).toEqual({ from: 7, to: 12 }); // after 'world' (doc end)
+    expect(wordAround(doc, 0)).toBeNull(); // before the paragraph — no word
   });
 
   it('addComment refuses an image/node selection (non-text anchors out of scope)', async () => {
@@ -502,27 +548,28 @@ describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () 
     expect(markedRanges(editor)).toHaveLength(1);
   });
 
-  it('the palette dispatches the SAME body, with selection-gated enablement', async () => {
+  it('the palette dispatches the SAME body, ALWAYS enabled (the caret anchors the word)', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settleLayout();
 
     const cmd = getCommand('addComment')!;
+    // A bare caret is no longer a disabled state — the ruling.
     act(() => {
-      editor.commands.setTextSelection(3); // caret
-    });
-    expect(cmd.enablement?.()).toBe(false);
-    act(() => {
-      editor.commands.setTextSelection({ from: 1, to: 6 });
+      editor.commands.setTextSelection(3);
     });
     expect(cmd.enablement?.()).toBe(true);
     act(() => {
       cmd.run();
     });
-    expect(useCommentStore.getState().draftThreadId).toBeTruthy();
-    expect(markedRanges(editor)).toHaveLength(1);
+    const tid = useCommentStore.getState().draftThreadId!;
+    expect(tid).toBeTruthy();
+    // The caret fallback anchored the word + selected it.
+    expect(markedRanges(editor)).toEqual([{ threadId: tid, text: 'hello' }]);
+    expect(editor.state.selection.from).toBe(1);
+    expect(editor.state.selection.to).toBe(6);
   });
 
-  it('the floating toolbar comment button: caret-disabled, selection-wired to the one body', async () => {
+  it('the floating toolbar comment button: always enabled, wired to the one body', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settleLayout();
 
@@ -530,26 +577,18 @@ describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () 
     act(() => {
       editor.commands.setTextSelection(3); // bare caret
     });
-    const { rerender } = render(
+    render(
       <FloatingToolbar editor={editor} position={position} containerTop={0} containerLeft={0} />,
     );
-    let btn = document.querySelector('button[aria-label="Insert Comment"]') as HTMLButtonElement;
+    const btn = document.querySelector('button[aria-label="Insert Comment"]') as HTMLButtonElement;
     expect(btn).not.toBeNull();
-    expect(btn.disabled).toBe(true);
-
-    act(() => {
-      editor.commands.setTextSelection({ from: 1, to: 6 });
-    });
-    rerender(
-      <FloatingToolbar editor={editor} position={position} containerTop={0} containerLeft={0} />,
-    );
-    btn = document.querySelector('button[aria-label="Insert Comment"]') as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     act(() => {
       fireEvent.click(btn);
     });
-    expect(useCommentStore.getState().draftThreadId).toBeTruthy();
-    expect(markedRanges(editor)).toHaveLength(1);
+    const tid = useCommentStore.getState().draftThreadId!;
+    expect(tid).toBeTruthy();
+    expect(markedRanges(editor)).toEqual([{ threadId: tid, text: 'hello' }]);
   });
 });
 

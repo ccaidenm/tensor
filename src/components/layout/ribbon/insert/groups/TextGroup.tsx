@@ -4,6 +4,7 @@ import { useEditorState } from '@tiptap/react';
 import { RibbonGroup } from '@/components/layout/RibbonGroup';
 import { LinkButton } from '../../LinkButton';
 import { IconButton } from '../../../IconButton';
+import { getCommand } from '@/lib/commands/registry';
 import { SymbolButton } from '../SymbolButton';
 import { EquationButton } from '../EquationButton';
 import { HorizontalRuleButton } from '../HorizontalRuleButton';
@@ -22,11 +23,17 @@ export function TextGroup({ editor }: { editor: Editor }) {
   return (
     <RibbonGroup showSeparator={false}>
       <LinkButton editor={editor} />
+      {/* #COMMENTS — dispatches the ONE command body (the registry's
+          law: the ribbon, the floating toolbar, Ctrl+Alt+M, and the
+          palette share EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED
+          (the user's ruling): a bare caret anchors the word it sits
+          in — the command body's toasts are the loud fallbacks, not
+          disabled states. */}
       <IconButton
         label="Comment"
         icon={<MessageSquarePlus size={16} />}
-        onClick={() => {}}
-        disabled
+        shortcutId="addComment"
+        onClick={() => getCommand('addComment')?.run()}
       />
       <IconButton
         label="Mark Index Entry"

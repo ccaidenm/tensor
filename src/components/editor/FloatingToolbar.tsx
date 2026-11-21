@@ -65,14 +65,6 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       // caret in a cell never sees it: merge is meaningless on one cell.
       isCellSelection: ctx.editor?.state.selection instanceof CellSelection,
       hasMergedCells: ctx.editor?.state ? selectionHasMergedCells(ctx.editor.state) : false,
-      // #COMMENTS — commentable = a non-empty TEXT selection (a caret
-      // is a no-op; an image NodeSelection is out of scope — the image
-      // strip's own button stays a disabled stub). The toolbar button
-      // disables in sync with the command body's guards.
-      canComment: (() => {
-        const sel = ctx.editor?.state.selection;
-        return !!sel && !sel.empty && !(sel instanceof NodeSelection);
-      })(),
     }),
   });
 
@@ -203,12 +195,13 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       <LinkButton editor={editor} />
       {/* #COMMENTS — dispatches the ONE command body (the registry's
           law: the toolbar, Ctrl+Alt+M, and the palette share
-          EDITOR_COMMAND_MAP.addComment). Disabled for a bare caret —
-          the command needs a non-empty text selection. */}
+          EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED (the user's
+          ruling): a bare caret anchors the word it sits in. (This
+          strip only renders for text contexts — the image strip's
+          own stub stays disabled, non-text anchors out of scope.) */}
       <IconButton
         label="Insert Comment"
         icon={<MessageSquarePlus size={16} />}
-        disabled={!attrs?.canComment}
         shortcutId="addComment"
         onClick={() => getCommand('addComment')?.run()}
       />

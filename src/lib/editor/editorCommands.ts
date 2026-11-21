@@ -7,6 +7,7 @@ import { useLinkEditorStore } from '@/lib/editor/linkEditorStore';
 import { stepFontSize } from '@/lib/editor/fontSize';
 import { useDocumentStore } from '@/lib/document/store';
 import { selectionInBand } from '@/lib/editor/headerFooterCommands';
+import { wordAround } from '@/lib/editor/CommentExtension';
 import { useCommentStore } from '@/lib/comments/store';
 import { toast } from '@/components/ui/toast';
 
@@ -56,15 +57,21 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
     useLinkEditorStore.getState().requestInsert();
     return true;
   },
-  // #COMMENTS — THE ONE COMMENT BODY: the floating toolbar, Ctrl+Alt+M,
-  // and the palette all land here (the ShortcutsExtension + registry
-  // dispatch through this map; nothing re-implements a piece of it).
-  // Guards: a non-empty TEXT selection (a caret is a no-op — the
-  // toolbar disables itself in sync); an image NodeSelection is refused
-  // (non-text anchors are out of scope — the image strip keeps its own
-  // stub disabled); headers/footers are refused with a TOAST (the
-  // referenceTable band precedent — bands are separate editor
-  // instances, and a loud no beats a silent half-anchored comment).
+  // #COMMENTS — THE ONE COMMENT BODY: the floating toolbar, the Insert
+  // tab, Ctrl+Alt+M, and the palette all land here (the
+  // ShortcutsExtension + registry dispatch through this map; nothing
+  // re-implements a piece of it).
+  // Guards: an image/node selection is refused (non-text anchors are
+  // out of scope — the image strip keeps its own stub disabled);
+  // headers/footers are refused with a TOAST (the referenceTable band
+  // precedent — bands are separate editor instances, and a loud no
+  // beats a silent half-anchored comment).
+  // ALWAYS ENABLED (the user's ruling): a BARE CARET anchors the word
+  // it sits in (wordAround — before/inside/after a word all mean that
+  // word); a caret in NO word (whitespace, an empty block) toasts the
+  // guidance instead. The word path SELECTS the word (the user sees
+  // what got anchored — GDocs behavior) and anchors it in ONE chained
+  // transaction → ONE undo step.
   // THE WRITE-ORDER LAW: startDraft (store record) BEFORE setMark —
   // the tracking plugin's janitor must never observe a mark whose
   // thread is not yet in the store. The mark is inclusive, so the
@@ -72,7 +79,6 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   // orphans the thread — the defined states).
   addComment: (editor) => {
     const { selection } = editor.state;
-    if (selection.empty) return false;
     if (selection instanceof NodeSelection) return false;
     if (selectionInBand(editor)) {
       toast.add({
@@ -81,6 +87,28 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
         type: 'warning',
       });
       return true;
+    }
+    // THE CARET FALLBACK FIRST (the always-enabled ruling): resolve the
+    // word BEFORE creating anything — a caret in no word toasts the
+    // guidance and writes nothing at all.
+    if (selection.empty) {
+      const word = wordAround(editor.state.doc, selection.from);
+      if (!word) {
+        toast.add({
+          title: 'Nothing to comment on',
+          description: 'Place the cursor in a word, or select some text, then add a comment.',
+          type: 'info',
+        });
+        return true;
+      }
+      const threadId = nanoid();
+      // THE WRITE-ORDER LAW: the store record exists before any mark
+      // can land (the janitor must never observe an unknown mark).
+      useCommentStore.getState().startDraft(threadId);
+      // Select the word (the user sees what got anchored — GDocs
+      // behavior) + anchor it in ONE chained transaction → ONE undo
+      // step. setComment reads tr.selection (the chained range).
+      return editor.chain().setTextSelection(word).setComment(threadId).run();
     }
     const threadId = nanoid();
     useCommentStore.getState().startDraft(threadId);

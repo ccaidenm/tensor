@@ -1,5 +1,4 @@
 import type { LucideIcon } from 'lucide-react';
-import { NodeSelection } from '@tiptap/pm/state';
 import {
   AlignCenter,
   AlignJustify,
@@ -1106,17 +1105,15 @@ export const COMMANDS: CommandAction[] = [
   }),
   // #COMMENTS — the ONE comment body lives in EDITOR_COMMAND_MAP
   // (editorCommands.ts); this entry is the palette/metadata face of it.
-  // Enablement: a non-empty TEXT selection (cheap + sync — the same
-  // facts the command body re-guards).
+  // ALWAYS ENABLED (the user's ruling): a bare caret anchors the word
+  // it sits in; the body's guards (band toast, no-word toast) are the
+  // loud fallbacks, not disabled states.
   editorCommand('addComment', {
     title: 'Add Comment',
     icon: MessageSquarePlus,
     group: 'actions',
     shortcutId: 'addComment',
-    enablement: () => {
-      const sel = doc().editor?.state.selection;
-      return !!sel && !sel.empty && !(sel instanceof NodeSelection);
-    },
+    enablement: () => !!doc().editor,
     keywords: ['comment', 'note', 'annotate', 'remark', 'feedback', 'review', 'margin'],
   }),
   editorCommand('insertEquation', {
