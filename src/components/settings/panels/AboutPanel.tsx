@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 import licensesData from '@/generated/licenses.json';
+import { APP_VERSION } from '@/generated/version';
 import { cn } from 'cn';
 
 export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
@@ -16,9 +17,10 @@ export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'licenses', label: 'Third-Party Licenses' },
 ];
 
-// TODO: replace with the real GitHub org/repo once decided.
-const GITHUB_REPO_URL = 'https://github.com/aestriex/word-processor';
-const APP_VERSION = '0.1.0'; // TODO: wire to actual package.json/Cargo.toml version at build time
+// #97 — the repo is the app (the git remote is the source of truth);
+// the version is single-sourced from tauri.conf.json at build time
+// (src/generated/version.ts, the generate-licenses pattern).
+const GITHUB_REPO_URL = 'https://github.com/ccaidenm/tensor';
 const LICENSE = 'AGPL-3.0';
 
 interface LicenseEntry {
