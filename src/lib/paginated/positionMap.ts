@@ -499,14 +499,19 @@ export function textRangeLineRects(
   pageGap: number,
   bandPage?: number,
   surface?: 'band' | 'body',
-  bandBlockIds?: ReadonlySet<string>
+  bandBlockIds?: ReadonlySet<string>,
+  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top) —
+   *  the y-only pageTops walk is WRONG for columns ≥ 2 (page 1's true
+   *  top is its row's, not the stack stride). Absent ≡ the legacy walk
+   *  (columns 1 — bit-identical). */
+  tops?: number[]
 ): PaintedRect[] {
   const spans = matchSpans(blocks, result, from, to, bandPage, surface, bandBlockIds);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
   // #58 — per-page geometry: the cumulative tops table replaces the
   // uniform stride; each span's rect reads ITS page's contentBox.
-  const tops = pageTops(result.pages, pageGap);
+  const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
     const cb = result.pages[line.pageIndex]!.contentBox;
@@ -539,7 +544,7 @@ export function textRangeLineRects(
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,
-      top: tops[line.pageIndex]! + cb.y + line.rect.y,
+      top: topsTable[line.pageIndex]! + cb.y + line.rect.y,
       width: cx2 - cx1,
       height: line.rect.height,
     };
@@ -564,14 +569,19 @@ export function textRangeTextExtents(
   pageGap: number,
   /** M-HEADER-FOOTER-3: the active band page (bubble anchors); absent
    *  paints every echo (search highlights — the text is on every page). */
-  bandPage?: number
+  bandPage?: number,
+  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top) —
+   *  the y-only pageTops walk below is WRONG for column ≥ 2 (page 1's
+   *  true top is its row's, not the stack stride). Absent ≡ the legacy
+   *  walk (columns 1 — bit-identical). */
+  tops?: number[]
 ): PaintedRect[] {
   const spans = matchSpans(blocks, result, from, to, bandPage);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
   // #58 — per-page geometry: the cumulative tops table replaces the
   // uniform stride; each span's rect reads ITS page's contentBox.
-  const tops = pageTops(result.pages, pageGap);
+  const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
     const cb = result.pages[line.pageIndex]!.contentBox;
@@ -619,7 +629,7 @@ export function textRangeTextExtents(
         descent = metrics.descent(style);
       }
     }
-    const top = tops[line.pageIndex]! + cb.y + line.rect.y + line.baseline - ascent;
+    const top = topsTable[line.pageIndex]! + cb.y + line.rect.y + line.baseline - ascent;
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,
@@ -653,7 +663,9 @@ export function textRangeUnderlineRects(
   from: number,
   to: number,
   metrics: TextMetrics,
-  pageGap: number
+  pageGap: number,
+  /** #101 — SPLIT VIEW: the grid's ROW tops (see textRangeLineRects). */
+  tops?: number[]
 ): PaintedRect[] {
   void metrics; // (font-size comes from the runs' styles; kept for signature parity)
   const spans = matchSpans(blocks, result, from, to);
@@ -661,7 +673,7 @@ export function textRangeUnderlineRects(
   if (!page0 || spans.length === 0) return [];
   // #58 — per-page geometry: the cumulative tops table replaces the
   // uniform stride; each span's rect reads ITS page's contentBox.
-  const tops = pageTops(result.pages, pageGap);
+  const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
     const cb = result.pages[line.pageIndex]!.contentBox;
@@ -703,7 +715,7 @@ export function textRangeUnderlineRects(
     }
     const thickness = Math.max(SPELL_LINE_MIN_THICKNESS, Math.round(fontSize / 12));
     const top =
-      tops[line.pageIndex]! + cb.y + line.rect.y + line.baseline + SPELL_LINE_OFFSET * fontSize;
+      topsTable[line.pageIndex]! + cb.y + line.rect.y + line.baseline + SPELL_LINE_OFFSET * fontSize;
     return {
       pageIndex: line.pageIndex,
       left: cb.x + cx1,

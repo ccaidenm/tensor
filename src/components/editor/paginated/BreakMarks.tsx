@@ -49,13 +49,17 @@ export function BreakMarks({
   facts,
   result,
   pageGap,
+  tops: topsProp,
 }: {
   facts: readonly BreakFact[];
   result: LayoutResult;
   pageGap: number;
+  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top);
+   *  absent ≡ the legacy y-only walk (columns 1 — bit-identical). */
+  tops?: number[];
 }) {
   if (facts.length === 0) return null;
-  const tops = pageTops(result.pages, pageGap);
+  const tops = topsProp ?? pageTops(result.pages, pageGap);
   const marks: { key: string; label: string; style: CSSProperties }[] = [];
   for (const fact of facts) {
     if (!fact.afterBlockId) continue;

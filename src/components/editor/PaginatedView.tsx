@@ -31,6 +31,7 @@ import {
   textRangeTextExtents,
   textRangeUnderlineRects,
   wordRangeAround,
+  lineForOffset,
   type CaretGeometry,
   type PaintedRect,
 } from '@/lib/paginated/positionMap';
@@ -71,7 +72,7 @@ import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/re
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
 import { ensureStyleSync } from '@/lib/styles/styleExtensions';
 import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
-import { pageIndexAtY, pageTops, stackSize } from '@/lib/paginated/pageStack';
+import { pageGridLayout, pageIndexAtPoint } from '@/lib/paginated/pageStack';
 import { enableRegion, findBandContainer, type BandWhich } from '@/lib/editor/headerFooterCommands';
 import { FINAL_SECTION_ID } from '@/lib/editor/HeaderFooterNodes';
 import { PageSheet } from './paginated/PageSheet';
@@ -158,6 +159,9 @@ interface LayoutState {
   result: LayoutResult;
   /** #58 — the NPC break facts (the BreakMarks layer's sidecar). */
   breakFacts: import('@/lib/paginated/adapter').AdapterResult['breakFacts'];
+  /** #101 — SPLIT VIEW: the column-aware page grid (the tops, the
+   *  lefts, the stack size) the desk renders from. */
+  pageGrid: import('@/lib/paginated/pageStack').PageGridLayout;
   /**
    * M-HEADER-FOOTER-3: the band blocks' ids — the cross-surface
    * selection clamp's membership set (from the adapter sidecar).
@@ -324,6 +328,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // read fresh at call time (L4) — these selectors never feed options
   // directly.
   const pageSetup = useDocumentStore((s) => s.pageSetup);
+  // #101 — SPLIT VIEW: the desk's page arrangement (1 = the classic
+  // stack). A store subscription like its siblings: its flips schedule
+  // the warm relayout (the frame adjustment lives at the commit).
+  const pageColumns = useConfigStore((s) => s.config.editor.pageColumns);
   // #48 — the per-page styles (the positional map): paint-only ink,
   // so a map change re-renders without a relayout (the pageSetup
   // subscription's twin).
@@ -593,7 +601,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // selection band would paint a full line-box stripe OVER the
     // image (and zero-width before the object-aware walk). The
     // caret is suppressed too: a NodeSelection has no text caret.
-    const tops = pageTops(current.result.pages, useDocumentStore.getState().pageSetup.pageGap);
+    const tops = current.pageGrid.tops;
     const stackRectOf = (pr: import('@tensor-editor/engine').PlacedRect): PaintedRect => ({
       pageIndex: pr.pageIndex,
       left: current.result.pages[pr.pageIndex]!.contentBox.x + pr.rect.x,
@@ -672,7 +680,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             useDocumentStore.getState().pageSetup.pageGap,
             bandPage,
             surface,
-            current.bandBlockIds
+            current.bandBlockIds,
+            current.pageGrid.tops
           );
     if (isInlineImageNodeSelection || isCellSelection || isReferenceTableNodeSelection) setCaret(null);
     setSelRects(rects);
@@ -748,12 +757,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const all: PaintedRect[] = [];
     for (const match of st.matches) {
       all.push(
-        ...textRangeTextExtents(current.blocks, current.result, match.from, match.to, m, gap)
+        ...textRangeTextExtents(current.blocks, current.result, match.from, match.to, m, gap, undefined, current.pageGrid.tops)
       );
     }
     const cur = st.currentIndex >= 0 ? st.matches[st.currentIndex] : undefined;
     const currentRects = cur
-      ? textRangeTextExtents(current.blocks, current.result, cur.from, cur.to, m, gap)
+      ? textRangeTextExtents(current.blocks, current.result, cur.from, cur.to, m, gap, undefined, current.pageGrid.tops)
       : [];
     setSearchPaint({ all, current: currentRects });
     if (st.currentIndex !== prevSearchIndexRef.current) {
@@ -802,7 +811,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const byThread = new Map<string, PaintedRect[]>();
     const active: PaintedRect[] = [];
     for (const range of st.ranges) {
-      const rects = textRangeTextExtents(current.blocks, current.result, range.from, range.to, m, gap);
+      const rects = textRangeTextExtents(current.blocks, current.result, range.from, range.to, m, gap, undefined, current.pageGrid.tops);
       if (rects.length === 0) continue;
       const arr = byThread.get(range.threadId) ?? [];
       arr.push(...rects);
@@ -828,7 +837,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         e.from,
         e.to,
         metricsRef.current!,
-        gap
+        gap,
+        current.pageGrid.tops
       )) {
         bars.push({ ...rect, kind: e.kind });
       }
@@ -975,7 +985,41 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           spliced: engineRef.current!.lastStats.blocksSpliced,
         });
       }
-      const next: LayoutState = { blocks: adapted.blocks, result, styleEpoch: registryNow.epoch, bandBlockIds: adapted.bandBlockIds, breakFacts: adapted.breakFacts };
+      // #101 — SPLIT VIEW: THE FRAME ADJUSTMENT (the STACK frame). The
+      // shell arranges the pages row-major, so each page's stack-local
+      // origin gains its COLUMN offset — folded into contentBox.x ONCE
+      // here. The STACK-frame consumers then land in the page's own
+      // column with zero per-site changes: the stack-local overlay
+      // siblings (selection bands, the caret, spell/search/comment
+      // paint, break marks), the hit-testers, the coords callbacks,
+      // and the positionMap helpers that build stack rects internally.
+      // The rect.x values stay content-relative. columns 1 = the
+      // identity (no adjustment).
+      // THE OTHER FRAME: everything mounted INSIDE a PageSheet lives in
+      // the PAGE frame (the sheet is already positioned at the column's
+      // left), so the fold rolls back OFF at the sheet boundary — the
+      // render's `localPage` (the exact inverse, the commit grid's
+      // left) — before any in-sheet consumer (text canvases, images,
+      // tables, equations, band slots, gutters) reads it. Two frames,
+      // two one-place transformations.
+      const pageColumns = useConfigStore.getState().config.editor.pageColumns;
+      const grid = pageGridLayout(result.pages, pageSetup.pageGap, pageColumns);
+      const adjustedPages =
+        pageColumns > 1
+          ? result.pages.map((p, i) => ({
+              ...p,
+              contentBox: { ...p.contentBox, x: p.contentBox.x + grid.lefts[i]! },
+            }))
+          : result.pages;
+      const adjusted: LayoutState = {
+        blocks: adapted.blocks,
+        result: { ...result, pages: adjustedPages },
+        styleEpoch: registryNow.epoch,
+        bandBlockIds: adapted.bandBlockIds,
+        breakFacts: adapted.breakFacts,
+        pageGrid: grid,
+      };
+      const next: LayoutState = adjusted;
       layoutRef.current = next;
       // No flushSync — React batches setLayout calls
       // from N input events into ONE render + ONE useLayoutEffect paint
@@ -1043,7 +1087,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       metricsRef.current!,
       useDocumentStore.getState().pageSetup.pageGap,
       (e.clientX - r.left) / z,
-      (e.clientY - r.top) / z
+      (e.clientY - r.top) / z,
+      useConfigStore.getState().config.editor.pageColumns
     );
     if (!hit) return null;
     // M-HEADER-FOOTER-3: every band hit records its page — the echo
@@ -1125,10 +1170,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const sr = stack.getBoundingClientRect();
     const localX = (e.clientX - sr.left) / z;
     const localY = (e.clientY - sr.top) / z;
-    const tops = pageTops(layout.result.pages, pageSetup.pageGap);
-    const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
+    // The COMMIT grid (rides the layout with the folded frames): the
+    // point hit and the content offsets stay internally consistent
+    // even in the one-frame window after a columns flip.
+    const grid = layout.pageGrid;
+    const pageIndex = pageIndexAtPoint(grid, layout.result.pages, localX, localY, pageSetup.pageGap);
     const page = layout.result.pages[pageIndex]!;
-    const inPageY = localY - tops[pageIndex]! - page.contentBox.y;
+    const inPageY = localY - grid.tops[pageIndex]! - page.contentBox.y;
     const inPageX = localX - page.contentBox.x;
     const inside = (p: (typeof layout.result.placed)[number]) =>
       inPageX >= p.rect.x &&
@@ -1208,9 +1256,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (!stack) return;
     const z = useConfigStore.getState().config.editor.zoomLevel / 100;
     const sr = stack.getBoundingClientRect();
+    const localX = (e.clientX - sr.left) / z;
     const localY = (e.clientY - sr.top) / z;
-    const tops = pageTops(layout.result.pages, pageSetup.pageGap);
-    const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
+    // #101 — SPLIT VIEW: the POINT hit (the grid's row/column law) —
+    // a y spans two pages side by side; the band dblclick belongs to
+    // the page the user double-clicked, not the row's last member.
+    const pageIndex = pageIndexAtPoint(
+      layout.pageGrid,
+      layout.result.pages,
+      localX,
+      localY,
+      pageSetup.pageGap,
+    );
+    const tops = layout.pageGrid.tops;
     const page = layout.result.pages[pageIndex]!;
     const inPageY = localY - tops[pageIndex]!;
     const which: BandWhich | null =
@@ -1275,10 +1333,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       const sr = stack.getBoundingClientRect();
       const localX = (e.clientX - sr.left) / z;
       const localY = (e.clientY - sr.top) / z;
-      const tops = pageTops(layout.result.pages, pageSetup.pageGap);
-      const pageIndex = pageIndexAtY(tops, layout.result.pages.length, localY);
+      // The COMMIT grid (rides the layout with the folded frames).
+      const grid = layout.pageGrid;
+      const pageIndex = pageIndexAtPoint(grid, layout.result.pages, localX, localY, pageSetup.pageGap);
       const page = layout.result.pages[pageIndex]!;
-      const inPageY = localY - tops[pageIndex]! - page.contentBox.y;
+      const inPageY = localY - grid.tops[pageIndex]! - page.contentBox.y;
       const inPageX = localX - page.contentBox.x;
       const inside = (p: (typeof layout.result.placed)[number]) =>
         inPageX >= p.rect.x &&
@@ -1346,7 +1405,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         metricsRef.current!,
         useDocumentStore.getState().pageSetup.pageGap,
         (e.clientX - rs.left) / rz,
-        (e.clientY - rs.top) / rz
+        (e.clientY - rs.top) / rz,
+        useConfigStore.getState().config.editor.pageColumns
       );
       const refBlock = refHit ? layout.blocks.find((b) => b.id === refHit.blockId) : undefined;
       if (refBlock?.reference) {
@@ -1478,11 +1538,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         selectionInBand(editor) ? activeBandPage() : undefined
       );
       if (!caretGeom) return; // selection outside text: nothing to reveal
-      const { pageSetup: setupNow } = useDocumentStore.getState();
       const zoomNow = useConfigStore.getState().config.editor.zoomLevel / 100;
       // #58: the caret's OWN page carries the geometry (mixed sections).
       const caretPage = current.result.pages[caretGeom.pageIndex]!;
-      const topsNow = pageTops(current.result.pages, setupNow.pageGap);
+      const topsNow = current.pageGrid.tops;
       scrollCaretIntoView(
         stack,
         caretStackRect(
@@ -1577,7 +1636,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     relayoutRef.current();
     // M-HEADER-FOOTER-2: showHeadersFooters rides the LAYOUT (the band
     // strip above) — its flips relayout through this same warm path.
-  }, [pageSetup, defaultFontFamily, defaultFontSize, styleEpoch, showHeadersFooters]);
+    // #101 — SPLIT VIEW: pageColumns rides too — the frame adjustment
+    // (the column offsets folded into contentBox.x) lives at the
+    // commit, so a columns flip MUST re-commit or the overlays/caret
+    // keep the previous arrangement's frames.
+  }, [pageSetup, defaultFontFamily, defaultFontSize, styleEpoch, showHeadersFooters, pageColumns]);
 
   // M-HEADER-FOOTER-2: settings writes (differentFirstPage) relayout
   // through the same warm path — the flag feeds the adapter's band
@@ -2054,14 +2117,13 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const geom = caretGeometry(current.blocks, current.result, pos, metricsRef.current!, activeBandPage());
     const page0 = current.result.pages[0];
     if (!geom || !page0) return { left: 0, top: 0 };
-    const { pageSetup: setup } = useDocumentStore.getState();
     // #58: the caret's OWN page carries the geometry (mixed sections).
     const caretPage = current.result.pages[geom.pageIndex]!;
     const r = caretStackRect(
       geom,
       caretPage.contentBox.x,
       caretPage.contentBox.y,
-      pageTops(current.result.pages, setup.pageGap)[geom.pageIndex]!
+      current.pageGrid.tops[geom.pageIndex]!
     );
     return { left: sr.left + r.left * z, top: sr.top + (r.top + r.height) * z };
   }, []);
@@ -2085,14 +2147,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const z = useConfigStore.getState().config.editor.zoomLevel / 100;
     const sr = stack.getBoundingClientRect();
     const page = current.result.pages[placed.pageIndex]!;
-    const top = pageTops(current.result.pages, pageSetup.pageGap)[placed.pageIndex]!;
+    const top = current.pageGrid.tops[placed.pageIndex]!;
     return {
       left:
         sr.left +
         (page.contentBox.x + placed.rect.x + placed.rect.width / 2 - 160) * z,
       top: sr.top + (top + page.contentBox.y + placed.rect.y + placed.rect.height) * z + 4,
     };
-  }, [pageSetup.pageGap]);
+  }, []);
   const equationBubbleRef = useRef<HTMLDivElement>(null);
   const { state: equationState, close: closeEquationEditor } = useEquationEditor(
     editor,
@@ -2227,13 +2289,49 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const slot = result.pages[line.pageIndex]?.columns?.[line.column];
     return slot ? { left: slot.x, width: slot.width } : undefined;
   })();
+  // #101 — SPLIT VIEW: the caret's split column — WHICH strip wears
+  // the caret's model (indents/tabs/column frame); the other stays
+  // margins-only (Word's active-ruler law, one ruler per page).
+  const rulerSplitColumn = (() => {
+    if (!layout || !editor || pageColumns !== 2) return 0;
+    const head = editor.state.selection.head ?? editor.state.selection.from;
+    const block = layout.blocks.find((b) => head >= b.from && head <= b.to);
+    if (!block) return 0;
+    // The CARET'S OWN line — a block may SPAN the page break (its first
+    // line sits on the previous page while the caret is on this one);
+    // the block's first line would pin the model to the wrong strip.
+    const blockLines = result.lines.filter((l) => l.blockId === block.id && !l.band);
+    const line = lineForOffset(blockLines, head - block.from) ?? blockLines[0];
+    return (line?.pageIndex ?? 0) % 2;
+  })();
+  // #101 — SPLIT VIEW: the rulers read the PAGE-LOCAL frame — the
+  // fold's exact inverse (the commit grid's left). The folded
+  // contentBox.x is the STACK frame's origin; a ruler strip mounted
+  // over its own column must anchor its margin handles, rails, two-tone
+  // band, and tab stops to the page's OWN margins (the strip is already
+  // positioned at the column's left). columns 1 = the identity.
+  const localPageGeometry = (p: PageGeometry): PageGeometry => ({
+    ...p,
+    contentBox: { ...p.contentBox, x: p.contentBox.x - layout.pageGrid.lefts[p.index]! },
+  });
+  // #101 — SPLIT VIEW: the per-column ruler sets. Row-major pairing:
+  // column c's pages are the indices ≡ c (mod columns); their scales
+  // read the grid's ROW tops (row-mates share a top), never the y-only
+  // walk. columns 1 ≡ the full set with the internal pageTops (legacy).
+  const splitRulers = pageColumns === 2 && result.pages.length > 1;
+  const columnPages = (c: number) => result.pages.filter((_, i) => i % 2 === c);
+  const columnTops = (c: number) => columnPages(c).map((p) => pageGrid.tops[p.index]!);
   // #58 — the stack's cumulative arithmetic (mixed page sizes): the
   // sheet tops, the max width, the total height — one helper, shared
   // with the hit-testers and the overlays.
-  const pageTopTable = pageTops(result.pages, gap);
-  const stackDims = stackSize(result.pages, gap);
-  const stackW = stackDims.width;
-  const stackH = stackDims.height;
+  // #101 — SPLIT VIEW: the column-aware grid (the desk arrangement;
+  // 1 = the classic stack). The tops table keeps the name (every
+  // consumer below reads pageTopTable[page.index]).
+  const pageGrid = pageGridLayout(result.pages, gap, pageColumns);
+  const pageTopTable = pageGrid.tops;
+  const pageLeftTable = pageGrid.lefts;
+  const stackW = pageGrid.size.width;
+  const stackH = pageGrid.size.height;
   const rootRect = rootRef.current?.getBoundingClientRect();
   // The spell bubble's anchor: the flagged word's painted text extent
   // (stack-local pre-zoom) → viewport (the transform's scale applied —
@@ -2248,7 +2346,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       spellBubble.to,
       metricsRef.current!,
       gap,
-      activeBandPage() // the bubble anchors the ACTIVE echo (the click's page)
+      activeBandPage(), // the bubble anchors the ACTIVE echo (the click's page)
+      layout.pageGrid.tops
     );
     const bounds = paintedBounds(exts);
     const stack = stackRef.current;
@@ -2284,11 +2383,30 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         deskWrapper &&
         editor &&
         createPortal(
-          <VerticalRuler
-            pages={result.pages}
-            zoom={z}
-            editor={editor}
-          />,
+          splitRulers ? (
+            <>
+              {/* The LEFT edge rules the LEFT column; the RIGHT edge the
+                  right — each paints its own pages' scales off the grid's
+                  row tops (row-mates share a top; the y-only walk would
+                  double-paint the rows). */}
+              <VerticalRuler
+                pages={columnPages(0)}
+                tops={columnTops(0)}
+                zoom={z}
+                editor={editor}
+              />
+              <VerticalRuler
+                pages={columnPages(1)}
+                tops={columnTops(1)}
+                zoom={z}
+                editor={editor}
+                side="right"
+                testId="ruler-vertical-right"
+              />
+            </>
+          ) : (
+            <VerticalRuler pages={result.pages} zoom={z} editor={editor} />
+          ),
           deskWrapper,
         )}
       {/* Explicit outer size = natural stack dimensions x zoom, so scroll
@@ -2331,11 +2449,32 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           <TooltipProvider delay={200}>
           {result.pages.map((page) => {
             const pageGroups = groupsByPage.get(page.index) ?? [];
+            // #101 — SPLIT VIEW: THE SHEET FRAME (the coordinate-frame
+            // boundary). The commit folds the column offset into
+            // contentBox.x for the STACK frame — the stack-local
+            // siblings (selection bands, the caret, spell/search/
+            // comment paint, break marks) and the hit-testers read the
+            // folded pages. But everything mounted INSIDE this sheet
+            // lives in the PAGE frame: the sheet is already positioned
+            // at the column's left (the `left` prop), so its children
+            // must see the UNFOLDED margin — the fold rolls back OFF
+            // once here, its exact inverse (the commit grid's left;
+            // columns 1's lefts are all 0, the identity). Every
+            // in-sheet consumer below takes `localPage`; stack-level
+            // consumers outside this map keep the folded pages.
+            const localPage = {
+              ...page,
+              contentBox: {
+                ...page.contentBox,
+                x: page.contentBox.x - layout.pageGrid.lefts[page.index]!,
+              },
+            };
             return (
               <PageSheet
                 key={page.index}
-                geometry={page}
+                geometry={localPage}
                 top={pageTopTable[page.index]!}
+                left={pageLeftTable[page.index]!}
                 observeRef={observeSheet}
                 background={backgroundForPage(page.index, page.sectionIndex)}
               >
@@ -2347,7 +2486,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 {showWatermark &&
                   (visiblePages === null || visiblePages.has(page.index)) && (
                     <WatermarkLayer
-                      geometry={page}
+                      geometry={localPage}
                       watermark={watermarkForPage(page.sectionIndex)}
                       metrics={metricsRef.current!}
                       baseFontFamily={defaultFontFamily}
@@ -2359,7 +2498,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     field, split at the shell's two layer seams). */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <ImageLayer
-                    geometry={page}
+                    geometry={localPage}
                     placed={result.placed.filter(
                       (p) => p.pageIndex === page.index && p.z === 'behind' && p.kind === 'image',
                     )}
@@ -2370,7 +2509,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     tracks (above the sheet + behind-floats). */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <TableCellLayer
-                    geometry={page}
+                    geometry={localPage}
                     cells={result.placed.filter(
                       (p) => p.pageIndex === page.index && p.kind === 'tableCell',
                     )}
@@ -2387,7 +2526,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     const slot =
                       group.column != null ? page.columns?.[group.column] : undefined;
                     const frameLeft = slot ? slot.x : 0;
-                    const frameWidth = slot ? slot.width : page.contentBox.width;
+                    const frameWidth = slot ? slot.width : localPage.contentBox.width;
                     // M-HEADER-FOOTER-2: band groups — muted ink unless
                     // the selection sits in a band container (the
                     // active-band signal, selection-driven).
@@ -2399,9 +2538,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                         runs={block.runs}
                         text={block.text}
                         metrics={metricsRef.current!}
-                        left={page.contentBox.x}
-                        top={page.contentBox.y + minY}
-                        width={page.contentBox.width}
+                        left={localPage.contentBox.x}
+                        top={localPage.contentBox.y + minY}
+                        width={localPage.contentBox.width}
                         muted={bandWhich ? !inBand : undefined}
                         align={block.align}
                         runDecor={block.runDecor}
@@ -2438,7 +2577,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     canvases for pointer reach). */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <TableResizeHandles
-                    geometry={page}
+                    geometry={localPage}
                     cells={result.placed.filter(
                       (p) => p.pageIndex === page.index && p.kind === 'tableCell',
                     )}
@@ -2462,7 +2601,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     }
                     return entries.length > 0 ? (
                       <LineNumberGutter
-                        contentBox={page.contentBox}
+                        contentBox={localPage.contentBox}
                         entries={entries}
                         // M-GUTTER: contextual icons own these lines'
                         // slots; their numbers hide.
@@ -2473,16 +2612,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     ) : null;
                   })()}
                 {/* M-T3: the header-row pins (gutter chrome, click-to-toggle). */}
-                <TableHeaderPins geometry={page} pins={headerPins} onToggle={toggleTableHeader} />
+                <TableHeaderPins geometry={localPage} pins={headerPins} onToggle={toggleTableHeader} />
                 {/* M-REFS: the collection badges (one per table, at its
                     first line — click selects the block) + the index
                     bookmarks (one per marked line, GDocs-style). */}
                 <ReferenceTableBadges
-                  geometry={page}
+                  geometry={localPage}
                   badges={referenceBadges}
                   onSelect={(pos) => editor.commands.setNodeSelection(pos)}
                 />
-                <IndexLineMarks geometry={page} marks={indexBookmarks} />
+                <IndexLineMarks geometry={localPage} marks={indexBookmarks} />
 
                 {/* The selected image's border + resize handles. An
                     INLINE object gets no float drag (in-flow objects
@@ -2491,7 +2630,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     inert (ImageSelection's receipt). */}
                 {imageSel && imageSel.placed.pageIndex === page.index && (
                   <ImageSelection
-                    geometry={page}
+                    geometry={localPage}
                     placed={imageSel.placed}
                     editor={editor}
                     pos={imageSel.pos}
@@ -2505,7 +2644,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                   />
                 )}
                 <ImageLayer
-                  geometry={page}
+                  geometry={localPage}
                   placed={result.placed.filter(
                     (p) => p.pageIndex === page.index && p.z !== 'behind',
                   )}
@@ -2517,7 +2656,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     precedent) + the doc-default text color. */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <EquationLayer
-                    geometry={page}
+                    geometry={localPage}
                     placed={result.placed.filter(
                       (p) => p.pageIndex === page.index && p.kind === 'equation',
                     )}
@@ -2532,7 +2671,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     the ONE hidden view via hitTest's band-strip rule. */}
                 <HeaderFooterSlots
                   pageIndex={page.index}
-                  geometry={page}
+                  geometry={localPage}
                   editor={editor}
                   sectionId={sectionIdOfPage(page.sectionIndex)}
                 />
@@ -2556,7 +2695,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
               Review ▸ Show Break Marks toggle): the page/section-break
               badges — view-only ink, never printed. */}
           {showBreakMarks && (
-            <BreakMarks facts={layout.breakFacts} result={result} pageGap={gap} />
+            <BreakMarks facts={layout.breakFacts} result={result} pageGap={gap} tops={layout.pageGrid.tops} />
           )}
           <SelectionHighlights rects={selRects} color={selectionColor || undefined} />
           {caret && editorFocused && selRects.length === 0 &&
@@ -2624,6 +2763,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                   span.to,
                   metricsRef.current,
                   gap,
+                  undefined,
+                  layoutRef.current.pageGrid.tops
                 );
                 return rects[0] ? rects[0].top * z : null;
               }}
@@ -2688,12 +2829,39 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           desk wrapper — static overlay chrome pinned to its top edge
           (flush under the ribbon; show/hide reflows nothing). Geometry
           comes from the engine's PageGeometry — the same facts the
-          pages below paint. */}
+          pages below paint. #101 — SPLIT VIEW: ONE STRIP PER COLUMN —
+          the desk-wide chrome bar belongs to the first strip; the
+          second rides beside it (transparent, strip-local), each
+          ruling its own page's geometry. The caret's strip wears the
+          model (Word's active-ruler law). */}
       {showHorizontalRuler &&
         deskWrapper &&
         editor &&
         createPortal(
-          <Ruler geometry={firstGeometry} zoom={z} model={rulerModel} editor={editor} columnFrame={rulerColumnFrame} />,
+          splitRulers && result.pages[1] ? (
+            <>
+              <Ruler
+                geometry={localPageGeometry(result.pages[0]!)}
+                zoom={z}
+                model={rulerSplitColumn === 0 ? rulerModel : null}
+                editor={editor}
+                columnFrame={rulerSplitColumn === 0 ? rulerColumnFrame : undefined}
+                arrangement={{ stackWidthZ: stackW * z, columnLeftZ: pageLeftTable[0]! * z }}
+              />
+              <Ruler
+                geometry={localPageGeometry(result.pages[1])}
+                zoom={z}
+                model={rulerSplitColumn === 1 ? rulerModel : null}
+                editor={editor}
+                columnFrame={rulerSplitColumn === 1 ? rulerColumnFrame : undefined}
+                arrangement={{ stackWidthZ: stackW * z, columnLeftZ: pageLeftTable[1]! * z }}
+                chrome={false}
+                testId="ruler-split"
+              />
+            </>
+          ) : (
+            <Ruler geometry={localPageGeometry(firstGeometry)} zoom={z} model={rulerModel} editor={editor} columnFrame={rulerColumnFrame} />
+          ),
           deskWrapper,
         )}
     </div>

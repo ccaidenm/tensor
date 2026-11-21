@@ -25,11 +25,13 @@ import type { CaretStackRect } from './positionMap';
  * - PADDING: a caret rect padded by CARET_SCROLL_PAD_PX that intersects
  *   the scroller's visible rect scrolls NOTHING. A bottom-edge violation
  *   scrolls down by exactly caretBottom − viewportBottom + pad; a
- *   top-edge violation symmetrically up. Clipped horizontally? NEVER for
- *   now — the horizontal seam (mirroring the two vertical arms) is left
- *   for RTL / extreme-zoom edge cases, deliberately.
- * - INSTANT: direct scrollTop mutation, no smooth behavior — Word-style;
- *   revisit later.
+ *   top-edge violation symmetrically up. HORIZONTAL (#101 — the split
+ *   view's second column lives in the horizontal scroll range, so the
+ *   seam is now load-bearing): the same minimal-delta law on
+ *   scrollLeft — a left/right-edge violation scrolls by exactly the
+ *   violation + pad, never re-centering.
+ * - INSTANT: direct scrollTop/scrollLeft mutation, no smooth behavior —
+ *   Word-style; revisit later.
  */
 export const CARET_SCROLL_PAD_PX = 16;
 
@@ -53,4 +55,19 @@ export function scrollCaretIntoView(
     scroller.scrollTop -= viewRect.top + CARET_SCROLL_PAD_PX - top;
   }
   // Intersects the visible rect (padded): scrollTop untouched.
+
+  // #101 — THE HORIZONTAL ARMS (the same minimal-delta law): the
+  // caret's stack-local LEFT is in caret.left (the split view folds
+  // the column offset into the page frame — the caretStackRect law).
+  // The caret bar is ~0 wide, so the point IS both edges — the left
+  // violation reveals it with pad to the right, the right violation
+  // with pad to the left.
+  const left = stackRect.left + caret.left * zoom;
+
+  if (left < viewRect.left + CARET_SCROLL_PAD_PX) {
+    scroller.scrollLeft -= viewRect.left + CARET_SCROLL_PAD_PX - left;
+  } else if (left > viewRect.right - CARET_SCROLL_PAD_PX) {
+    scroller.scrollLeft += left + CARET_SCROLL_PAD_PX - viewRect.right;
+  }
+  // Intersects the visible rect (padded): scrollLeft untouched.
 }

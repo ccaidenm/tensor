@@ -98,6 +98,21 @@ export function sectionAtBreak(editor: Editor | null, pos: number, storeSetup: P
   };
 }
 
+/** #101 — SPLIT VIEW: the section's EFFECTIVE setup by ordinal — the
+ *  rulers' margin drags seed their write from the DRAGGED PAGE's
+ *  section (each ruler affects its own page's section), so a
+ *  mixed-geometry doc never clobbers the section's own size with the
+ *  store's. Same holder law as sectionAtCaret: ordinal k's props live
+ *  on breaks[k] when that break exists, else the store. */
+export function sectionSetupAt(editor: Editor | null, storeSetup: PageSetup, ordinal: number): PageSetup {
+  if (!editor || ordinal < 0) return storeSetup;
+  const breaks = breakOrdinalList(editor.state.doc);
+  const target = breaks[ordinal];
+  if (!target) return storeSetup;
+  const node = editor.state.doc.nodeAt(target.pos);
+  return (node?.attrs.setup as PageSetup | null) ?? storeSetup;
+}
+
 /** The section FOLLOWING the caret's (the "this point forward"
  *  target): its props holder (the next break's attrs, or the store)
  *  and its effective setup. */
@@ -294,8 +309,11 @@ export function applyPageSetup(
     }
     const positions = breakPositions(editor);
     const tr = editor.state.tr;
-    tr.setMeta(PAGE_SETUP_MARKER, true);
-      markerDispatched = true;
+    // The ruler's preview frames pass addToHistory false — the drag's
+    // end commit is the ONE item (the 'document' scope's law).
+    if (!addToHistory) tr.setMeta('addToHistory', false);
+    if (addToHistory) tr.setMeta(PAGE_SETUP_MARKER, true);
+    markerDispatched = true;
     let touchedStore = false;
     for (const k of set) {
       if (k < positions.length) {

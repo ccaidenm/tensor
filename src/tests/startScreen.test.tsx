@@ -43,7 +43,6 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 }));
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string }) => {
-    console.log('INVOKE: ' + cmd + ' path=' + String(args?.path));
     if (cmd === 'package_document') {
       wpdocInvokes.set(args.path!, args.documentJson!);
       // The real Rust writes the zip at args.path — the mock's stand-in
@@ -460,7 +459,6 @@ describe('the start screen — the pageless-open regression (#103)', () => {
     await settleLayout();
     const store = useDocumentStore.getState();
     expect(store.startActive).toBe(false);
-    console.log('REPRO: pageSetup =', JSON.stringify(store.pageSetup));
     expect(store.pageSetup.viewMode).toBe('pages');
     await settleLayout();
     expect(store.pageSetup.viewMode).toBe('pages');

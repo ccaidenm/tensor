@@ -86,6 +86,7 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
   return (
     <div
         data-floating-toolbar
+        data-testid="floating-toolbar"
         onMouseDown={(e) => e.preventDefault()}
         className="absolute z-30 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
         style={{

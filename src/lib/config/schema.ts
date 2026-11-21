@@ -43,6 +43,10 @@ export const ConfigSchema = z.object({
      *  .catch: a config from a speculative build carrying a stray
      *  value falls back to Pages instead of rejecting the whole file. */
     defaultPageLayout: z.enum(['Pages', 'Pageless']).catch('Pages').default('Pages'),
+    /** #101 — SPLIT VIEW: the paginated desk's page arrangement (1 =
+     *  the classic stack; 2 = two pages side by side — Word's "Many
+     *  pages"). A VIEW preference, not a document property. */
+    pageColumns: z.union([z.literal(1), z.literal(2)]).default(1),
     defaultPageSize: z.string().default('Letter'),
     defaultPageGap: z.number().default(PAGE_GAP),
     defaultMargins: z.object({
@@ -105,6 +109,7 @@ export const ConfigSchema = z.object({
     defaultFontFamily: 'system-ui',
     defaultFontSize: 16,
     defaultPageLayout: 'Pages' as const,
+    pageColumns: 1 as const,
     defaultPageSize: 'Letter',
     defaultPageGap: PAGE_GAP,
     defaultMargins: DEFAULT_MARGINS,

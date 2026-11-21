@@ -1,5 +1,5 @@
 import { fitDownImage, type LayoutResult, type PageGeometry, type TextMetrics, type TextStyle } from '@tensor-editor/engine';
-import { pageIndexAtY, pageTops } from './pageStack';
+import { pageGridLayout, pageIndexAtPoint } from './pageStack';
 import type { AdapterBlock } from './adapter';
 import { alignOffset, blockWrapWidth, lineColumnFrame } from './positionMap';
 
@@ -50,22 +50,24 @@ export function hitTest(
   metrics: TextMetrics,
   pageGap: number,
   localX: number,
-  localY: number
+  localY: number,
+  /** #101 — SPLIT VIEW: the paginated desk's page arrangement (the
+   *  column-aware point hit; absent = the classic stack). */
+  pageColumns: 1 | 2 = 1
 ): HitResult | null {
   if (result.pages.length === 0) return null;
-  // #58 — per-page geometry: invert the CUMULATIVE tops table (pages
-  // may differ per section), then read the hit page's own contentBox.
-  const tops = pageTops(result.pages, pageGap);
-  let pageIndex = pageIndexAtY(tops, result.pages.length, localY);
-  {
-    const sec = result.pages[pageIndex]!;
-    const pageH = sec.size.height;
-    const pageEnd = tops[pageIndex]! + pageH;
-    // Gap ownership: the second half of a gap belongs to the next sheet.
-    if (localY > pageEnd + pageGap / 2 && pageIndex < result.pages.length - 1) {
-      pageIndex += 1;
-    }
-  }
+  // #58 — per-page geometry: invert the grid (pages may differ per
+  // section), then read the hit page's own contentBox. SPLIT VIEW: the
+  // POINT hit — a y spans two pages side by side, so the column
+  // disambiguates by x.
+  const grid = pageGridLayout(result.pages, pageGap, pageColumns);
+  const tops = grid.tops;
+  // #101 — SPLIT VIEW: the POINT hit — a y spans two pages side by
+  // side, so the column disambiguates by x; the fallback (a gutter, a
+  // margin, the inter-row gap) resolves row by y and column by x
+  // INSIDE the grid hit (the rowRanges/columnRanges law) — the old
+  // y-only gap bump lives there now, column-aware.
+  let pageIndex = pageIndexAtPoint(grid, result.pages, localX, localY, pageGap);
   pageIndex = Math.min(Math.max(pageIndex, 0), result.pages.length - 1);
   const cb = result.pages[pageIndex]!.contentBox;
   const pageTop = tops[pageIndex]!;

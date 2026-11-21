@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import type { PageGeometry, TabStop } from '@tensor-editor/engine';
 import { pageTops } from '@/lib/paginated/pageStack';
-import { applyPageSetup } from '@/lib/editor/sections';
+import { applyPageSetup, sectionSetupAt } from '@/lib/editor/sections';
 import type { PageSetup } from '@/lib/document/pageSetup';
 import { useConfigStore } from '@/lib/config/store';
 import { useDocumentStore } from '@/lib/document/store';
@@ -227,6 +227,9 @@ export function Ruler({
   model,
   editor,
   columnFrame,
+  arrangement,
+  chrome = true,
+  testId = 'ruler',
 }: {
   /** The FIRST page's engine geometry — the single source of page and
    * content-box dims (L1: never re-derived from pageSetup here). */
@@ -252,6 +255,24 @@ export function Ruler({
    * are page properties; only the flow frame narrows).
    */
   columnFrame?: { left: number; width: number };
+  /**
+   * #101 — SPLIT VIEW: the desk arrangement — the stack's zoomed
+   * width (the CENTERING base: the desk centers the WHOLE stack, not
+   * this strip's page) and this column's zoomed stack-local left.
+   * pageLeft = desk centering + column left − scroll. Absent ≡ the
+   * legacy single-page math (stackWidth = pageW, columnLeft = 0 —
+   * bit-identical).
+   */
+  arrangement?: { stackWidthZ: number; columnLeftZ: number };
+  /**
+   * #101 — SPLIT VIEW: false = the STRIP variant — a transparent,
+   * strip-local container (the desk-wide chrome bar belongs to the
+   * FIRST strip only; a second full-width bar would block its
+   * sibling's handles). Same ink, same handles, narrower reach.
+   */
+  chrome?: boolean;
+  /** The test hook (the split column's strip wears its own). */
+  testId?: string;
 }) {
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   // Canvas colors are computed-style READS at paint time, not live CSS —
@@ -284,7 +305,14 @@ export function Ruler({
   // the desk scroller gives the zoom wrapper (clientWidth-based, so a
   // layout-taking vertical scrollbar can't skew it), minus the desk's
   // horizontal scroll so the bar tracks the page when zoom overflows.
-  const pageLeft = Math.max(0, (deskW - pageWz) / 2) - deskScrollLeft;
+  const stackWidthZ = arrangement?.stackWidthZ ?? pageWz;
+  const columnLeftZ = arrangement?.columnLeftZ ?? 0;
+  const pageLeft = Math.max(0, (deskW - stackWidthZ) / 2) + columnLeftZ - deskScrollLeft;
+  // The strip variant positions relative to its own container (which
+  // starts at pageLeft − LABEL_PAD): the canvas at 0, the page strip
+  // at LABEL_PAD. The chrome variant positions within the full-width
+  // bar. One number drives the inner, the badge, and the dblclick.
+  const innerLeft = chrome ? pageLeft : LABEL_PAD;
   // The canvas covers the strip PLUS the edge overhangs (LABEL_PAD law).
   const canvasW = pageWz + LABEL_PAD * 2;
 
@@ -425,7 +453,7 @@ export function Ruler({
   // live in it; the drag here commits through the store as before).
   function handleBarDoubleClick(e: ReactMouseEvent<HTMLDivElement>) {
     const rectLeft = barRef.current?.getBoundingClientRect().left ?? 0;
-    const x = (e.clientX - rectLeft - pageLeft) / zoom;
+    const x = (e.clientX - rectLeft - (chrome ? pageLeft : LABEL_PAD)) / zoom;
     if (x < contentX || x > contentR) {
       useDocumentPropertiesStore.getState().openPageSetup();
     }
@@ -870,7 +898,7 @@ export function Ruler({
 
   const dragBadge = marginDrag
     ? {
-        x: pageLeft + marginDrag.draftPx * zoom,
+        x: innerLeft + marginDrag.draftPx * zoom,
         text:
           marginDrag.side === 'left'
             ? fmtVal(marginDrag.draftPx)
@@ -879,13 +907,13 @@ export function Ruler({
     : tabDrag
       ? {
           // #74 — the dragged glyph anchors to the ACTIVE frame.
-          x: pageLeft + (frameX + tabDrag.draftPx) * zoom,
+          x: innerLeft + (frameX + tabDrag.draftPx) * zoom,
           text: fmtVal(tabDrag.draftPx),
         }
       : indentDrag
         ? {
             x:
-              pageLeft +
+              innerLeft +
               (indentDrag.which === 'first'
                 ? frameX + (model?.indentLeft ?? 0) + indentDrag.draftPx
                 : indentDrag.which === 'left'
@@ -900,9 +928,15 @@ export function Ruler({
     <TooltipProvider>
       <div
         ref={barRef}
-        data-testid="ruler"
-        className={`absolute inset-x-0 top-0 z-30 select-none border-b border-border/60 bg-card${marginDrag ? ' cursor-ew-resize' : ''}`}
-        style={{ height: `${RULER_HEIGHT}px` }}
+        data-testid={testId}
+        className={`absolute top-0 z-30 select-none border-b border-border/60 bg-card${
+          chrome ? ' inset-x-0' : ''
+        }${marginDrag ? ' cursor-ew-resize' : ''}`}
+        style={
+          chrome
+            ? { height: `${RULER_HEIGHT}px` }
+            : { left: `${pageLeft - LABEL_PAD}px`, width: `${canvasW}px`, height: `${RULER_HEIGHT}px` }
+        }
         onDoubleClick={handleBarDoubleClick}
       >
         {/* Ink probes: the canvas can't resolve Tailwind tokens, so this
@@ -918,7 +952,7 @@ export function Ruler({
           role="presentation"
           className="pointer-events-none absolute top-0"
           style={{
-            left: `${pageLeft - LABEL_PAD}px`,
+            left: `${chrome ? pageLeft - LABEL_PAD : 0}px`,
             width: `${canvasW}px`,
             height: `${RULER_HEIGHT}px`,
           }}
@@ -927,7 +961,7 @@ export function Ruler({
           data-testid="ruler-inner"
           ref={innerRef}
           className="absolute top-0 h-full"
-          style={{ left: `${pageLeft}px`, width: `${pageWz}px` }}
+          style={{ left: `${innerLeft}px`, width: `${pageWz}px` }}
           onPointerDown={handleBandPointerDown}
           onPointerUp={handleBandPointerUp}
           onPointerCancel={() => {
@@ -1082,7 +1116,7 @@ export function Ruler({
             className="absolute top-full z-50 mt-1 min-w-[130px] -translate-x-1/2 rounded-md border border-border bg-background py-1 shadow-md"
             style={{
               left: `${Math.min(
-                Math.max(pageLeft + tabMenu.pageX * zoom, 70),
+                Math.max(innerLeft + tabMenu.pageX * zoom, 70),
                 Math.max(70, deskW - 70),
               )}px`,
             }}
@@ -1153,12 +1187,27 @@ export function VerticalRuler({
   pages,
   zoom,
   editor,
+  tops: topsProp,
+  side = 'left',
+  testId = 'ruler-vertical',
 }: {
   /** #58 — the walk's per-page geometry (mixed sections make pages
    *  differ; the ruler paints EACH page's own margins). */
   pages: PageGeometry[];
   zoom: number;
   editor: Editor | null;
+  /**
+   * #101 — SPLIT VIEW: the scale's tops for THESE pages — the grid's
+   * ROW tops (row-mates share a top), passed by the caller. Absent ≡
+   * the internal y-only pageTops walk (the classic stack — legacy,
+   * bit-identical).
+   */
+  tops?: number[];
+  /** #101 — SPLIT VIEW: which desk edge the column rides. 'right'
+   *  mirrors the badge and the tooltip direction. */
+  side?: 'left' | 'right';
+  /** The test hook (the split column's ruler wears its own). */
+  testId?: string;
 }) {
   const unit = useConfigStore((s) => s.config.editor.measurementUnit);
   const theme = useConfigStore((s) => s.config.theme);
@@ -1202,7 +1251,10 @@ export function VerticalRuler({
   const firstContentY = firstPage?.contentBox.y ?? 0;
   const firstContentB =
     (firstPage ? firstPage.contentBox.y + firstPage.contentBox.height : 0);
-  const tops = useMemo(() => pageTops(pages, pageGap), [pages, pageGap]);
+  const tops = useMemo(
+    () => topsProp ?? pageTops(pages, pageGap),
+    [topsProp, pages, pageGap],
+  );
   // The paint-window signature (the deps law — primitives only: a
   // value-identical pages array must not repaint into the paint-ops
   // window).
@@ -1386,13 +1438,21 @@ export function VerticalRuler({
     const ps = useDocumentStore.getState().pageSetup;
     const margins = { ...ps.margins };
     // The drag page's own height (mixed sections — the dragged page's
-    // frame defines the bottom edge); the write is DOCUMENT-WIDE (the
-    // ribbon quick controls' law).
+    // frame defines the bottom edge). #101 — SPLIT VIEW + Word's law:
+    // the drag writes THE DRAGGED PAGE'S SECTION (the left ruler rules
+    // the left column's pages, the right ruler the right's — a right-
+    // ruler drag must not move a left page of another section). The
+    // write seeds from the section's OWN effective setup (a mixed-
+    // geometry doc never takes the store's size). A uniform doc (no
+    // breaks) collapses to the store — the one-section case IS
+    // document-wide; both pages share the one margin set.
     const dragPageH = pages[d.page]?.size.height ?? firstPageH;
     if (d.side === 'top') margins.top = pxToPt(px);
     else margins.bottom = pxToPt(dragPageH - px);
     if (margins.top === ps.margins.top && margins.bottom === ps.margins.bottom) return;
-    applyPageSetup('document', { ...ps, margins }, { margins }, opts);
+    const sectionIndex = pages[d.page]?.sectionIndex ?? 0;
+    const full = { ...sectionSetupAt(editor, ps, sectionIndex), margins };
+    applyPageSetup('sections', full, { margins }, { ...opts, sectionSet: [sectionIndex] });
   }
 
   function startDrag(side: 'top' | 'bottom', page: number) {
@@ -1499,9 +1559,11 @@ export function VerticalRuler({
     <TooltipProvider>
       <div
         ref={barRef}
-        data-testid="ruler-vertical"
-        className={`absolute inset-y-0 left-0 z-20 select-none bg-card${drag ? ' cursor-ns-resize' : ''}`}
-        style={{ left: 0, width: `${RULER_WIDTH}px` }}
+        data-testid={testId}
+        className={`absolute inset-y-0 z-20 select-none bg-card${drag ? ' cursor-ns-resize' : ''} ${
+          side === 'right' ? 'right-0' : 'left-0'
+        }`}
+        style={{ [side]: 0, width: `${RULER_WIDTH}px` } as CSSProperties}
       >
         <span
           ref={mutedProbeRef}
@@ -1543,7 +1605,7 @@ export function VerticalRuler({
           return (
             <div key={p}>
               <div
-                data-testid={p === 0 ? 'ruler-vertical-top' : undefined}
+                data-testid={p === 0 ? `${testId}-top` : undefined}
                 aria-label={fmt(pageEdges.y, 'Top margin')}
                 className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
                 style={{ top: `${topY}px` }}
@@ -1554,12 +1616,14 @@ export function VerticalRuler({
               >
                 <Tooltip>
                   <TooltipTrigger render={<span className="absolute inset-0 block" />} />
-                  <TooltipContent side="right">{fmt(pageEdges.y, 'Top margin')}</TooltipContent>
+                  <TooltipContent side={side === 'right' ? 'left' : 'right'}>
+                    {fmt(pageEdges.y, 'Top margin')}
+                  </TooltipContent>
                 </Tooltip>
                 <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
               </div>
               <div
-                data-testid={p === 0 ? 'ruler-vertical-bottom' : undefined}
+                data-testid={p === 0 ? `${testId}-bottom` : undefined}
                 aria-label={fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}
                 className="absolute left-0 w-full h-[16px] -translate-y-1/2 cursor-ns-resize touch-none"
                 style={{ top: `${botY}px` }}
@@ -1570,7 +1634,9 @@ export function VerticalRuler({
               >
                 <Tooltip>
                   <TooltipTrigger render={<span className="absolute inset-0 block" />} />
-                  <TooltipContent side="right">{fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}</TooltipContent>
+                  <TooltipContent side={side === 'right' ? 'left' : 'right'}>
+                    {fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}
+                  </TooltipContent>
                 </Tooltip>
                 <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
               </div>
@@ -1579,9 +1645,11 @@ export function VerticalRuler({
         })}
         {badge && (
           <div
-            data-testid="ruler-vertical-drag-badge"
-            className="pointer-events-none absolute z-40 ml-1 -translate-y-1/2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground shadow-sm"
-            style={{ top: `${badge.y}px`, left: `${RULER_WIDTH}px` }}
+            data-testid={`${testId}-drag-badge`}
+            className={`pointer-events-none absolute z-40 -translate-y-1/2 whitespace-nowrap rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground shadow-sm ${
+              side === 'right' ? 'mr-1' : 'ml-1'
+            }`}
+            style={{ top: `${badge.y}px`, [side]: `${RULER_WIDTH}px` } as CSSProperties}
           >
             {badge.text}
           </div>

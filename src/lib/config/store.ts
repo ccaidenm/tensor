@@ -23,6 +23,8 @@ interface ConfigStore {
   /** #101 — the draggable sidebars' width memory (committed on drag
    *  release; the panel reads it live during the drag). */
   setSidebarWidth: (id: string, width: number) => void;
+  /** #101 — SPLIT VIEW: the paginated desk's page arrangement. */
+  setPageColumns: (columns: 1 | 2) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -151,6 +153,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
         ...state.config,
         sidebarWidths: { ...state.config.sidebarWidths, [id]: Math.round(width) },
       },
+    })),
+
+  setPageColumns: (columns) =>
+    set((state) => ({
+      config: { ...state.config, editor: { ...state.config.editor, pageColumns: columns } },
     })),
 
   setDownloadsDir: (value) =>
