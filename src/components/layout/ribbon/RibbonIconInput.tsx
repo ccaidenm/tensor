@@ -3,6 +3,9 @@ import { ChevronUp, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
+import { useConfigStore } from '@/lib/config/store';
+import { getEffectiveKeybinding, formatShortcutParts } from '@/lib/shortcuts';
 
 interface RibbonIconInputProps {
   label: string;
@@ -25,6 +28,10 @@ interface RibbonIconInputProps {
    *  the row instead: one hover, one delay, carried across the
    *  fields). */
   hideTooltip?: boolean;
+  /** #101 — the shortcut ids whose LIVE bindings ride the tooltip
+   *  (the user's keybindings, never a hardcoded spelling). Absent =
+   *  the field has none. */
+  shortcutIds?: string[];
 }
 
 export function RibbonIconInput({
@@ -40,8 +47,11 @@ export function RibbonIconInput({
   ariaLabel,
   suffix,
   hideTooltip = false,
+  shortcutIds,
 }: RibbonIconInputProps) {
   const [localValue, setLocalValue] = useState(String(value));
+  // The bindings read ONCE (the hook law: never inside the map below).
+  const keybindings = useConfigStore((s) => s.config.keybindings);
 
   useEffect(() => {
     setLocalValue(String(value));
@@ -127,7 +137,21 @@ export function RibbonIconInput({
   return (
     <Tooltip>
       <TooltipTrigger render={field} />
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>
+        <span className="flex items-center gap-2">
+          {label}
+          {shortcutIds && shortcutIds.length > 0 && (
+            <span className="flex items-center gap-1">
+              {shortcutIds.map((id) => {
+                const binding = getEffectiveKeybinding(keybindings, id);
+                return binding ? (
+                  <Kbd key={id}>{formatShortcutParts(binding).join('+')}</Kbd>
+                ) : null;
+              })}
+            </span>
+          )}
+        </span>
+      </TooltipContent>
     </Tooltip>
   );
 }

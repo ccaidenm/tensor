@@ -41,7 +41,7 @@ export function DictionaryDialog() {
       <DialogContent className="max-w-sm" data-testid="dictionary-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <BookA size={15} /> Personal Dictionary
+            <BookA size={16} /> Personal Dictionary
           </DialogTitle>
           <DialogDescription>
             Words Tensor stops flagging. Saved as plain text in your config folder.

@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RibbonGroup } from "../../../RibbonGroup";
 import { IconButton } from "../../../IconButton";
 import { useDocumentStore } from "@/lib/document/store";
@@ -176,18 +177,25 @@ export function FontGroup() {
           Light would render Regular, the accepted-input lie). */}
       {availableWeights(entry).some((w) => w !== 400 && w !== 700) && (
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                type="button"
-                data-testid={`font-picker-weights-${entry.family}`}
-                className="ml-1 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent"
-                aria-label={`Weights for ${entry.displayName}`}
-              >
-                <ChevronsUpDown size={12} />
-              </button>
-            }
-          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid={`font-picker-weights-${entry.family}`}
+                      className="ml-1 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent"
+                      aria-label={`Weights for ${entry.displayName}`}
+                    >
+                      <ChevronsUpDown size={12} />
+                    </button>
+                  }
+                />
+              }
+            />
+            <TooltipContent>Font weights</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="w-36">
             <DropdownMenuItem
               disabled
@@ -218,24 +226,31 @@ export function FontGroup() {
   return (
     <RibbonGroup>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-36 justify-between gap-1 px-2 text-sm font-normal"
-              aria-label="Font Family"
-            >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-36 justify-between gap-1 px-2 text-sm font-normal"
+                    aria-label="Font Family"
+                  >
               <span className="flex min-w-0 items-center gap-1.5">
                 <WholeWord size={12} className="shrink-0 text-muted-foreground" />
                 <span className="truncate capitalize" style={{ fontFamily: attrs?.effectiveFontFamily || undefined }}>
                   {effectiveName || 'Font'}
                 </span>
               </span>
-              <ChevronDown size={12} className="shrink-0 opacity-60" />
-            </Button>
+                  <ChevronDown size={12} className="shrink-0 opacity-60" />
+                </Button>
+              }
+            />
           }
         />
+        <TooltipContent>Font</TooltipContent>
+        </Tooltip>
         <PopoverContent className="relative flex max-h-150 w-64 flex-col p-1" align="start">
           {/* The font list scrolls; the Browse action is a FOOTER —
               always anchored to the bottom, never scrolled away. */}

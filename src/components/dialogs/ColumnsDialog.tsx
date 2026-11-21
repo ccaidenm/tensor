@@ -293,8 +293,7 @@ export function ColumnsDialog() {
         <DialogHeader>
           <DialogTitle>Columns</DialogTitle>
           <DialogDescription>
-            Flow text in multiple columns. Changes apply when you press Done and are saved with
-            the document.
+            Flow text in multiple columns.
           </DialogDescription>
         </DialogHeader>
 
@@ -386,7 +385,7 @@ export function ColumnsDialog() {
                   return widths.map((w, i) => (
                     <div
                       key={i}
-                      className="h-full rounded-[2px] bg-primary/25"
+                      className="h-full rounded-xs bg-primary/25"
                       style={{
                         flexGrow: w / total,
                         marginRight: i < draft.count - 1 ? `${gapPx}px` : 0,

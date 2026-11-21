@@ -6,6 +6,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  STACKED_DIALOG_CONTENT,
+  STACKED_DIALOG_OVERLAY,
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
 
@@ -39,8 +41,8 @@ export function ImportReportDialog() {
       <DialogContent
         // The raised-overlay treatment the other dialogs use — the
         // frosted layer dims/blurs the app, never the card.
-        className="sm:max-w-sm z-[110]"
-        overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+        className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
+        overlayClassName={STACKED_DIALOG_OVERLAY}
       >
         <DialogHeader>
           <DialogTitle>{pending?.title ?? ''}</DialogTitle>

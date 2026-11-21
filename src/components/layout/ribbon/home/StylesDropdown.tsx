@@ -3,6 +3,7 @@ import { ChevronDown, Pencil, Plus, Type } from 'lucide-react';
 import { useEditorState } from '@tiptap/react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Editor } from '@tiptap/core';
 import { useStyleRegistryStore } from '@/lib/styles/registry';
 import { headingStyleId, type StyleDefinition } from '@/lib/styles/types';
@@ -101,13 +102,19 @@ export function StylesDropdown({ editor }: { editor: Editor }) {
           {def.name}
         </button>
         <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            className="rounded p-1 hover:bg-muted"
-            title="Edit style"
-            onClick={() => openDialog(def.id, def.kind)}
-          >
-            <Pencil size={12} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  className="rounded p-1 hover:bg-muted"
+                  onClick={() => openDialog(def.id, def.kind)}
+                >
+                  <Pencil size={12} />
+                </button>
+              }
+            />
+            <TooltipContent>Edit style</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     );
@@ -121,22 +128,29 @@ export function StylesDropdown({ editor }: { editor: Editor }) {
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
+      <Tooltip>
+        <TooltipTrigger
           render={
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-36 justify-between gap-2 px-2 text-sm font-normal"
-              aria-label={`Styles (current: ${currentStyleName})`}
-            >
-              <span className="flex min-w-0 items-center gap-1.5">
-                <Type size={12} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">{currentStyleName}</span>
-              </span>
-              <ChevronDown size={12} className="shrink-0 opacity-60" />
-            </Button>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-36 justify-between gap-2 px-2 text-sm font-normal"
+                aria-label={`Styles (current: ${currentStyleName})`}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Type size={12} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{currentStyleName}</span>
+                </span>
+                <ChevronDown size={12} className="shrink-0 opacity-60" />
+              </Button>
+            }
+          />
           }
         />
+        <TooltipContent>Styles</TooltipContent>
+      </Tooltip>
         <PopoverContent className="w-64 p-1">
           <div className="max-h-[28rem] overflow-y-auto">
             <div className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">

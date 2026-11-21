@@ -215,7 +215,7 @@ function MarginHandle({
       {/* The grabber tab — decorative now, straddling the bar's bottom
           edge; the full-height column above it is the hit target. */}
       <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">
-        <div className="h-[11px] w-[9px] rounded-[2px] border border-foreground/40 bg-card" />
+        <div className="h-[11px] w-[9px] rounded-xs border border-foreground/40 bg-card" />
       </div>
     </div>
   );
@@ -1069,7 +1069,7 @@ export function Ruler({
                 onPointerUp={endIndentDrag(true)}
                 onPointerCancel={endIndentDrag(false)}
               >
-                <div className="h-[7px] w-[10px] rounded-[2px] bg-foreground" />
+                <div className="h-[7px] w-[10px] rounded-xs bg-foreground" />
               </Marker>
               <Marker
                 x={rightIndentX - 6}
@@ -1620,7 +1620,7 @@ export function VerticalRuler({
                     {fmt(pageEdges.y, 'Top margin')}
                   </TooltipContent>
                 </Tooltip>
-                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
+                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-xs border border-foreground/40 bg-card" />
               </div>
               <div
                 data-testid={p === 0 ? `${testId}-bottom` : undefined}
@@ -1638,7 +1638,7 @@ export function VerticalRuler({
                     {fmt(pageEdges.h - pageEdges.b, 'Bottom margin')}
                   </TooltipContent>
                 </Tooltip>
-                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-[2px] border border-foreground/40 bg-card" />
+                <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-[9px] w-[11px] rounded-xs border border-foreground/40 bg-card" />
               </div>
             </div>
           );

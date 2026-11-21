@@ -74,7 +74,7 @@ export function WindowControls() {
         onClick={toggleMaximize}
       >
         {/* Maximized: the two overlapping squares (restore); else one. */}
-        {maximized ? <Copy size={12} /> : <Square size={11} />}
+        {maximized ? <Copy size={12} /> : <Square size={12} />}
       </button>
       <button
         type="button"
@@ -85,7 +85,7 @@ export function WindowControls() {
         className="flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-destructive hover:text-white"
         onClick={close}
       >
-        <X size={15} />
+        <X size={14} />
       </button>
     </div>
   );

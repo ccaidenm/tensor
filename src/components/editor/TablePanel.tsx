@@ -26,7 +26,7 @@ import {
 import { clearAllColumnWidths, setColumnWidth, setRowCantSplit, setRowMinHeight } from '@/lib/editor/tableResize';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { IconButton } from '@/components/layout/IconButton';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { cn } from 'cn';
@@ -446,20 +446,26 @@ function TablePanelInner({ editor }: { editor: Editor }) {
                      * grid (the default); OFF = cantSplit, the row moves
                      * wholly. Written through setRowCantSplit (null|true
                      * — a `false` normalizes to null). */}
-                    <label
-                      className="flex items-center gap-1 text-xs text-muted-foreground"
-                      title="Allow row to break across pages (Word's default; off = keep the whole row on one page)"
-                    >
-                      <Switch
-                        size="sm"
-                        data-testid={`tp-row-split-${i}`}
-                        checked={row.cantSplit !== true}
-                        onCheckedChange={(checked: boolean) =>
-                          setRowCantSplit(editor, model.pos, i, checked ? null : true)
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Switch
+                              size="sm"
+                              data-testid={`tp-row-split-${i}`}
+                              checked={row.cantSplit !== true}
+                              onCheckedChange={(checked: boolean) =>
+                                setRowCantSplit(editor, model.pos, i, checked ? null : true)
+                              }
+                            />
+                            break
+                          </label>
                         }
                       />
-                      break
-                    </label>
+                      <TooltipContent>
+                        Word's default; off keeps the whole row on one page.
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 </div>
               ))}

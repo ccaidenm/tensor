@@ -17,6 +17,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  STACKED_DIALOG_CONTENT,
+  STACKED_DIALOG_OVERLAY,
 } from '@/components/ui/dialog';
 import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -323,8 +325,8 @@ export function GeneralPanel() {
           // everything below it — including the already-open Settings
           // dialog's z-50 popup — so the frosted layer dims/blurs the
           // app, never the card itself.
-          className="sm:max-w-sm z-[110]"
-          overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+          className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
+          overlayClassName={STACKED_DIALOG_OVERLAY}
         >
           <DialogHeader>
             <DialogTitle>Enable Developer Mode?</DialogTitle>

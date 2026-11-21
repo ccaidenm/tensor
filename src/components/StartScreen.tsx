@@ -15,6 +15,10 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useShortcutDisplay } from '@/lib/useShortcutDisplay';
+import { formatShortcutParts } from '@/lib/shortcuts';
 import { cn } from 'cn';
 import { useDocumentStore } from '@/lib/document/store';
 import { listRecoveryCopies, type RecoveryEntry } from '@/lib/document/recovery';
@@ -81,6 +85,10 @@ export function StartScreen() {
     s.filePath ? (s.filePath.split('/').pop() ?? s.filePath) : null,
   );
   const author = useConfigStore((s) => s.config.identity.author);
+  const defaultPageLayout = useConfigStore((s) => s.config.editor.defaultPageLayout);
+  // The New binding rides the DEFAULT-surface card's tooltip (hoisted:
+  // hooks never live inside the map).
+  const newBinding = useShortcutDisplay('new');
   const recents = useConfigStore((s) => s.config.recentDocuments);
 
   // The OS username (the greeting's fallback name — the author config
@@ -184,19 +192,23 @@ export function StartScreen() {
               const visual = TEMPLATE_VISUALS[template.id];
               const Icon = visual?.icon ?? FileText;
               const isBlank = template.kind === 'blank';
+              const isDefaultSurface =
+                template.id ===
+                (defaultPageLayout === 'Pageless' ? 'blank-pageless' : 'blank-paginated');
               return (
-                <button
-                  key={template.id}
-                  type="button"
-                  role="listitem"
-                  data-testid={`template-${template.id}`}
-                  aria-label={`Create ${template.title} (${template.description})`}
-                  onClick={() => create(template)}
-                  className="group flex w-36 flex-col items-start gap-3 rounded-lg border border-border bg-card p-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring"
-                >
+                <Tooltip key={template.id}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        role="listitem"
+                        data-testid={`template-${template.id}`}
+                        aria-label={`Create ${template.title} (${template.description})`}
+                        onClick={() => create(template)}
+                        className="group flex w-36 flex-col items-start gap-3 rounded-lg border border-border bg-card p-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
                   {/* The preview block: a tinted page tile per template
-                      (the GDocs card posture — icon-forward, honest). */}
-                  <span
+                      (the GDocs card posture — icon-forward, honest). */}                  <span
                     aria-hidden="true"
                     className={cn(
                       'flex h-20 w-full items-center justify-center rounded-md',
@@ -216,6 +228,21 @@ export function StartScreen() {
                     </span>
                   </span>
                 </button>
+                    }
+                  />
+                  <TooltipContent>
+                    {isDefaultSurface && (
+                      <span className="flex items-center gap-2">
+                        {template.title}
+                        <KbdGroup>
+                          {formatShortcutParts(newBinding ?? '').map((part, i) => (
+                            <Kbd key={i}>{part}</Kbd>
+                          ))}
+                        </KbdGroup>
+                      </span>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
               );
             })}
             {/* Open a file — the core row's third card (GDocs's

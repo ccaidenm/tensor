@@ -243,7 +243,7 @@ export const LinkBubble = forwardRef<HTMLDivElement, LinkBubbleProps>(function L
               <button
                 type="button"
                 onClick={() => openUrl(activeHref)}
-                className="truncate text-left font-medium cursor-pointer hover:text-primary"
+                className="truncate rounded-sm text-left font-medium cursor-pointer hover:text-primary focus-visible:bg-accent focus-visible:outline-none"
               >
                 {metadata?.title || hostname}
               </button>

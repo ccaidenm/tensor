@@ -27,6 +27,7 @@ export function FontSizeInput({ editor, currentSize }: FontSizeInputProps) {
       width="w-16"
       showSteppers
       stepAmount={FONT_STEP_PT}
+      shortcutIds={['fontSizeUp', 'fontSizeDown']}
       onCommit={(pt) => editor.chain().focus().setFontSize(`${fontPtToPx(pt)}px`).run()}
     />
   );

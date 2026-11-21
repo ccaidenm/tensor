@@ -59,7 +59,7 @@ export function TableGridPicker() {
                   data-testid={`table-grid-cell-${r}-${c}`}
                   role="gridcell"
                   aria-label={`${r} by ${c} table`}
-                  className={`h-[18px] w-[18px] rounded-[2px] border transition-colors ${
+                  className={`h-[18px] w-[18px] rounded-xs border transition-colors ${
                     active
                       ? 'border-primary bg-primary/25'
                       : 'border-border/60 bg-transparent'

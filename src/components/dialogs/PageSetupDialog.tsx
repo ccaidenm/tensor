@@ -343,8 +343,8 @@ export function PageSetupDialog() {
           <DialogTitle>Page Setup</DialogTitle>
           <DialogDescription>
             {pagelessDialog
-              ? 'Margins and page background for the continuous pageless flow — changes apply when you press Done.'
-              : 'Modify the setup of your document — paper size, orientation, and margins. Changes apply when you press Done and are saved with the document.'}
+              ? 'Margins and page background for the continuous pageless flow.'
+              : 'Modify the setup of your document — paper size, orientation, and margins.'}
           </DialogDescription>
         </DialogHeader>
 

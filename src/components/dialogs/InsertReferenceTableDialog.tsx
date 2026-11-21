@@ -64,7 +64,7 @@ export function InsertReferenceTableDialog() {
           <DialogTitle>Insert Table of Contents</DialogTitle>
           <DialogDescription>
             The table lists your document's headings and updates automatically
-            as they change. Click an entry (Ctrl+click) to jump to it.
+            as they change.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">

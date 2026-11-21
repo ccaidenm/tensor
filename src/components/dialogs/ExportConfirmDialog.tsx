@@ -6,6 +6,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  STACKED_DIALOG_CONTENT,
+  STACKED_DIALOG_OVERLAY,
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
 
@@ -62,8 +64,8 @@ export function ExportConfirmDialog() {
         // The POPUP clears its OWN raised overlay (z-[100]) — the same
         // treatment the developer-mode warning uses — so the frosted
         // layer dims/blurs the app, never the card itself.
-        className="sm:max-w-sm z-[110]"
-        overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+        className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
+        overlayClassName={STACKED_DIALOG_OVERLAY}
       >
         <DialogHeader>
           <DialogTitle>{pending?.title ?? ''}</DialogTitle>

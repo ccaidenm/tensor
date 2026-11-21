@@ -46,6 +46,16 @@ function DialogOverlay({
   )
 }
 
+/**
+ * THE STACKED-DIALOG TIER (#101 consistency pass): the shared classes
+ * for a dialog that opens OVER another open dialog — the overlay wears
+ * the heavy frosted scrim (and climbs above the base dialog's z-50),
+ * the popup clears its own overlay. One definition; the confirm/report
+ * dialogs spread it. The BASE dialog keeps its subtle scrim below.
+ */
+export const STACKED_DIALOG_OVERLAY = 'z-[100] bg-black/30 backdrop-blur-lg'
+export const STACKED_DIALOG_CONTENT = 'z-[110]'
+
 function DialogContent({
   className,
   children,

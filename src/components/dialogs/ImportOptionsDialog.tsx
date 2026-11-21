@@ -6,6 +6,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  STACKED_DIALOG_CONTENT,
+  STACKED_DIALOG_OVERLAY,
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
 
@@ -58,8 +60,8 @@ export function ImportOptionsDialog() {
   return (
     <Dialog open={pending !== null} onOpenChange={(o) => { if (!o) settle('keep'); }}>
       <DialogContent
-        className="sm:max-w-sm z-[110]"
-        overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+        className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
+        overlayClassName={STACKED_DIALOG_OVERLAY}
       >
         <DialogHeader>
           <DialogTitle>Fonts not in Tensor</DialogTitle>

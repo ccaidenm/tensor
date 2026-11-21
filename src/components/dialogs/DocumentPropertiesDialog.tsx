@@ -206,8 +206,7 @@ export function DocumentPropertiesDialog() {
         <DialogHeader>
           <DialogTitle>Document Properties</DialogTitle>
           <DialogDescription>
-            Metadata for this document. Done saves your changes with the document; Cancel
-            discards them.
+            Metadata for this document.
           </DialogDescription>
         </DialogHeader>
 

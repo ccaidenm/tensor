@@ -301,7 +301,7 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
                 data-testid="symbol-group-more"
                 aria-label="More character groups"
                 className={cn(
-                  'flex h-6 items-center justify-center rounded border px-1.5 text-muted-foreground transition-colors hover:bg-muted',
+                  'flex h-6 items-center justify-center rounded border px-1.5 text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   restGroups.some((g) => g.id === activeGroup) && 'border-primary text-primary',
                 )}
               >
@@ -392,7 +392,7 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
                             className={cn(
                               'flex items-center justify-center rounded border text-base',
                               covered
-                                ? 'border-transparent hover:bg-muted hover:border-border'
+                                ? 'border-transparent hover:bg-muted hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                                 : 'cursor-not-allowed border-transparent opacity-40',
                             )}
                             style={{ width: CELL, height: CELL }}
@@ -441,7 +441,7 @@ function GroupChip({ id, label, active, onClick }: { id: string; label: string; 
       onClick={onClick}
       data-testid={`symbol-group-${id}`}
       className={cn(
-        'rounded border px-1.5 py-0.5 text-[11px] transition-colors',
+        'rounded border px-1.5 py-0.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
       )}
     >

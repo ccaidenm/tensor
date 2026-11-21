@@ -123,7 +123,7 @@ export function CustomPageSizeDialog() {
         <DialogHeader>
           <DialogTitle>Custom Page Size</DialogTitle>
           <DialogDescription>
-            Page dimensions in {MEASUREMENT_UNITS[unit].label.toLowerCase()}. Changes apply when you select Done.
+            Page dimensions in {MEASUREMENT_UNITS[unit].label.toLowerCase()}.
           </DialogDescription>
         </DialogHeader>
 

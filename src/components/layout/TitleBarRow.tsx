@@ -1,4 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
+import { useShortcutDisplay } from '@/lib/useShortcutDisplay';
+import { formatShortcutParts } from '@/lib/shortcuts';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,6 +14,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { TensorLogo } from '@/components/icons/TensorIcon';
+
+/** The menu item's right-aligned shortcut: the USER'S live binding for
+ *  the id (useShortcutDisplay), Word's convention. Nothing renders when
+ *  the command is unbound (Save As…, Export — the no-binding lie). */
+function MenuShortcut({ id }: { id: string }) {
+  const binding = useShortcutDisplay(id);
+  if (!binding) return null;
+  return (
+    <span className="ml-auto pl-6 text-xs tracking-wider text-muted-foreground">
+      {formatShortcutParts(binding).join('+')}
+    </span>
+  );
+}
 import { WindowControls } from '@/components/layout/WindowControls';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSettingsDialogStore } from '@/lib/settings/store';
@@ -95,11 +110,15 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
               }
             />
             <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => void openFile()}>Open…</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void openFile()}>
+                Open…
+                <MenuShortcut id='open' />
+              </DropdownMenuItem>
               {variant === 'editor' && (
                 <>
                   <DropdownMenuItem onClick={() => void useDocumentStore.getState().save()}>
                     Save
+                    <MenuShortcut id='save' />
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => void useDocumentStore.getState().saveAs()}>
                     Save As…
@@ -130,10 +149,12 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => useSettingsDialogStore.getState().open()}>
                 Settings
+                <MenuShortcut id='openSettings' />
               </DropdownMenuItem>
               {variant === 'home' && (
                 <DropdownMenuItem onClick={() => void getCommand('quit')?.run()}>
                   Quit Tensor
+                  <MenuShortcut id='quit' />
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
