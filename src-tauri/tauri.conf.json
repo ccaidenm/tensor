@@ -27,6 +27,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Caiden",
+    "category": "Productivity",
+    "copyright": "© 2026 Caiden",
+    "shortDescription": "A paginated word processor",
+    "longDescription": "Tensor — a paginated, engine-driven word processor with sections, columns, headers and footers, tables, images, equations, and native print, PDF, DOCX, and Markdown round trips.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
