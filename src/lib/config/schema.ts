@@ -27,6 +27,10 @@ export const ConfigSchema = z.object({
     .object({ path: z.string(), name: z.string(), openedAt: z.number() })
     .array()
     .default([]),
+  /** #101 — DRAGGABLE SIDEBARS: per-sidebar width memory (px). The
+   *  drag handle live-resizes the panel and commits on release; the
+   *  width rides the config so the user's layout survives restarts. */
+  sidebarWidths: z.record(z.string(), z.number()).default({}),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({

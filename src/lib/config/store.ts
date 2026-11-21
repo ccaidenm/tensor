@@ -20,6 +20,9 @@ interface ConfigStore {
   noteRecentDocument: (path: string, name: string) => void;
   /** #103 — drop a recent (the file vanished — the open failed). */
   removeRecentDocument: (path: string) => void;
+  /** #101 — the draggable sidebars' width memory (committed on drag
+   *  release; the panel reads it live during the drag). */
+  setSidebarWidth: (id: string, width: number) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -139,6 +142,14 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         recentDocuments: state.config.recentDocuments.filter((d) => d.path !== path),
+      },
+    })),
+
+  setSidebarWidth: (id, width) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        sidebarWidths: { ...state.config.sidebarWidths, [id]: Math.round(width) },
       },
     })),
 

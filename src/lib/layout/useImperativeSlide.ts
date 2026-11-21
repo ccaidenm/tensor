@@ -59,10 +59,20 @@ export function useImperativeSlide({
 }: UseImperativeSlideOptions) {
   const rafRef = useRef<number | null>(null);
   const currentValueRef = useRef<number | null>(null); // null = not yet initialized
+  const lastAnchorRef = useRef<SidebarAnchor | null>(null);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+
+    // #101 — REDOCK: the anchor changed → the previous dock's inline
+    // offset is STALE (right: 0px on a left-anchored panel keeps it on
+    // the right forever) — clear it and force the re-init below.
+    if (lastAnchorRef.current !== null && lastAnchorRef.current !== anchor) {
+      el.style.setProperty(OFFSET_PROPERTY[lastAnchorRef.current], '');
+      currentValueRef.current = null;
+    }
+    lastAnchorRef.current = anchor;
 
     const property = OFFSET_PROPERTY[anchor];
     const size = anchor === 'bottom' ? el.offsetHeight : el.offsetWidth;
@@ -120,6 +130,7 @@ export function useImperativeSlide({
         rafRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, reduceMotion]);
+    // The anchor rides the deps: a redock re-runs this effect (the
+    // stale-offset cleanup above re-inits the value for the new dock).
+  }, [isOpen, anchor, reduceMotion, durationMs, ref]);
 }
