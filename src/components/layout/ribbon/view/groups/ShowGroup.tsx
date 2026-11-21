@@ -20,6 +20,10 @@ export function ShowGroup() {
   // #WATERMARK: the display toggle (the captions NPC precedent).
   const showWatermark = useConfigStore((s) => s.config.editor.showWatermark);
   const setShowWatermark = useConfigStore((s) => s.setShowWatermark);
+  // #COMMENTS — the boundary-content toggle (the rewired "Show Margins"
+  // stub): the outside space around the sheets (the comments gutter).
+  const showBoundaryContent = useConfigStore((s) => s.config.editor.showBoundaryContent);
+  const setShowBoundaryContent = useConfigStore((s) => s.setShowBoundaryContent);
   // M-RULER: the ruler is a PAGINATED-mode surface (it rules real page
   // geometry) — like the page-setup controls, it disables (never
   // disappears) in pageless mode. The single button toggles BOTH bars
@@ -44,11 +48,16 @@ export function ShowGroup() {
         disabled={isPageless}
         onClick={() => setBothRulers(!(showHorizontalRuler || showVerticalRuler))}
       />
+      {/* #COMMENTS — the rewired "Show Margins" stub: BOUNDARY CONTENT
+          — the outside space around the sheets (the comments gutter
+          today; whatever lands there later). A persisted view setting
+          like the ruler toggles, ON by default; both modes (pageless
+          has boundary space too). Hiding never reflows the document. */}
       <IconButton
-        label="Show Margins"
+        label="Show Boundary Content"
         icon={<SquareDashed size={16} />}
-        onClick={() => {}}
-        disabled
+        active={showBoundaryContent}
+        onClick={() => setShowBoundaryContent(!showBoundaryContent)}
       />
       <IconButton
         label="Show Headers & Footers"

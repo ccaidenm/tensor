@@ -67,6 +67,8 @@ import {
   Proportions,
   Languages,
   ChartColumn,
+  MessageSquarePlus,
+  SquareDashed,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
@@ -77,6 +79,7 @@ import { runEditorCommand } from '@/lib/editor/editorCommands';
 import { focusedTextControl } from '@/lib/editor/domUtils';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { saveRecoveryCopy } from '@/lib/document/recovery';
+import { useCommentStore } from '@/lib/comments/store';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSidebarStore } from "@/lib/layout/sidebarStore";
 import { useFocusStore } from "@/lib/layout/focusStore";
@@ -456,6 +459,9 @@ export const COMMANDS: CommandAction[] = [
           lineNumbers,
           coreProperties,
           headerFooter,
+          // #COMMENTS: the snapshot parity law — threads ride like the
+          // rest of the metadata bundle.
+          commentThreads: useCommentStore.getState().threadsForSave(),
         });
       }
       getCurrentWindow().close();
@@ -999,6 +1005,22 @@ export const COMMANDS: CommandAction[] = [
       }
     },
   },
+  {
+    // #COMMENTS — the BOUNDARY CONTENT toggle (the rewired "Show
+    // Margins" stub): the outside space around the sheets — the comments
+    // gutter today, future boundary content later. One body for the
+    // View-tab button and the palette; persisted like the ruler
+    // toggles. Hiding never reflows the document (desk-level space
+    // reservation — the engine never sees it).
+    id: 'toggleBoundaryContent',
+    title: 'Show Boundary Content',
+    icon: SquareDashed,
+    group: 'navigate',
+    keywords: ['boundary', 'margin', 'margins', 'outside', 'comments', 'gutter', 'annotations'],
+    run: () => {
+      cfg().setShowBoundaryContent(!cfg().config.editor.showBoundaryContent);
+    },
+  },
 
   // ── Format (editor-context commands — shared ShortcutsExtension
   //    dispatch path; the palette never re-implements one) ──────────
@@ -1080,6 +1102,19 @@ export const COMMANDS: CommandAction[] = [
     group: 'format',
     shortcutId: 'insertLink',
     keywords: ['link', 'hyperlink', 'url', 'insert'],
+  }),
+  // #COMMENTS — the ONE comment body lives in EDITOR_COMMAND_MAP
+  // (editorCommands.ts); this entry is the palette/metadata face of it.
+  // ALWAYS ENABLED (the user's ruling): a bare caret anchors the word
+  // it sits in; the body's guards (band toast, no-word toast) are the
+  // loud fallbacks, not disabled states.
+  editorCommand('addComment', {
+    title: 'Add Comment',
+    icon: MessageSquarePlus,
+    group: 'actions',
+    shortcutId: 'addComment',
+    enablement: () => !!doc().editor,
+    keywords: ['comment', 'note', 'annotate', 'remark', 'feedback', 'review', 'margin'],
   }),
   editorCommand('insertEquation', {
     title: 'Insert Equation',

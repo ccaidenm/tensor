@@ -315,6 +315,10 @@ const BUILTIN_REGISTRY: StyleRegistrySnapshot = {
 // design (a reading-mode mark the scanner consumes document-side),
 // never a dropped-in-error warn. Its entries ride the referenceTable
 // blocks, not the paragraph runs it decorates.
+// #COMMENTS: the comment mark is RECOGNIZED-QUIET the same way — the
+// anchor is model data (threadId) consumed by the comment gutter and
+// exporters; a comment can never change pagination or line layout
+// (the run walk simply never reads it — no warn, no effect).
 const warnedDroppedSignatures = new Set<string>();
 
 const DEFAULT_HIGHLIGHT = '#fef08a';

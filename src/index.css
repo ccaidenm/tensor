@@ -64,6 +64,12 @@ body {
   /* Grammar: the ADVISORY blue (Word/GDocs convention) — distinct from
    * spelling's red by color (and, optionally, the double line). */
   --color-grammar-error: oklch(52% 0.17 250);
+  /* #COMMENTS — the anchored-thread tint (Pages overlay background,
+   * pageless mark-span background — one var, both surfaces, the spell
+   * pattern). A VIOLET distinct from search's yellow and spell's
+   * red/blue; the active (caret's thread) tier deepens it. */
+  --color-comment-highlight: oklch(91% 0.07 290);
+  --color-comment-highlight-active: oklch(84% 0.1 290);
 }
 
 .dark {
@@ -444,6 +450,27 @@ body {
 
 .grammar-double-line .tensor-grammar-error {
   text-decoration-style: double;
+}
+
+/* ── #COMMENTS (pageless surface) ────────────────────────────────────
+    The anchored-thread tint: the mark's OWN span carries the base
+    background (the mark's renderHTML class — no decoration needed for
+    the base); the tracking plugin's decoration adds
+    .tensor-comment-active on the caret's thread. The tint is
+    translucent (color-mix over the sheet) so the text stays readable,
+    the same readability law as the search highlight. Pages mode paints
+    the same two tiers as overlay rects (CommentHighlights). */
+.tensor-comment-mark {
+  background-color: color-mix(in oklab, var(--color-comment-highlight) 60%, transparent);
+  border-radius: 2px;
+}
+
+.tensor-comment-active {
+  background-color: var(--color-comment-highlight-active);
+}
+
+.tensor-comment-mark.tensor-comment-active {
+  background-color: var(--color-comment-highlight-active);
 }
 
 @theme inline {

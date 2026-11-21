@@ -17,6 +17,7 @@ import { CellSelection } from '@tiptap/pm/tables';
 import { Separator } from '@/components/ui/separator';
 import type { FloatingToolbarPosition } from '@/lib/editor/useFloatingToolbar';
 import { selectionHasMergedCells } from '@/lib/editor/TableExtensions';
+import { getCommand } from '@/lib/commands/registry';
 
 import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { ColorPickerButton } from '../layout/ribbon/ColorPickerButton';
@@ -192,11 +193,17 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       <Separator orientation="vertical" className="mx-1 h-6" />
 
       <LinkButton editor={editor} />
+      {/* #COMMENTS — dispatches the ONE command body (the registry's
+          law: the toolbar, Ctrl+Alt+M, and the palette share
+          EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED (the user's
+          ruling): a bare caret anchors the word it sits in. (This
+          strip only renders for text contexts — the image strip's
+          own stub stays disabled, non-text anchors out of scope.) */}
       <IconButton
         label="Insert Comment"
         icon={<MessageSquarePlus size={16} />}
-        onClick={() => { }}
-        disabled
+        shortcutId="addComment"
+        onClick={() => getCommand('addComment')?.run()}
       />
       <ClearFormattingButton editor={editor} />
           </>

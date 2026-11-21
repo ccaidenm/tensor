@@ -7,6 +7,7 @@ import { EquationEditorBubble } from "./EquationEditorBubble";
 import { TooltipProvider } from "../ui/tooltip";
 import { useConfigStore } from "@/lib/config/store";
 import { useFocusStore } from "@/lib/layout/focusStore";
+import { useCommentsGutterVisible, CommentsGutter } from "@/components/comments/CommentsGutter";
 import { useDocumentStore } from "@/lib/document/store";
 import { ptToPx } from "@/lib/document/pageSetup";
 import { PagelessRuler } from "./PagelessRuler";
@@ -86,6 +87,13 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   // rule flips grammar decorations to text-decoration-style: double —
   // live, without rebuilding the decoration set).
   const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
+  // #COMMENTS — the boundary gutter (the anchored thread cards): the
+  // strip's own ref anchors the cards (content-space ÷ zoom — the
+  // gutter rides the scaled strip). THE OVERLAY RULING: the strip never
+  // moves (no reservation); the column attaches at its right edge. One
+  // visibility selector, synced with PaginatedView's.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const boundaryVisible = useCommentsGutterVisible();
 
   // The suggestion bubble (GDocs rule: plain click on a flagged word).
   // The anchor stores the OPEN-TIME offset from the container — the
@@ -175,6 +183,7 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
               consumes it — the paginated selection parity). */}
           <div
             data-testid="pageless-surface"
+            ref={stripRef}
             onClick={handleSurfaceClick}
             className={`pageless-strip relative z-10 mx-auto ${showNonPrintingChars ? "show-non-printing" : ""} ${grammarDoubleLine ? "grammar-double-line" : ""}`}
             style={{
@@ -190,6 +199,24 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
               className="prose prose-neutral min-h-100 focus:outline-none text-black"
               style={{ fontFamily, fontSize: `${fontSize}px` }}
             />
+            {/* #COMMENTS — the boundary gutter: inside the strip (its
+                containing block), left-full hugs the sheet's right
+                edge. Cards scale with the strip (the v1 ruling — the
+                gutter rides the zoom transform; chrome-fixed sizing is
+                a follow-up if it reads wrong at extremes). */}
+            {boundaryVisible && (
+              <CommentsGutter
+                getAnchorTop={(threadId) => {
+                  const strip = stripRef.current;
+                  if (!strip) return null;
+                  const span = strip.querySelector(`[data-comment-thread-id="${threadId}"]`);
+                  if (!span) return null;
+                  const z = zoomLevel / 100;
+                  return (span.getBoundingClientRect().top - strip.getBoundingClientRect().top) / z;
+                }}
+                scale={zoomLevel / 100}
+              />
+            )}
           </div>
 
           {linkBubble && editor && containerRef.current && (

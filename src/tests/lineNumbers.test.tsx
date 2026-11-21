@@ -381,13 +381,18 @@ describe('Layout tab (ArrangeGroup) + palette commands', () => {
     // M-RULER: Show Rulers is LIVE (both bars ship); its button is a
     // real toggle. M-HEADER-FOOTER: Show Headers & Footers is LIVE too
     // (the captions NPC precedent). #WATERMARK: Show Watermark is LIVE
-    // as well; the remaining placeholders (Show Margins, Show
-    // Footnotes & Endnotes) stay disabled.
-    expect(document.querySelectorAll('button[disabled]').length).toBe(2);
+    // as well; #COMMENTS rewired the Show Margins placeholder into the
+    // LIVE Show Boundary Content toggle — the ONE remaining placeholder
+    // is Show Footnotes & Endnotes.
+    expect(document.querySelectorAll('button[disabled]').length).toBe(1);
     const rulers = document.querySelector('button[aria-label="Show Rulers"]') as HTMLButtonElement;
     expect(rulers.disabled).toBe(false);
     const hf = document.querySelector('button[aria-label="Show Headers & Footers"]') as HTMLButtonElement;
     expect(hf.disabled).toBe(false);
+    const boundary = document.querySelector(
+      'button[aria-label="Show Boundary Content"]',
+    ) as HTMLButtonElement;
+    expect(boundary.disabled).toBe(false);
   });
 
   it('the main icon button reflects and toggles the setting (default Per Page)', () => {

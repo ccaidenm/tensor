@@ -25,6 +25,10 @@ interface ConfigStore {
   setShowCaptions: (value: boolean) => void;
   setShowHeadersFooters: (value: boolean) => void;
   setShowWatermark: (value: boolean) => void;
+  /** #COMMENTS — the boundary-content toggle (the rewired "Show
+   *  Margins" stub): the outside space around the sheets (the comments
+   *  gutter today). Persisted like the other show-* view settings. */
+  setShowBoundaryContent: (value: boolean) => void;
   setShowHorizontalRuler: (value: boolean) => void;
   setShowVerticalRuler: (value: boolean) => void;
   setBothRulers: (value: boolean) => void;
@@ -202,6 +206,16 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       config: {
         ...state.config,
         editor: { ...state.config.editor, showCaptions: value },
+      },
+    })),
+
+  // #COMMENTS — the boundary-content toggle (the rewired "Show Margins"
+  // stub): persisted like the other show-* view settings.
+  setShowBoundaryContent: (value) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        editor: { ...state.config.editor, showBoundaryContent: value },
       },
     })),
 

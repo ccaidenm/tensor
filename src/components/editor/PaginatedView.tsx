@@ -63,6 +63,9 @@ import { selectionInBand } from '@/lib/editor/headerFooterCommands';
 import { HeaderFooterSlots } from './paginated/HeaderFooterSlots';
 import { useConfigStore } from '@/lib/config/store';
 import { useFocusStore } from '@/lib/layout/focusStore';
+import { useCommentStore } from '@/lib/comments/store';
+import { commentTrackingKey } from '@/lib/editor/CommentExtension';
+import { CommentsGutter, useCommentsGutterVisible } from '@/components/comments/CommentsGutter';
 import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
 import { resolveNormalBase, baselineRunStyle, resolveRun } from '@/lib/styles/resolve';
 import { ensureBlockIds } from '@/lib/editor/BlockIdExtension';
@@ -85,6 +88,7 @@ import { Ruler, VerticalRuler } from './paginated/Ruler';
 import { useFontRegistryStore } from '@/lib/fonts/registry';
 import { SelectionHighlights } from './paginated/SelectionHighlights';
 import { SearchHighlights } from './paginated/SearchHighlights';
+import { CommentHighlights, type CommentThreadPaint } from './paginated/CommentHighlights';
 import { BreakMarks } from './paginated/BreakMarks';
 import { SpellHighlights, type SpellBar } from './paginated/SpellHighlights';
 import { FloatingToolbar } from './FloatingToolbar';
@@ -264,6 +268,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const [searchPaint, setSearchPaint] = useState<SearchPaint | null>(null);
   // Spell/grammar flags: the flat-line projection (see updateSpellProjection).
   const [spellPaint, setSpellPaint] = useState<SpellBar[]>([]);
+  // #COMMENTS — the anchored threads' painted rects (see
+  // updateCommentProjection). Null = nothing to paint.
+  const [commentPaint, setCommentPaint] = useState<{
+    threads: CommentThreadPaint[];
+    active: PaintedRect[];
+  } | null>(null);
   // The suggestion bubble: set by a plain left-click on a flagged
   // word (GDocs behavior); the anchor derives at render time from the
   // error's painted extent (fresh through scrolls/zoom re-renders).
@@ -294,9 +304,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const selectionProjectionRef = useRef<() => void>(() => {});
   const searchProjectionRef = useRef<() => void>(() => {});
   const spellProjectionRef = useRef<() => void>(() => {});
+  // #COMMENTS — the comment projection (the search/spell pattern).
+  const commentProjectionRef = useRef<() => void>(() => {});
   const pendingScrollRef = useRef(false);
   const prevSearchIndexRef = useRef(-1);
   const prevSearchStateRef = useRef<unknown>(null);
+  // #COMMENTS — the projection's skip-state (the search pattern).
+  const prevCommentRangesRef = useRef<ReadonlyArray<unknown> | null>(null);
+  const prevActiveThreadRef = useRef<string | null>(null);
   const prevSpellErrorsRef = useRef<readonly unknown[] | null>(null);
   const draggingRef = useRef(false);
   const lastClickRef = useRef<{ t: number; x: number; y: number; c: number } | null>(null);
@@ -329,6 +344,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const styleEpoch = useStyleRegistryStore((s) => s.epoch);
   const zoomLevel = useConfigStore((s) => s.config.editor.zoomLevel);
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
+  // #COMMENTS — the shared visibility law: the gutter renders and the
+  // desk reserves the same width iff this is true (one selector, the
+  // two can never drift).
+  const boundaryVisible = useCommentsGutterVisible();
   // Display-only ink (M6): NPCs paint on screen; never a layout fact.
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   const showBreakMarks = useConfigStore((s) => s.config.editor.showBreakMarks);
@@ -759,6 +778,40 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
    *  and on spell-meta transactions (results arrived — those dispatch
    *  WITHOUT doc changes, the same seam search's index metas ride).
    *  Doc-changing transactions reach this through relayout()'s force. */
+  /** #COMMENTS — the comment projection (the search pattern): the
+   *  tracking plugin's PM ranges mapped through positionMap into tinted
+   *  rects, grouped per thread, with the ACTIVE thread's deeper tier.
+   *  Recomputed on relayout (geometry moved) and on comment-store
+   *  changes (the subscription below — active thread rides selection
+   *  moves, anchored membership rides mark steps; neither can be seen
+   *  from the doc-change seam alone). Skips when the ranges array is
+   *  reference-identical AND the active thread is unchanged (the
+   *  search projection's skip law). */
+  function updateCommentProjection(force = false) {
+    if (!editor) return;
+    const st = commentTrackingKey.getState(editor.state);
+    const current = layoutRef.current;
+    if (!st || !current) return;
+    const activeId = useCommentStore.getState().activeThreadId;
+    if (!force && st.ranges === prevCommentRangesRef.current && activeId === prevActiveThreadRef.current)
+      return;
+    prevCommentRangesRef.current = st.ranges;
+    prevActiveThreadRef.current = activeId;
+    const gap = useDocumentStore.getState().pageSetup.pageGap;
+    const m = metricsRef.current!;
+    const byThread = new Map<string, PaintedRect[]>();
+    const active: PaintedRect[] = [];
+    for (const range of st.ranges) {
+      const rects = textRangeTextExtents(current.blocks, current.result, range.from, range.to, m, gap);
+      if (rects.length === 0) continue;
+      const arr = byThread.get(range.threadId) ?? [];
+      arr.push(...rects);
+      byThread.set(range.threadId, arr);
+      if (range.threadId === activeId) active.push(...rects);
+    }
+    setCommentPaint(byThread.size > 0 ? { threads: [...byThread.entries()].map(([id, rects]) => ({ id, rects })), active } : null);
+  }
+
   function updateSpellProjection(force = false) {
     if (!editor) return;
     const current = layoutRef.current;
@@ -936,6 +989,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       updateSelectionProjection();
       updateSearchProjection(true);
       updateSpellProjection(true);
+      updateCommentProjection(true);
     } catch (err) {
       // FALLBACK AUDIT (M6.1, CONVENTIONS.md): the pageless fallback
       // catches ONLY the sentinel family — a document using a node the
@@ -975,6 +1029,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   selectionProjectionRef.current = updateSelectionProjection;
   searchProjectionRef.current = updateSearchProjection;
   spellProjectionRef.current = updateSpellProjection;
+  commentProjectionRef.current = updateCommentProjection;
 
   function pmPosAt(e: { clientX: number; clientY: number }): number | null {
     const current = layoutRef.current;
@@ -1539,6 +1594,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return () => {
       unsubDoc();
     };
+  }, []);
+
+  // #COMMENTS — the comment store is the projection's trigger for
+  // every NON-transaction change (active thread, anchored membership,
+  // thread edits): the transaction seams (relayout for geometry/doc,
+  // onTransaction for selection) can't see store-only writes like
+  // deleteThread's active reset. The projection's skip law keeps the
+  // redundant calls free (identity compare on ranges + active id).
+  useEffect(() => {
+    const unsub = useCommentStore.subscribe(() => commentProjectionRef.current());
+    return unsub;
   }, []);
 
   // M-FONTS: a font install/uninstall changes the RULER mid-session.
@@ -2478,6 +2544,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           {searchPaint && (
             <SearchHighlights matches={searchPaint.all} current={searchPaint.current} />
           )}
+          {/* #COMMENTS — the anchored threads' tint (the search pattern:
+              base tier for every anchored thread, the active tier on
+              top for the caret's thread). Document ink — visible
+              regardless of the boundary toggle; the toggle governs the
+              gutter only. */}
+          {commentPaint && (
+            <CommentHighlights threads={commentPaint.threads} active={commentPaint.active} />
+          )}
           {/* #58 — the break marks (the structural NPC layer, the
               Review ▸ Show Break Marks toggle): the page/section-break
               badges — view-only ink, never printed. */}
@@ -2529,6 +2603,33 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                 </div>
               );
             })()}
+          {/* #COMMENTS — the boundary gutter (the anchored thread cards).
+              A sibling of the stack in the UNSCALED zoom-wrapper: cards
+              render at 100% chrome size while their anchors read stack
+              coordinates × zoom (the getAnchorTop contract). left-full
+              attaches at the sheet's right edge — THE OVERLAY RULING:
+              the document never moves (no reservation); the column
+              overlays whatever whitespace exists. */}
+          {boundaryVisible && editor && (
+            <CommentsGutter
+              getAnchorTop={(threadId) => {
+                const st = commentTrackingKey.getState(editor.state);
+                if (!st || !layoutRef.current || !metricsRef.current) return null;
+                const span = st.ranges.find((r) => r.threadId === threadId);
+                if (!span) return null;
+                const rects = textRangeTextExtents(
+                  layoutRef.current.blocks,
+                  layoutRef.current.result,
+                  span.from,
+                  span.to,
+                  metricsRef.current,
+                  gap,
+                );
+                return rects[0] ? rects[0].top * z : null;
+              }}
+              scale={1}
+            />
+          )}
         </div>
       </div>
       {/* The link bubble anchors at PAINTED coords (linkCoordsFor) —

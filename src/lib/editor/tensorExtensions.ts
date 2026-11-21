@@ -48,6 +48,9 @@ import { TensorTableKit } from '@/lib/editor/TableExtensions';
 import { ReferenceTableNode } from '@/lib/editor/ReferenceTableNode';
 import { IndexMark } from '@/lib/editor/IndexMark';
 import { RefLeaderMark } from '@/lib/editor/RefLeaderMark';
+// #COMMENTS: the comment mark (the anchoring half — attrs.threadId) +
+// the tracking plugin (anchored scan, the janitor, active-thread).
+import { CommentMark } from '@/lib/editor/CommentExtension';
 import { ReferenceScanExtension } from '@/lib/references/store';
 import { ReferenceGeneratorExtension } from '@/lib/references/generator';
 import { PageSetupHistoryExtension } from '@/lib/editor/pageSetupHistoryExtension';
@@ -132,6 +135,10 @@ export function tensorExtensions(): Extensions {
     ReferenceTableNode,
     IndexMark,
     RefLeaderMark,
+    // #COMMENTS: the invisible comment mark + tracking plugin (after
+    // the marks family, before the history-override tail — order among
+    // marks is irrelevant; the plugin rides the mark's own registration).
+    CommentMark,
     ReferenceScanExtension,
     ReferenceGeneratorExtension,
     // #58 — LAST: overrides StarterKit's undo/redo commands with the

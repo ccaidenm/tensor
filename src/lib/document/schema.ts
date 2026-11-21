@@ -104,6 +104,35 @@ export const HeaderFooterSchema = z.object({
 }) satisfies z.ZodType<HeaderFooterSettings>;
 
 /**
+ * #COMMENTS — the file-side thread validation. Optional — old files
+ * predate it and open with no threads (the styles/lineNumbers
+ * precedent). NOT named `comments`: that key is the core-properties
+ * "description" field (CorePropertiesSchema). The ANCHORS ride docJSON
+ * (the comment mark's threadId); this array is the CONTENT half — the
+ * ids are the join. Entries are ≥1 (deleting the last entry deletes
+ * the thread, so a saved file never holds an empty one).
+ */
+export const CommentThreadsSchema = z.array(
+  z.object({
+    id: z.string(),
+    entries: z
+      .array(
+        z.object({
+          id: z.string(),
+          author: z.string(),
+          text: z.string(),
+          createdAt: z.string(),
+          editedAt: z.string().optional(),
+        }),
+      )
+      .min(1),
+    resolved: z.boolean(),
+    resolvedAt: z.string().optional(),
+    resolvedBy: z.string().optional(),
+  }),
+) satisfies z.ZodType<import('@/lib/comments/store').CommentThread[]>;
+
+/**
  * M-HEADER-FOOTER-2: the v1 shape (per-region TipTap JSON docs) —
  * kept ONLY so the open path can SEE it (zod strips unknown keys;
  * without this union the legacy content fields would vanish before
@@ -175,6 +204,10 @@ export const DocumentFileSchema = z.object({
     styles: DocStylesSchema.optional(),
     lineNumbers: LineNumbersSchema.optional(),
     headerFooter: z.union([LegacyHeaderFooterSchema, HeaderFooterSchema]).optional(),
+    /** #COMMENTS — the threads' CONTENT half (the anchors ride docJSON
+     *  as comment marks; the ids join them). Absent = the file predates
+     *  comments (or carries none). */
+    commentThreads: CommentThreadsSchema.optional(),
   }).default({}),
 });
 
