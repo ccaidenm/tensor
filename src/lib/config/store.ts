@@ -12,6 +12,8 @@ interface ConfigStore {
   setTheme: (theme: Config["theme"]) => void;
   /** #97 — the brand accent (the writer below retunes the tokens). */
   setAccent: (accent: Config["accent"]) => void;
+  /** #100 — the window controls' side (Linux/Windows lane). */
+  setWindowControlsSide: (side: Config["windowControlsSide"]) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -104,6 +106,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setAccent: (accent) =>
     set((state) => ({
       config: { ...state.config, accent },
+    })),
+
+  setWindowControlsSide: (side) =>
+    set((state) => ({
+      config: { ...state.config, windowControlsSide: side },
     })),
 
   setDownloadsDir: (value) =>

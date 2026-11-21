@@ -12,6 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useDocumentStore } from "@/lib/document/store";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { inTauriWindow, isMacOS } from "@/lib/window/tauriEnv";
+import { WindowControls } from "./WindowControls";
 import { FontGroup } from "./ribbon/home/groups/FontGroup";
 import { TooltipProvider } from "../ui/tooltip";
 import { ParagraphGroup } from "./ribbon/home/groups/ParagraphGroup";
@@ -62,6 +65,9 @@ export function Ribbon() {
   const exportDocx = useDocumentStore((s) => s.exportDocx);
 
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
+  // #100 — the window controls' side (Linux/Windows lane; macOS keeps
+  // its native traffic lights regardless).
+  const controlsSide = useConfigStore((s) => s.config.windowControlsSide);
 
   // M-CONTEXTUAL-RIBBON — the contextual interplay lives HERE, next to
   // the tab state it acts on (the store stays producer-facing). Entering
@@ -94,6 +100,16 @@ export function Ribbon() {
 
   const displayName = filePath ? filePath.split("/").pop() : "Untitled";
 
+  // #100 — the OS window title follows the document (taskbar, alt-tab,
+  // the window list): the merged titlebar row owns the visual title,
+  // and the native frame is gone, so the OS chrome reads it here.
+  useEffect(() => {
+    if (!inTauriWindow()) return;
+    void getCurrentWindow().setTitle(
+      `${displayName}${isDirty ? " •" : ""} — Tensor`,
+    );
+  }, [displayName, isDirty]);
+
   const editor = useDocumentStore((s) => s.editor);
   // M-CONTEXTUAL-RIBBON — the selection producers (table / image;
   // header/footer stubs until its milestone).
@@ -108,8 +124,22 @@ export function Ribbon() {
         className="gap-0 bg-card border-b border-border"
       >
         <div className="relative h-10">
-          <div className="relative z-10 flex h-10 items-center justify-between px-1">
+          <div className="relative z-10 flex h-10 items-center px-1">
             <div className="flex h-10 items-center">
+              {/*
+                #100 — the macOS lane: the native traffic lights overlay
+                the row's left edge (titleBarStyle: Overlay in
+                tauri.conf); reserve their lane (a drag region — it is
+                empty chrome) so the Tensor button clears them. Linux/
+                Windows never reserves it: the row IS the frame.
+              */}
+              {!isMacOS() && controlsSide === 'left' && <WindowControls />}
+              {isMacOS() && (
+                <div
+                  className="h-full w-[68px] flex-none"
+                  data-tauri-drag-region
+                />
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -164,10 +194,42 @@ export function Ribbon() {
               </TabsList>
             </div>
 
-            <span className="pr-2 text-sm text-muted-foreground">
-              {displayName}
-              {isDirty ? " •" : ""}
-            </span>
+              {/*
+                #100 — THE TITLE LANES. The drag lane absorbs the row's
+                leftover width (data-tauri-drag-region; double-click
+                toggles maximize — the tauri drag listener owns the
+                mousedown). The document name: on Linux/Windows it
+                floats ABSOLUTELY CENTERED in the WINDOW (the user's
+                ruling — centering between ribbon and controls reads
+                off-axis), dragging on its own band; on macOS it stays
+                in-flow at the far right (the traffic lights own the
+                left lane). CAVEAT: a window dragged narrow enough for
+                the tabs to reach the center band would tuck the name
+                under them — the desktop app starts maximized, so the
+                band is clear in practice.
+              */}
+              <div
+                className="min-w-3 flex-1 self-stretch"
+                data-tauri-drag-region
+              />
+              {isMacOS() ? (
+                <span
+                  className="max-w-[240px] truncate px-2 text-sm text-muted-foreground"
+                  data-tauri-drag-region
+                >
+                  {displayName}
+                  {isDirty ? " •" : ""}
+                </span>
+              ) : (
+                <span
+                  className="absolute left-1/2 top-0 z-20 flex h-10 max-w-[240px] -translate-x-1/2 items-center truncate px-2 text-sm text-muted-foreground"
+                  data-tauri-drag-region
+                >
+                  {displayName}
+                  {isDirty ? " •" : ""}
+                </span>
+              )}
+              {!isMacOS() && controlsSide === 'right' && <WindowControls />}
           </div>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-0.5 bg-border" />

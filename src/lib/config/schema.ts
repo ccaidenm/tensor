@@ -13,6 +13,10 @@ export const ConfigSchema = z.object({
    *  config store's writer retunes --primary + the foreground ink;
    *  the catalog is the one source — see lib/branding/accents). */
   accent: z.enum(ACCENT_IDS).default(DEFAULT_ACCENT_ID),
+  /** #100 — which side the custom window controls sit on (the merged
+   *  titlebar row). Linux/Windows only — macOS keeps its native
+   *  traffic lights (Overlay) regardless. */
+  windowControlsSide: z.enum(['right', 'left']).default('right'),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({

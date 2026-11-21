@@ -9,7 +9,7 @@ import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { useStyleDialogStore } from '@/lib/styles/dialogStore';
 import { usePaletteStore } from '@/lib/palette/store';
 import { CommandPalette } from '@/components/palette/CommandPalette';
-import { COMMANDS, getCommand, getCommandByMenuEvent } from '@/lib/commands/registry';
+import { COMMANDS, getCommand } from '@/lib/commands/registry';
 import { filterCommands } from '@/lib/commands/useAppCommands';
 import { hasBandContainer, selectionInBand, setDifferentFirstPage } from '@/lib/editor/headerFooterCommands';
 import { EDITOR_COMMAND_MAP } from '@/lib/editor/editorCommands';
@@ -105,71 +105,30 @@ function paletteHint(id: string): HTMLElement | null {
   return document.querySelector(`[data-testid="palette-hint-${id}"]`);
 }
 
-// ─── 1. Menu ⇄ registry: single source of truth, no drift ─────────────────
+// ─── 1. Registry shape ─────────────────────────────────────────────────────
 
-/** RECEIPT — the Rust-side MenuItem ids (src-tauri/src/lib.rs, lines
- *  17-55). The native menu can only emit these payloads; each must
- *  map to EXACTLY ONE registry entry, or the menu would dispatch a
- *  different action than the palette shows. */
-const RUST_MENU_EVENT_IDS = [
-  'menu-new',
-  'menu-open',
-  'menu-save',
-  'menu-save-as',
-  'menu-quit',
-  'menu-undo',
-  'menu-redo',
-  'menu-cut',
-  'menu-copy',
-  'menu-paste',
-  'menu-toggle-dark-mode',
-] as const;
+// #100 — the old menu-parity block died with the native menu (absorbed
+// into the app: the Ribbon + palette + web shortcuts own its items).
+// The registry INVARIANTS it happened to carry live on:
 
-describe('registry ⇄ menu parity (drift is structurally impossible)', () => {
-  it('every Rust menu id resolves to exactly one registry command', () => {
-    for (const id of RUST_MENU_EVENT_IDS) {
-      const matches = COMMANDS.filter((c) => c.menuEventId === id);
-      expect(matches, id).toHaveLength(1);
-    }
-  });
-
-  it('no orphan menuEventIds — the registry carries nothing the Rust menu cannot emit', () => {
-    const registryMenuIds = COMMANDS.filter((c) => c.menuEventId).map((c) => c.menuEventId);
-    for (const id of registryMenuIds) {
-      expect(RUST_MENU_EVENT_IDS, `orphan menuEventId ${id}`).toContain(id);
-    }
-  });
-
-  it('toggle-dark-mode is ONE entry serving both menu and palette (no duplicate non-menu dark action)', () => {
-    const darkCommands = COMMANDS.filter(
-      (c) => c.keywords.includes('dark') || c.title.toLowerCase().includes('dark'),
-    );
-    expect(darkCommands.map((c) => c.id)).toEqual(['toggleDarkMode']);
-    expect(getCommandByMenuEvent('menu-toggle-dark-mode')!.id).toBe('toggleDarkMode');
-  });
-
+describe('registry shape', () => {
   it('registry ids are unique', () => {
     const ids = COMMANDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('hidden is PALETTE-only: "new" (stub) never shows in the palette, but the menu still dispatches it', () => {
+  it('hidden is PALETTE-only: "new" (stub) never shows in the palette, but its run body stays callable', () => {
     expect(filterCommands(false).some((c) => c.id === 'new')).toBe(false);
     expect(filterCommands(true).some((c) => c.id === 'new')).toBe(false);
-    // Menu path still resolves and runs the stub (the console.warn
-    // receipt) without throwing:
-    expect(() => getCommandByMenuEvent('menu-new')!.run()).not.toThrow();
+    // The stub stays runnable (the console.warn receipt) without
+    // throwing — #103 replaces the body:
+    expect(() => getCommand('new')!.run()).not.toThrow();
   });
 
   it('quit IS a palette command (amendment 1a) and carries the safe-quit marker', () => {
     const quit = getCommand('quit')!;
     expect(filterCommands(false).some((c) => c.id === 'quit')).toBe(true);
     expect(quit.requiresSafeQuit).toBe(true);
-    expect(quit.menuEventId).toBe('menu-quit');
-  });
-
-  it('quit and "new-when-real" are the only safe-quit surfaces', () => {
-    expect(COMMANDS.filter((c) => c.requiresSafeQuit).map((c) => c.id)).toEqual(['quit']);
   });
 });
 
@@ -394,16 +353,13 @@ describe('palette UI', () => {
   });
 });
 
-// ─── 4. Dispatch: palette run == menu run (the drift-proof test) ────────
+// ─── 4. Dispatch (the one-path law: palette/shortcuts run the same body) ─
 
 describe('dispatch equivalence', () => {
-  it('menu path and palette path run the SAME save (identical store effect)', () => {
+  it('the palette path runs the save (the single dispatch body)', () => {
     const saveSpy = vi.spyOn(useDocumentStore.getState(), 'save');
-    // Menu path:
-    void getCommandByMenuEvent('menu-save')!.run();
-    // Palette path:
     void getCommand('save')!.run();
-    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
     saveSpy.mockRestore();
   });
 
@@ -415,9 +371,9 @@ describe('dispatch equivalence', () => {
       editor.commands.insertContent(' MORE');
     });
     expect(editor.state.doc.textContent).toContain('MORE');
-    void getCommandByMenuEvent('menu-undo')!.run();
+    void getCommand('undo')!.run();
     expect(editor.state.doc.textContent).not.toContain('MORE');
-    // Palette path — identical effect:
+    // The same single body:
     act(() => {
       editor.commands.insertContent(' AGAIN');
     });
@@ -459,8 +415,6 @@ describe('dispatch equivalence', () => {
 
     void getCommand('toggleDarkMode')!.run();
     expect(useConfigStore.getState().config.theme).toBe('dark');
-    // ...and it is the same entry the menu dispatches:
-    expect(getCommandByMenuEvent('menu-toggle-dark-mode')!.id).toBe('toggleDarkMode');
 
     void getCommand('toggleNPC')!.run();
     expect(useConfigStore.getState().config.editor.showNonPrintingChars).toBe(true);

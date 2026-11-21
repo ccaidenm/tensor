@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
-import { Moon, Type, Paintbrush, User, Mouse, Terminal, FolderOpen } from 'lucide-react';
+import { Moon, PanelLeftClose, PanelRightClose, Type, Paintbrush, User, Mouse, Terminal, FolderOpen } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useConfigStore } from '@/lib/config/store';
+import { isMacOS } from '@/lib/window/tauriEnv';
 import { useSettingsDialogStore } from '@/lib/settings/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 import { Switch } from '@/components/ui/switch';
@@ -121,6 +122,9 @@ export function GeneralPanel() {
   const setPdfAlwaysAskTrigger = useConfigStore((s) => s.setPdfAlwaysAskTrigger);
   const triggerLabel = trigger === 'ctrl' ? 'Ctrl/' : 'Shift+';
   const setDeveloperMode = useConfigStore((s) => s.setDeveloperMode);
+  // #100 — the window controls' side (inert on macOS — native lights).
+  const windowControlsSide = useConfigStore((s) => s.config.windowControlsSide);
+  const setWindowControlsSide = useConfigStore((s) => s.setWindowControlsSide);
   // The enabling warning: turning Developer Mode ON must be ACCEPTED,
   // never incidental (devtools can inspect and mutate anything).
   const [developerWarningOpen, setDeveloperWarningOpen] = useState(false);
@@ -130,6 +134,32 @@ export function GeneralPanel() {
       <SettingsSection id="appearance" title="Appearance">
         <Row icon={<Moon className="h-4 w-4" />} label="Dark Mode" description="Switch between light and dark appearance">
           <Switch checked={theme === 'dark'} onCheckedChange={(checked: boolean) => setTheme(checked ? 'dark' : 'light')} />
+        </Row>
+        <Row
+          icon={<PanelRightClose className="h-4 w-4" />}
+          label="Window buttons"
+          description={
+            isMacOS()
+              ? 'macOS keeps its native traffic lights (left) — this setting applies to Linux and Windows'
+              : 'Which side of the title bar the minimize/maximize/close buttons sit on'
+          }
+        >
+          <div className="flex gap-1" role="group" aria-label="Window button placement">
+            {(['left', 'right'] as const).map((option) => (
+              <Button
+                key={option}
+                size="sm"
+                variant={windowControlsSide === option ? 'secondary' : 'ghost'}
+                className="h-7 gap-1 capitalize"
+                aria-pressed={windowControlsSide === option}
+                disabled={isMacOS()}
+                onClick={() => setWindowControlsSide(option)}
+              >
+                {option === 'left' ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+                {option}
+              </Button>
+            ))}
+          </div>
         </Row>
       </SettingsSection>
 
