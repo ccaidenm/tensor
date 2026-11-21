@@ -15,7 +15,11 @@ import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
 // makes that entire bug family structurally impossible rather than
 // chasing a fifth timing fix. Revisit once smooth animation can be
 // tested against a less reflow-sensitive layout, and/or on
-// non-WebKitGTK platforms.
+// non-WebKitGTK platforms. WHEN ANIMATION RETURNS: the closed panel
+// must keep hiding via visibility (see the ghost fix below) — and the
+// slide's initial-value branch must handle a NOT-YET-LAID-OUT element
+// (offsetWidth 0 under a hidden ancestor read as -0 and docked the
+// panel visibly — the same bug through the animation path).
 const SIDEBAR_ANIMATION_DISABLED = true;
 
 const ANCHOR_POSITION_CLASS: Record<SidebarAnchor, string> = {
@@ -61,7 +65,14 @@ export function SidebarHost({ id, anchor, children }: SidebarHostProps) {
         // Panel-internal dropdowns (z-40) nest fine beneath this.
         'absolute z-40 flex flex-col bg-background border-border',
         ANCHOR_POSITION_CLASS[anchor],
-        !isOpen && 'pointer-events-none',
+        // #103 — THE GHOST FIX: a closed panel is INVISIBLE. The host
+        // mounts while the start screen owns the window (the desk is
+        // display:none), so the slide's initial offset read offsetWidth
+        // as 0 and parked the panel at its DOCK position (-0 === 0) —
+        // fully visible the moment the desk showed, aria-hidden and
+        // pointer-events-none: an uncloseable ghost. visibility (not
+        // display) keeps the element laid out for the slide machinery.
+        !isOpen && 'invisible pointer-events-none',
       )}
       aria-hidden={!isOpen}
     >

@@ -7,6 +7,8 @@ import { getCommand } from '@/lib/commands/registry';
 import { StartScreen } from '@/components/StartScreen';
 import { TitleBarRow } from '@/components/layout/TitleBarRow';
 import { saveRecoveryCopy, listRecoveryCopies } from '@/lib/document/recovery';
+import { assembleDocumentFile } from '@/lib/document/fileOperations';
+import { saveWpdoc } from '@/lib/document/wpdoc';
 
 // #103 — the tauri layer, mocked at the seams the recovery flow
 // touches (the docx-save suite's pattern): the zip rides through
@@ -41,6 +43,7 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 }));
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string }) => {
+    console.log('INVOKE: ' + cmd + ' path=' + String(args?.path));
     if (cmd === 'package_document') {
       wpdocInvokes.set(args.path!, args.documentJson!);
       // The real Rust writes the zip at args.path — the mock's stand-in
@@ -82,7 +85,19 @@ beforeEach(() => {
       identity: { ...useConfigStore.getState().config.identity, author: '' },
     },
   });
-  useDocumentStore.setState({ startActive: true, hasDocument: false });
+  // The FULL doc-store surface resets — the singleton leaks filePath/
+  // pageSetup/isDirty across this file's tests otherwise (the restore
+  // tests proved it).
+  useDocumentStore.setState({
+    startActive: true,
+    hasDocument: false,
+    filePath: null,
+    isDirty: false,
+    pageSetup: { pageSize: 'Letter', margins: { top: 72, bottom: 72, left: 72, right: 72 }, pageGap: 32 },
+    pageStyles: {},
+    lineNumbers: null,
+    headerFooter: null,
+  });
 });
 
 afterEach(cleanup);
@@ -277,7 +292,9 @@ describe('the start screen (#103)', () => {
     expect(cards[1]!.textContent).toContain('old.md');
     // A click routes through openFile WITH the path (the picker never
     // fires from a known path). Spy swap INSIDE act — the re-render
-    // must flush before the click.
+    // must flush before the click. The spy is RESTORED after — a
+    // leaked spy would swallow every later open (the pageless-repro
+    // test's silent no-op open).
     const openFile = useDocumentStore.getState().openFile;
     const spy = vi.fn();
     act(() => {
@@ -285,6 +302,9 @@ describe('the start screen (#103)', () => {
     });
     fireEvent.click(cards[0]!);
     expect(spy).toHaveBeenCalledWith('/docs/newsletter.wpdoc');
+    act(() => {
+      useDocumentStore.setState({ openFile });
+    });
   });
 
   it("the registry's New is real: run() leaves Home on the config's default layout", async () => {
@@ -407,5 +427,73 @@ describe('the start screen — recovery + stable layout (#103)', () => {
     // overlay's zone; the greeting's position is constant with/without).
     const column = greeting.closest('.pt-16');
     expect(column).not.toBeNull();
+  });
+});
+
+describe('the start screen — the pageless-open regression (#103)', () => {
+  beforeEach(() => {
+    useDocumentStore.setState({ startActive: true, hasDocument: false, filePath: null, isDirty: false });
+  });
+
+  it('opening a PAGINATED .wpdoc from the library stays paginated', async () => {
+    renderTensor('<p>x</p>');
+    // A .wpdoc saved with an EXPLICIT paginated view mode:
+    await act(async () => {
+      void saveRecoveryCopy(
+        useDocumentStore.getState().editor!,
+        '/docs/paginated.wpdoc',
+        {
+          pageSetup: { ...useDocumentStore.getState().pageSetup, viewMode: 'pages' },
+          lineNumbers: null,
+          coreProperties: { title: 'Paginated doc' },
+          headerFooter: null,
+          commentThreads: [],
+        },
+      );
+    });
+    render(<StartScreen />);
+    await act(async () => {});
+    const card = document.querySelector('[data-testid="recovery-paginated.wpdoc"]')!;
+    await act(async () => {
+      fireEvent.click(card);
+    });
+    await settleLayout();
+    const store = useDocumentStore.getState();
+    expect(store.startActive).toBe(false);
+    console.log('REPRO: pageSetup =', JSON.stringify(store.pageSetup));
+    expect(store.pageSetup.viewMode).toBe('pages');
+    await settleLayout();
+    expect(store.pageSetup.viewMode).toBe('pages');
+  });
+
+  it('opening a PAGINATED .wpdoc from the recents (the openFile path) stays paginated', async () => {
+    renderTensor('<p>x</p>');
+    // A REAL .wpdoc on disk (the recents open the DOC path — the
+    // save side assembles and packages exactly like Save does):
+    await act(async () => {
+      const file = assembleDocumentFile(useDocumentStore.getState().editor!, {
+        pageSetup: { ...useDocumentStore.getState().pageSetup, viewMode: 'pages' },
+        lineNumbers: null,
+        coreProperties: { title: 'Paginated doc' },
+        headerFooter: null,
+        commentThreads: [],
+        originalPath: '/docs/paginated2.wpdoc',
+      });
+      void saveWpdoc('/docs/paginated2.wpdoc', file);
+    });
+    await act(async () => {
+      useConfigStore.getState().noteRecentDocument('/docs/paginated2.wpdoc', 'paginated2.wpdoc');
+    });
+    // The open runs DIRECTLY and AWAITED: the dirty guard's recovery
+    // snapshot pauses at crypto.subtle.digest (a real macrotask act
+    // cannot flush) — the card's void-call races the assertion (the
+    // flake); the card→path contract is pinned by the recents test.
+    await act(async () => {
+      await useDocumentStore.getState().openFile('/docs/paginated2.wpdoc');
+    });
+    await settleLayout();
+    const store = useDocumentStore.getState();
+    expect(store.filePath).toBe('/docs/paginated2.wpdoc');
+    expect(store.pageSetup.viewMode).toBe('pages');
   });
 });

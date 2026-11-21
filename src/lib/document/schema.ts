@@ -15,6 +15,12 @@ const PageSetupSchema = z.object({
     right: z.number(),
   }),
   pageGap: z.number(),
+  /** #103 — the doc's rendering mode RIDES THE FILE (the model's
+   *  field, now persisted — its absence here silently stripped it on
+   *  every save, so every document re-resolved to the app default on
+   *  open; the user-caught pageless-everything bug). Absent = old
+   *  files resolve via the config default (the resolveViewMode law). */
+  viewMode: z.enum(['pages', 'pageless']).optional(),
   orientation: z.enum(['portrait', 'landscape']).optional(),
   pageColor: z.string().optional(),
   customWidth: z.number().optional(),
