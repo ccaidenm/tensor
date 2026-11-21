@@ -21,6 +21,10 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // #103 — a shortcut on a stub is the accepted-input-did-nothing sin.
   { id: 'open', label: 'Open', keys: 'ctrl+o', context: 'app', category: 'General' },
   { id: 'quit', label: 'Quit', keys: 'ctrl+q', context: 'app', category: 'General' },
+  // #103 — the menu's last absorbed accelerator, alive now that New
+  // has a real body (the start screen's blank cards pick their surface
+  // explicitly; this one follows the config default).
+  { id: 'new', label: 'New Document', keys: 'ctrl+n', context: 'app', category: 'General' },
   { id: 'openSettings', label: 'Open Settings', keys: 'ctrl+,', context: 'app', category: 'General' },
   { id: 'palette', label: 'Command Palette', keys: 'ctrl+shift+p', context: 'app', category: 'General' },
   // Word's print-preview convention (context 'app': the preview is a

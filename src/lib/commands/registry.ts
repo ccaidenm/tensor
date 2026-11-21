@@ -223,14 +223,17 @@ export const COMMANDS: CommandAction[] = [
     icon: FileStack,
     group: 'navigate',
     keywords: ['new', 'document', 'window', 'blank'],
-    // Stub receipt (the old menu item): "New Document not yet implemented" —
-    // a console.warn no-op that would LOOK broken in a palette. Hidden
-    // from the palette until real; the menu still dispatches it.
-    // When implemented: unhide AND add requiresSafeQuit (unsaved work
-    // in the current doc must survive the switch).
-    hidden: () => true,
+    // #103 — REAL: the store's newDocument (a dirty current doc is
+    // recovery-snapshotted first — the quit law; requiresSafeQuit
+    // marks the destructive surface). The view mode follows the
+    // config default; the start screen's two blank cards pick their
+    // surface explicitly.
+    requiresSafeQuit: true,
     run: () => {
-      console.warn('New Document not yet implemented');
+      const layout = useConfigStore.getState().config.editor.defaultPageLayout;
+      void useDocumentStore
+        .getState()
+        .newDocument(layout === 'Pageless' ? 'pageless' : 'pages');
     },
   },
   {

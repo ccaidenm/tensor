@@ -21,6 +21,12 @@ export const ConfigSchema = z.object({
    *  titlebar row). Linux/Windows only — macOS keeps its native
    *  traffic lights (Overlay) regardless. */
   windowControlsSide: z.enum(['right', 'left']).default('right'),
+  /** #103 — the start screen's recent-documents list (most recent
+   *  first; deduped by path; capped). Recorded on open and save-as. */
+  recentDocuments: z
+    .object({ path: z.string(), name: z.string(), openedAt: z.number() })
+    .array()
+    .default([]),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({

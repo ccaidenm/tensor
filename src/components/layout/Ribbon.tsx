@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useDocumentStore } from "@/lib/document/store";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { inTauriWindow, isMacOS } from "@/lib/window/tauriEnv";
-import { WindowControls } from "./WindowControls";
 import { FontGroup } from "./ribbon/home/groups/FontGroup";
 import { TooltipProvider } from "../ui/tooltip";
 import { ParagraphGroup } from "./ribbon/home/groups/ParagraphGroup";
@@ -30,7 +16,7 @@ import { PageSetupGroup } from "./ribbon/layout/groups/PageSetupGroup";
 import { ParagraphSpacingGroup } from "./ribbon/layout/groups/SpacingGroup";
 import { ArrangeGroup } from "./ribbon/layout/groups/ArrangeGroup";
 import { BreaksGroup } from "./ribbon/insert/groups/BreaksGroup";
-import { TensorLogo } from "../icons/TensorIcon";
+import { TitleBarRow } from "./TitleBarRow";
 import { ProofingGroup } from "./ribbon/review/groups/ProofingGroup";
 import { AccessibilityGroup } from "./ribbon/review/groups/AccessibilityGroup";
 import { SearchGroup } from "./ribbon/review/groups/SearchGroup";
@@ -41,7 +27,6 @@ import { ShowGroup } from "./ribbon/view/groups/ShowGroup";
 import { WindowGroup } from "./ribbon/view/groups/WindowGroup";
 import { useConfigStore } from "@/lib/config/store";
 import { useFocusStore } from "@/lib/layout/focusStore";
-import { useSettingsDialogStore } from "@/lib/settings/store";
 import { useReducedMotion } from "@/lib/accessibility/useReducedMotion";
 import { useRibbonContextStore } from "@/lib/ribbon/contextStore";
 import { CONTEXTUAL_TABS, type RibbonContextId } from "@/lib/ribbon/contextualTabs";
@@ -54,18 +39,8 @@ type ActiveTab = RibbonTab | RibbonContextId;
 
 export function Ribbon() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("Home");
-  const filePath = useDocumentStore((s) => s.filePath);
-  const isDirty = useDocumentStore((s) => s.isDirty);
-  const save = useDocumentStore((s) => s.save);
-  const saveAs = useDocumentStore((s) => s.saveAs);
-  const openFile = useDocumentStore((s) => s.openFile);
-  const exportMarkdown = useDocumentStore((s) => s.exportMarkdown);
-  const exportDocx = useDocumentStore((s) => s.exportDocx);
 
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
-  // #100 — the window controls' side (Linux/Windows lane; macOS keeps
-  // its native traffic lights regardless).
-  const controlsSide = useConfigStore((s) => s.config.windowControlsSide);
 
   // M-CONTEXTUAL-RIBBON — the contextual interplay lives HERE, next to
   // the tab state it acts on (the store stays producer-facing). Entering
@@ -96,18 +71,6 @@ export function Ribbon() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeContext]);
 
-  const displayName = filePath ? filePath.split("/").pop() : "Untitled";
-
-  // #100 — the OS window title follows the document (taskbar, alt-tab,
-  // the window list): the merged titlebar row owns the visual title,
-  // and the native frame is gone, so the OS chrome reads it here.
-  useEffect(() => {
-    if (!inTauriWindow()) return;
-    void getCurrentWindow().setTitle(
-      `${displayName}${isDirty ? " •" : ""} — Tensor`,
-    );
-  }, [displayName, isDirty]);
-
   const editor = useDocumentStore((s) => s.editor);
   // M-CONTEXTUAL-RIBBON — the selection producers (table / image;
   // header/footer stubs until its milestone).
@@ -121,117 +84,27 @@ export function Ribbon() {
         onValueChange={(value) => setActiveTab(value as ActiveTab)}
         className="gap-0 bg-card border-b border-border"
       >
-        <div className="relative h-10">
-          <div className="relative z-10 flex h-10 items-center px-1">
-            <div className="flex h-10 items-center">
-              {/*
-                #100 — the macOS lane: the native traffic lights overlay
-                the row's left edge (titleBarStyle: Overlay in
-                tauri.conf); reserve their lane (a drag region — it is
-                empty chrome) so the Tensor button clears them. Linux/
-                Windows never reserves it: the row IS the frame.
-              */}
-              {!isMacOS() && controlsSide === 'left' && <WindowControls />}
-              {isMacOS() && (
-                <div
-                  className="h-full w-[68px] flex-none"
-                  data-tauri-drag-region
-                />
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-10 flex-none rounded-none px-3 text-primary text-sm hover:text-primary"
-                    >
-                      <TensorLogo size={16} />
-                      Tensor
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={openFile}>Open…</DropdownMenuItem>
-                  <DropdownMenuItem onClick={save}>Save</DropdownMenuItem>
-                  <DropdownMenuItem onClick={saveAs}>Save As…</DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {/* M-MD/M-DOCX: the export surface — Markdown and Word
-                      now; PDF joins when #39 lands. */}
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem onClick={exportMarkdown}>Markdown (.md)…</DropdownMenuItem>
-                      <DropdownMenuItem onClick={exportDocx}>Word Document (.docx)…</DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => useSettingsDialogStore.getState().open()}>Settings</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <TabsList
-                variant="line"
-                className="h-10 gap-1 bg-transparent p-0 group-data-horizontal/tabs:h-10"
+        {/* #100/#103 — the merged titlebar row, extracted (the start
+            screen renders the same chrome in its home variant). */}
+        <TitleBarRow variant="editor">
+          <TabsList
+            variant="line"
+            className="h-10 gap-1 bg-transparent p-0 group-data-horizontal/tabs:h-10"
+          >
+            {RIBBON_TABS.map((tab) => (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="h-10 flex-none rounded-none border-0 px-3 text-sm hover:bg-muted/50 data-active:hover:bg-muted/50 group-data-horizontal/tabs:after:bottom-0 group-data-horizontal/tabs:after:h-0.5 after:bg-muted-foreground hover:after:opacity-100 data-active:after:bg-foreground"
               >
-                {RIBBON_TABS.map((tab) => (
-                  <TabsTrigger
-                    key={tab}
-                    value={tab}
-                    className="h-10 flex-none rounded-none border-0 px-3 text-sm hover:bg-muted/50 data-active:hover:bg-muted/50 group-data-horizontal/tabs:after:bottom-0 group-data-horizontal/tabs:after:h-0.5 after:bg-muted-foreground hover:after:opacity-100 data-active:after:bg-foreground"
-                  >
-                    {tab}
-                  </TabsTrigger>
-                ))}
-                {activeContext && (
-                  <ContextualTabTrigger
-                    id={activeContext}
-                    reduceMotion={reduceMotion}
-                  />
-                )}
-              </TabsList>
-            </div>
-
-              {/*
-                #100 — THE TITLE LANES. The drag lane absorbs the row's
-                leftover width (data-tauri-drag-region; double-click
-                toggles maximize — the tauri drag listener owns the
-                mousedown). The document name: on Linux/Windows it
-                floats ABSOLUTELY CENTERED in the WINDOW (the user's
-                ruling — centering between ribbon and controls reads
-                off-axis), dragging on its own band; on macOS it stays
-                in-flow at the far right (the traffic lights own the
-                left lane). CAVEAT: a window dragged narrow enough for
-                the tabs to reach the center band would tuck the name
-                under them — the desktop app starts maximized, so the
-                band is clear in practice.
-              */}
-              <div
-                className="min-w-3 flex-1 self-stretch"
-                data-tauri-drag-region
-              />
-              {isMacOS() ? (
-                <span
-                  className="max-w-[240px] truncate px-2 text-sm text-muted-foreground"
-                  data-tauri-drag-region
-                >
-                  {displayName}
-                  {isDirty ? " •" : ""}
-                </span>
-              ) : (
-                <span
-                  className="absolute left-1/2 top-0 z-20 flex h-10 max-w-[240px] -translate-x-1/2 items-center truncate px-2 text-sm text-muted-foreground"
-                  data-tauri-drag-region
-                >
-                  {displayName}
-                  {isDirty ? " •" : ""}
-                </span>
-              )}
-              {!isMacOS() && controlsSide === 'right' && <WindowControls />}
-          </div>
-
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-0.5 bg-border" />
-        </div>
+                {tab}
+              </TabsTrigger>
+            ))}
+            {activeContext && (
+              <ContextualTabTrigger id={activeContext} reduceMotion={reduceMotion} />
+            )}
+          </TabsList>
+        </TitleBarRow>
 
         <TabsContent value="Home" className="m-0 h-14 flex-none px-3">
           <div className="flex h-full items-center">

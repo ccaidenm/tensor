@@ -138,8 +138,15 @@ export interface OpenDocumentResult {
   commentThreads: CommentThread[];
 }
 
-export async function openDocument(editor: Editor): Promise<OpenDocumentResult | null> {
-  const path = await open({ filters: FILE_FILTERS, multiple: false });
+export async function openDocument(
+  editor: Editor,
+  /** #103 — the recents pass a known path (no dialog); absent = the
+   *  picker (the ribbon/palette flows). */
+  knownPath?: string,
+): Promise<OpenDocumentResult | null> {
+  const path =
+    knownPath ??
+    (await open({ filters: FILE_FILTERS, multiple: false }) as string | null);
   if (!path || Array.isArray(path)) return null;
 
   // M-MD/M-DOCX: extension dispatch — markdown and Word import through

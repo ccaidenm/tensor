@@ -1,4 +1,4 @@
-import { exists, mkdir, remove } from '@tauri-apps/plugin-fs';
+import { exists, mkdir, remove, readDir } from '@tauri-apps/plugin-fs';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import type { Editor } from '@tiptap/core';
 import { assembleDocumentFile, type SaveDocumentOptions } from './fileOperations';
@@ -60,6 +60,67 @@ export async function readRecoveryCopy(path: string): Promise<DocumentFile> {
 /** Test seam: the GC scan lives in wpdoc.ts; re-exported for the
  * recovery tests' byte-level assertions. */
 export { collectReferencedMediaIds };
+
+/**
+ * #103 — THE START SCREEN'S RECOVERY LIST: every snapshot on disk
+ * with just enough metadata for a card (the display name, the
+ * back-pointer, the stamp). Reads each package fully (the recovery
+ * dir holds at most one file per path hash + one per session — a
+ * handful of small zips, never a scan cost). Corrupt entries drop
+ * loudly-quietly (the normalizePageStyles posture — a bad snapshot
+ * never crashes the listing).
+ */
+export interface RecoveryEntry {
+  /** The snapshot's own path (the restore action's input). */
+  recoveryPath: string;
+  /** The card's display name (the original basename / title). */
+  name: string;
+  /** The back-pointer to the original file, when it had one. */
+  originalPath: string | null;
+  /** The doc's own stamp (metadata.modifiedAt). */
+  modifiedAt: number | null;
+}
+
+async function recoveryDirPath(): Promise<string | null> {
+  const dir = await appDataDir();
+  const recoveryDir = await join(dir, 'recovery');
+  if (!(await exists(recoveryDir))) return null;
+  return recoveryDir;
+}
+
+export async function listRecoveryCopies(): Promise<RecoveryEntry[]> {
+  try {
+    const dir = await recoveryDirPath();
+    if (!dir) return [];
+    const entries = await readDir(dir);
+    const out: RecoveryEntry[] = [];
+    for (const entry of entries) {
+      if (!entry.name || !entry.name.endsWith('.wpdoc')) continue;
+      const recoveryPath = await join(dir, entry.name);
+      try {
+        const file = await readRecoveryCopy(recoveryPath);
+        const originalPath = file.metadata.originalPath ?? null;
+        const modifiedAt = file.metadata.modifiedAt
+          ? new Date(file.metadata.modifiedAt).getTime()
+          : null;
+        const baseName = originalPath
+          ? (originalPath.split('/').pop() ?? originalPath)
+          : null;
+        const name = baseName ?? file.metadata.title ?? 'Untitled draft';
+        out.push({ recoveryPath, name, originalPath, modifiedAt });
+      } catch {
+        // A corrupt snapshot drops from the list (never crashes it);
+        // it stays on disk for manual inspection.
+      }
+    }
+    // The freshest work first.
+    out.sort((a, b) => (b.modifiedAt ?? 0) - (a.modifiedAt ?? 0));
+    return out;
+  } catch (err) {
+    console.error('Failed to list recovery copies:', err);
+    return [];
+  }
+}
 
 export async function clearRecoveryCopy(originalPath: string | null): Promise<void> {
   try {

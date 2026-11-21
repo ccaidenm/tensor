@@ -24,6 +24,12 @@ export function renderTensor(initialHTML?: string) {
       editor.commands.setContent(initialHTML);
     });
   }
+  // #103 — the harness's context is an OPEN DOCUMENT (the app boots to
+  // the start screen; every existing suite tests the editor surface,
+  // so Home steps aside here — the start-screen suite re-opens it).
+  act(() => {
+    useDocumentStore.setState({ startActive: false });
+  });
   return { editor, ...utils };
 }
 

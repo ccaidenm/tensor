@@ -80,6 +80,17 @@
       ]
     },
     {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        {
+          "path": "$APPDATA/recovery"
+        },
+        {
+          "path": "$APPDATA/recovery/**"
+        }
+      ]
+    },
+    {
       "identifier": "fs:allow-mkdir",
       "allow": [
         {

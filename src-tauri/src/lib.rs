@@ -65,6 +65,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            current_username,
             fetch_link_metadata,
             fetch_url,
             package_document,
@@ -102,6 +103,28 @@ struct LinkMetadata {
     title: Option<String>,
     description: Option<String>,
     favicon: Option<String>,
+}
+
+// #103 — the local user's name for the start-screen greeting (the
+// identity.author config takes precedence when set; this is the
+// fallback). Zero-dep: the standard env vars cover every desktop
+// platform; the home-dir basename is the last resort.
+#[tauri::command]
+fn current_username() -> Option<String> {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok()
+                .and_then(|home| {
+                    std::path::Path::new(&home)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                })
+        })
 }
 
 #[tauri::command]

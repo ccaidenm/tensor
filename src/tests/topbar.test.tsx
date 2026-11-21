@@ -184,9 +184,8 @@ describe('the absorbed menu (#100)', () => {
     expect(open.keys).toBe('ctrl+o');
     const quit = SHORTCUTS.find((s) => s.id === 'quit')!;
     expect(quit.keys).toBe('ctrl+q');
-    // 'new' (Ctrl+N) deliberately ABSENT until #103's real body — a
-    // shortcut on a stub is the accepted-input-did-nothing sin.
-    expect(SHORTCUTS.find((s) => s.id === 'new')).toBeUndefined();
+    // #103 — the menu's last accelerator, alive on a real body now.
+    expect(SHORTCUTS.find((s) => s.id === 'new')!.keys).toBe('ctrl+n');
   });
 
   it('live: ctrl+o dispatches the registry\'s open command (the menu\'s old body)', async () => {

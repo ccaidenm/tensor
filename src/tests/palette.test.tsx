@@ -117,12 +117,9 @@ describe('registry shape', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('hidden is PALETTE-only: "new" (stub) never shows in the palette, but its run body stays callable', () => {
-    expect(filterCommands(false).some((c) => c.id === 'new')).toBe(false);
-    expect(filterCommands(true).some((c) => c.id === 'new')).toBe(false);
-    // The stub stays runnable (the console.warn receipt) without
-    // throwing — #103 replaces the body:
-    expect(() => getCommand('new')!.run()).not.toThrow();
+  it('"new" is a REAL palette command now (#103) — visible, safe-quit marked', () => {
+    expect(filterCommands(false).some((c) => c.id === 'new')).toBe(true);
+    expect(getCommand('new')!.requiresSafeQuit).toBe(true);
   });
 
   it('quit IS a palette command (amendment 1a) and carries the safe-quit marker', () => {

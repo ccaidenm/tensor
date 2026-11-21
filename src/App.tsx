@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
 import { Editor } from './components/editor/Editor';
+import { StartScreen } from './components/StartScreen';
+import { TitleBarRow } from './components/layout/TitleBarRow';
+import { cn } from 'cn';
 import { SearchPanel } from './components/editor/SearchPanel';
 import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
@@ -51,6 +54,8 @@ function App() {
   // App level (not inside the Insert tab) so it persists across ribbon
   // tab switches — park it in a corner, switch tabs, keep inserting.
   const editor = useDocumentStore((s) => s.editor);
+  // #103 — the start screen owns the window until a document exists.
+  const startActive = useDocumentStore((s) => s.startActive);
   // M-STYLES: load the global registry (appConfigDir/styles.json) once
   // at bootstrap — merges over the code builtins; first run seeds the
   // file (hyperlink custom, builtins.ts). Doc layers apply on open.
@@ -166,14 +171,30 @@ function App() {
   return (
     <>
       <main data-screen-chrome className="flex h-screen flex-col bg-background text-foreground">
-        {/* FOCUS MODE — the ribbon and status bar own their own hides
-            (component-level gates: any mount context unmounts them;
-            nothing hidden keeps running). */}
-        <Ribbon />
+        {/* #103 — THE START SCREEN: every launch opens on Home (the
+            Word/GDocs posture). The TitleBarRow (home variant) keeps
+            the window chrome; the ribbon, desk, and status bar step
+            aside — the DESK STAYS MOUNTED but hidden (the Editor's
+            lifecycle, the doc flows, and every portal target keep
+            working; Home is a view state, not a teardown). */}
+        {startActive ? (
+          <>
+            <TitleBarRow variant="home" />
+            <StartScreen />
+          </>
+        ) : (
+          /* FOCUS MODE — the ribbon and status bar own their own hides
+             (component-level gates: any mount context unmounts them;
+             nothing hidden keeps running). */
+          <Ribbon />
+        )}
         {/* data-desk-wrapper: the M-RULER portal target — the ruler bar
             mounts here as static overlay chrome (flush under the Ribbon,
             outside the scroller's flow; show/hide reflows nothing). */}
-        <div data-desk-wrapper className="relative flex-1 overflow-hidden">
+        <div
+          data-desk-wrapper
+          className={cn('relative flex-1 overflow-hidden', startActive && 'hidden')}
+        >
           {/* Desk: the editor scroll surface — the muted token reads
               as the classic gray desk in light mode and adapts in dark.
               data-desk-scroll: the ruler reads this element's clientWidth
@@ -219,7 +240,7 @@ function App() {
             <StatisticsPanel />
           </SidebarHost>
         </div>
-        <StatusBar />
+        {!startActive && <StatusBar />}
       </main>
       <SettingsDialog />
       <CommandPalette />

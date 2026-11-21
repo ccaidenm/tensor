@@ -15,6 +15,11 @@ interface ConfigStore {
   setAccent: (accent: Config["accent"]) => void;
   /** #100 — the window controls' side (Linux/Windows lane). */
   setWindowControlsSide: (side: Config["windowControlsSide"]) => void;
+  /** #103 — record an opened/saved document as recent (dedupe by
+   *  path, most-recent first, capped at 10). */
+  noteRecentDocument: (path: string, name: string) => void;
+  /** #103 — drop a recent (the file vanished — the open failed). */
+  removeRecentDocument: (path: string) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -112,6 +117,29 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setWindowControlsSide: (side) =>
     set((state) => ({
       config: { ...state.config, windowControlsSide: side },
+    })),
+
+  // #103 — the recents list: the start screen's data source. One
+  // entry per path (re-opening moves it to the front, refreshing its
+  // timestamp); the cap keeps the list honest (a decade of files is
+  // not "recent").
+  noteRecentDocument: (path, name) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        recentDocuments: [
+          { path, name, openedAt: Date.now() },
+          ...state.config.recentDocuments.filter((d) => d.path !== path),
+        ].slice(0, 10),
+      },
+    })),
+
+  removeRecentDocument: (path) =>
+    set((state) => ({
+      config: {
+        ...state.config,
+        recentDocuments: state.config.recentDocuments.filter((d) => d.path !== path),
+      },
     })),
 
   setDownloadsDir: (value) =>
