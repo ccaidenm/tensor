@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ConfigSchema, DEFAULT_CONFIG, type Config } from "./schema";
 import { SHORTCUTS } from "../shortcuts";
+import { ACCENTS_BY_ID, DEFAULT_ACCENT_ID } from "../branding/accents";
 
 export const ZOOM_MIN = 50;
 export const ZOOM_MAX = 200;
@@ -9,6 +10,8 @@ interface ConfigStore {
   config: Config;
 
   setTheme: (theme: Config["theme"]) => void;
+  /** #97 — the brand accent (the writer below retunes the tokens). */
+  setAccent: (accent: Config["accent"]) => void;
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
@@ -96,6 +99,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setTheme: (theme) =>
     set((state) => ({
       config: { ...state.config, theme },
+    })),
+
+  setAccent: (accent) =>
+    set((state) => ({
+      config: { ...state.config, accent },
     })),
 
   setDownloadsDir: (value) =>
@@ -495,9 +503,35 @@ setShowHorizontalRuler: (value) =>
 function applyThemeClass(theme: Config["theme"]): void {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
+
+// #97 — THE ACCENT WRITER (the theme-class law's twin): the brand
+// tokens retune SYNCHRONOUSLY with every accent value, including the
+// very first, from this module — one writer, registered before any
+// component subscribes, so chrome that paints from computed styles
+// never takes a first paint against the default accent when a
+// persisted selection exists. Inline on <html>: beats :root and .dark
+// — ONE mechanism, both modes (one hex per accent, the catalog's
+// model). The echoes (--ring, --sidebar-primary, --color-search-
+// current) resolve through var(--primary) in index.css, so ONE
+// variable carries the brand; the foreground ink is the catalog's
+// luminance-picked per-accent value (the pale accents keep readable
+// button text).
+function applyAccent(accentId: Config["accent"]): void {
+  const accent = ACCENTS_BY_ID[accentId] ?? ACCENTS_BY_ID[DEFAULT_ACCENT_ID];
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--primary", accent.hex);
+  rootStyle.setProperty(
+    "--primary-foreground",
+    accent.foreground === "white" ? "oklch(1 0 0)" : "oklch(0.18 0.01 285)",
+  );
+}
 applyThemeClass(useConfigStore.getState().config.theme);
+applyAccent(useConfigStore.getState().config.accent);
 useConfigStore.subscribe((state, prev) => {
   if (state.config.theme !== prev.config.theme) {
     applyThemeClass(state.config.theme);
+  }
+  if (state.config.accent !== prev.config.accent) {
+    applyAccent(state.config.accent);
   }
 });

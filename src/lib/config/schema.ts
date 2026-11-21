@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PAGE_GAP, DEFAULT_MARGINS } from '../document/pageSetup';
 import { SHORTCUTS } from '../shortcuts';
+import { ACCENT_IDS, DEFAULT_ACCENT_ID } from '../branding/accents';
 
 const DEFAULT_KEYBINDINGS: Record<string, string> = Object.fromEntries(
   SHORTCUTS.filter((s) => s.context !== 'os').map((s) => [s.id, s.keys]),
@@ -8,6 +9,10 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = Object.fromEntries(
 
 export const ConfigSchema = z.object({
   theme: z.enum(['light', 'dark']).default('light'),
+  /** #97 — the brand accent (one hex per accent, both modes; the
+   *  config store's writer retunes --primary + the foreground ink;
+   *  the catalog is the one source — see lib/branding/accents). */
+  accent: z.enum(ACCENT_IDS).default(DEFAULT_ACCENT_ID),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({
