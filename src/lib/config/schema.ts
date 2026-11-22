@@ -135,7 +135,10 @@ export const ConfigSchema = z.object({
   }),
   privacy: z.object({
     autoCheckForUpdates: z.boolean().default(false),
-    fetchLinkMetadata: z.boolean().default(true),
+    /** #103 — the DEFAULT posture is externals-off: the wizard's
+     *  privacy step pre-enables this for users who continue through
+     *  setup (the informed choice), but the schema default is OFF. */
+    fetchLinkMetadata: z.boolean().default(false),
     /** M-FONTS-A: gate for milestone B's online catalog browsing
      *  (Google Fonts / Font Share). Inert until B ships — default OFF,
      *  no network code reads it yet; saving the preference is all it
@@ -143,7 +146,7 @@ export const ConfigSchema = z.object({
     allowFontCatalogs: z.boolean().default(false),
   }).default({
     autoCheckForUpdates: false,
-    fetchLinkMetadata: true,
+    fetchLinkMetadata: false,
     allowFontCatalogs: false,
   }),
   /** Spell check — the CONSENT posture (the fonts/privacy precedents,
@@ -281,6 +284,11 @@ export const ConfigSchema = z.object({
   identity: z.object({
     author: z.string().default(''),
   }).default({ author: '' }),
+  /** #103 — THE FIRST-RUN GATE: true once the setup wizard has been
+   *  completed or skipped. Absent in every pre-#103 config (zod
+   * default false) — per the ruling, EVERYONE sees the wizard once;
+   * the flag then never lets it nag again. */
+  firstRunCompleted: z.boolean().default(false),
   /** Keyed by ShortcutDefinition.id (see src/lib/shortcuts.ts). Flat
    *  record rather than a fixed shape — every command in the Shortcuts
    *  registry gets an entry here, seeded from that registry's defaults.

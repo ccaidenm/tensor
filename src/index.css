@@ -686,6 +686,25 @@ body {
 }
 
 
+
+/* #101 — THE UI-POLISH SELECTION LAW: chrome text is never
+ * drag-selectable — nothing outside an input or the document surface.
+ * The law lives at the BODY level (every dialog/bubble portals there,
+ * outside the app's main), and the two legitimate surfaces opt back
+ * in: form fields, and the contenteditable views (the pageless editor
+ * and the hidden input view — paginated selection is canvas paint and
+ * never touches DOM text). */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* M-PRINT (#43, Mark 2) — THE PRINT MEDIA SPLIT. On paper: the screen
  * chrome (ribbon, status bar, sidebars, dialogs, the preview itself)
  * hides; only the print container (PrintContainer.tsx) shows. On

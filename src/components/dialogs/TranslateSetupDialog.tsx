@@ -76,9 +76,22 @@ const PROVIDERS: Array<{
   },
 ];
 
-export function TranslateSetupDialog() {
-  const open = useTranslateStore((s) => s.setupOpen);
-  const closeSetup = useTranslateStore((s) => s.closeSetup);
+/**
+ * THE PROVIDER FORM, SURFACE-FREE: the setup dialog's body AND the
+ * first-run wizard's Translate step render the SAME fields (the
+ * testids are the shared contract — translatePanel.test.tsx pins
+ * them). `onConnected` fires after the config writes (the dialog
+ * closes itself; the wizard just re-renders configured). Seeds from
+ * the current config on mount — the dialog remounts it per open (the
+ * render gate below), the wizard per step.
+ */
+export function TranslateSetupForm({
+  onConnected,
+  showCancel = true,
+}: {
+  onConnected?: () => void;
+  showCancel?: boolean;
+}) {
   const setTranslationConfigured = useConfigStore((s) => s.setTranslationConfigured);
   const setTranslationProvider = useConfigStore((s) => s.setTranslationProvider);
   const setTranslationEndpoint = useConfigStore((s) => s.setTranslationEndpoint);
@@ -91,19 +104,15 @@ export function TranslateSetupDialog() {
   const [tested, setTested] = useState<TranslationLanguage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Fresh state each time the dialog opens (the spell setup law),
-  // seeded from the current config for re-configuration.
   useEffect(() => {
-    if (open) {
-      const current = useConfigStore.getState().config.translation;
-      setProvider(current.provider);
-      setEndpoint(current.endpoint || 'https://libretranslate.com');
-      setApiKey(current.apiKey);
-      setTested(null);
-      setError(null);
-      setTesting(false);
-    }
-  }, [open]);
+    const current = useConfigStore.getState().config.translation;
+    setProvider(current.provider);
+    setEndpoint(current.endpoint || 'https://libretranslate.com');
+    setApiKey(current.apiKey);
+    setTested(null);
+    setError(null);
+    setTesting(false);
+  }, []);
 
   /** An edit to this provider's credentials kills the test result. */
   function touch(edit: () => void) {
@@ -131,7 +140,7 @@ export function TranslateSetupDialog() {
     setTranslationEndpoint(provider === 'libretranslate' ? endpoint.trim() : '');
     setTranslationApiKey(needsKey ? apiKey.trim() : '');
     setTranslationConfigured();
-    closeSetup();
+    onConnected?.();
   }
 
   const active = PROVIDERS.find((p) => p.id === provider)!;
@@ -142,7 +151,100 @@ export function TranslateSetupDialog() {
   const needsTest = provider !== 'local';
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !testing && (o ? null : closeSetup())}>
+    <div className="space-y-3">
+      <div className="space-y-2" data-testid="translate-setup-providers">
+        {PROVIDERS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => { setProvider(p.id); setTested(null); setError(null); }}
+            className={cn(
+              'flex w-full items-start gap-2 rounded-lg border p-3 text-left transition-colors',
+              provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50',
+            )}
+            data-testid={`translate-setup-card-${p.id}`}
+          >
+            <p.icon size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{p.name}</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">{p.blurb}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground/80">{p.note}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {needsEndpoint && (
+        <label className="block" data-testid="translate-setup-endpoint">
+          <span className="text-xs font-medium text-muted-foreground">Instance URL</span>
+          <Input
+            value={endpoint}
+            onChange={(e) => touch(() => setEndpoint(e.target.value))}
+            placeholder="https://libretranslate.com"
+            className="mt-1 h-8"
+          />
+        </label>
+      )}
+
+      <label className="block" data-testid="translate-setup-api-key">
+        <span className="text-xs font-medium text-muted-foreground">
+          {needsKey ? 'API key' : 'API key (optional — self-hosted usually needs none)'}
+        </span>
+        <Input
+          value={apiKey}
+          onChange={(e) => touch(() => setApiKey(e.target.value))}
+          placeholder={needsKey ? 'Required' : 'Only if your instance requires one'}
+          className="mt-1 h-8"
+        />
+      </label>
+
+      {needsTest && (
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void test()} disabled={testing || (needsKey && !apiKey.trim()) || (needsEndpoint && !endpoint.trim())} data-testid="translate-setup-test">
+            {testing ? 'Testing…' : 'Test connection'}
+          </Button>
+          {tested && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="translate-setup-tested">
+              <Languages size={13} /> {tested.length} languages available
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          data-testid="translate-setup-error"
+        >
+          {error}
+        </div>
+      )}
+
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <active.icon size={13} />
+        {active.name} — the destination of every translation run.
+      </div>
+
+      <div className="flex justify-end gap-2">
+        {showCancel && (
+          <Button size="sm" variant="outline" onClick={() => onConnected?.()} disabled={testing}>
+            Cancel
+          </Button>
+        )}
+        <Button size="sm" onClick={connect} disabled={(needsTest && !tested) || testing} data-testid="translate-setup-connect">
+          Connect
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function TranslateSetupDialog() {
+  const open = useTranslateStore((s) => s.setupOpen);
+  const closeSetup = useTranslateStore((s) => s.closeSetup);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) closeSetup(); }}>
       <DialogContent className="max-w-lg" data-testid="translate-setup-dialog">
         <DialogHeader>
           <DialogTitle>Set Up Translation</DialogTitle>
@@ -152,105 +254,23 @@ export function TranslateSetupDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="rounded-lg border border-border p-3" data-testid="translate-setup-privacy">
-            <div className="flex items-start gap-2">
-              <ShieldCheck size={16} className="mt-0.5 shrink-0" />
-              <div className="min-w-0">
-                <div className="text-sm font-medium">Where your text goes</div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Only the text you translate — a selection or the whole document — is sent to the
-                  provider configured here, each time you press Translate. Nothing is sent until
-                  you press Translate.
-                </p>
-              </div>
+        <div className="rounded-lg p-3" data-testid="translate-setup-privacy">
+          <div className="flex items-start gap-2">
+            <ShieldCheck size={16} className="mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Where your text goes</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Only the text you translate — a selection or the whole document — is sent to the
+                provider configured here, each time you press Translate. Nothing is sent until
+                you press Translate.
+              </p>
             </div>
-          </div>
-
-          {/* THE PROVIDER CARDS — one informed choice, the trade-offs
-              stated on the card itself. */}
-          <div className="space-y-2" data-testid="translate-setup-providers">
-            {PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => { setProvider(p.id); setTested(null); setError(null); }}
-                className={cn(
-                  'flex w-full items-start gap-2 rounded-lg border p-3 text-left transition-colors',
-                  provider === p.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50',
-                )}
-                data-testid={`translate-setup-card-${p.id}`}
-              >
-                <p.icon size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">{p.name}</div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{p.blurb}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground/80">{p.note}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {needsEndpoint && (
-            <label className="block" data-testid="translate-setup-endpoint">
-              <span className="text-xs font-medium text-muted-foreground">Instance URL</span>
-              <Input
-                value={endpoint}
-                onChange={(e) => touch(() => setEndpoint(e.target.value))}
-                placeholder="https://libretranslate.com"
-                className="mt-1 h-8"
-              />
-            </label>
-          )}
-
-          <label className="block" data-testid="translate-setup-api-key">
-            <span className="text-xs font-medium text-muted-foreground">
-              {needsKey ? 'API key' : 'API key (optional — self-hosted usually needs none)'}
-            </span>
-            <Input
-              value={apiKey}
-              onChange={(e) => touch(() => setApiKey(e.target.value))}
-              placeholder={needsKey ? 'Required' : 'Only if your instance requires one'}
-              className="mt-1 h-8"
-            />
-          </label>
-
-          {needsTest && (
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void test()} disabled={testing || (needsKey && !apiKey.trim()) || (needsEndpoint && !endpoint.trim())} data-testid="translate-setup-test">
-                {testing ? 'Testing…' : 'Test connection'}
-              </Button>
-              {tested && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid="translate-setup-tested">
-                  <Languages size={13} /> {tested.length} languages available
-                </span>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <div
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              data-testid="translate-setup-error"
-            >
-              {error}
-            </div>
-          )}
-
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <active.icon size={13} />
-            {active.name} — the destination of every translation run.
           </div>
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={closeSetup} disabled={testing}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={connect} disabled={(needsTest && !tested) || testing} data-testid="translate-setup-connect">
-            Connect
-          </Button>
-        </div>
+        {/* The form mounts ONLY when open — its seed-on-mount law then
+            matches the dialog-open rhythm exactly. */}
+        {open && <TranslateSetupForm onConnected={closeSetup} />}
       </DialogContent>
     </Dialog>
   );

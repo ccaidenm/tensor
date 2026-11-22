@@ -33,6 +33,7 @@ import { ExitFocusButton } from './components/layout/ExitFocusButton';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
+import { SetupWizard } from './components/setup/SetupWizard';
 import { useConfigPersistence } from './lib/config/useConfigPersistence';
 import './index.css';
 import { useAppShortcuts } from './lib/shortcuts/useAppShortcuts';
@@ -56,6 +57,9 @@ function App() {
   const editor = useDocumentStore((s) => s.editor);
   // #103 — the start screen owns the window until a document exists.
   const startActive = useDocumentStore((s) => s.startActive);
+  // #103 — THE FIRST-RUN GATE: the setup wizard rides beside the
+  // start screen until completed/skipped (the flag's law: once, ever).
+  const firstRunCompleted = useConfigStore((s) => s.config.firstRunCompleted);
   // M-STYLES: load the global registry (appConfigDir/styles.json) once
   // at bootstrap — merges over the code builtins; first run seeds the
   // file (hyperlink custom, builtins.ts). Doc layers apply on open.
@@ -176,11 +180,15 @@ function App() {
             the window chrome; the ribbon, desk, and status bar step
             aside — the DESK STAYS MOUNTED but hidden (the Editor's
             lifecycle, the doc flows, and every portal target keep
-            working; Home is a view state, not a teardown). */}
+            working; Home is a view state, not a teardown).
+            #103 FIRST RUN: before the wizard completes, the start
+            screen steps aside TOO — the wizard is the only content
+            (the installer posture: a lone window over a quiet desk;
+            Finish reveals the now-personalized Home). */}
         {startActive ? (
           <>
             <TitleBarRow variant="home" />
-            <StartScreen />
+            {firstRunCompleted && <StartScreen />}
           </>
         ) : (
           /* FOCUS MODE — the ribbon and status bar own their own hides
@@ -242,6 +250,7 @@ function App() {
         </div>
         {!startActive && <StatusBar />}
       </main>
+      {startActive && <SetupWizard />}
       <SettingsDialog />
       <CommandPalette />
       <StyleDialog state={styleDialog} onClose={styleDialog.close} />

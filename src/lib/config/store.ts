@@ -67,6 +67,11 @@ interface ConfigStore {
   setRecentSymbolGroups: (groups: string[]) => void;
   /** M-META: the user identity (the default author for new docs). */
   setIdentityAuthor: (value: string) => void;
+  /** #103 — THE FIRST-RUN GATE's writer (completed or skipped). */
+  setFirstRunCompleted: () => void;
+  /** #103 — the settings import (the wizard's Welcome step); false =
+   *  the file failed schema validation, nothing applied. */
+  importConfig: (raw: unknown) => boolean;
   /** Spell check: the MASTER gate (ribbon / F7 / palette) — flips BOTH
    *  feature flags together. The provider/language chosen with informed
    *  consent (default off — see schema.ts). */
@@ -441,6 +446,26 @@ setShowHorizontalRuler: (value) =>
         identity: { ...state.config.identity, author: value },
       },
     })),
+
+  /** #103 — THE FIRST-RUN GATE's writer: completed or skipped both set
+   *  it (the wizard never nags). */
+  setFirstRunCompleted: () =>
+    set((state) => ({ config: { ...state.config, firstRunCompleted: true } })),
+
+  /** #103 — THE SETTINGS IMPORT (the wizard's Welcome step): parse a
+   *  config JSON against the SCHEMA (never trust the file — a corrupt
+   *  or foreign JSON returns false, nothing applied), then apply it
+   *  whole. The first-run flag is PRESERVED (the wizard stays open —
+   *  imported values pre-fill the remaining steps; the user still
+   *  finishes or skips). */
+  importConfig: (raw: unknown): boolean => {
+    const parsed = ConfigSchema.safeParse(raw);
+    if (!parsed.success) return false;
+    set((state) => ({
+      config: { ...parsed.data, firstRunCompleted: state.config.firstRunCompleted },
+    }));
+    return true;
+  },
 
   setSpellCheckEnabled: (value) =>
     // MASTER: both flags together — the ribbon/F7/palette semantic.
