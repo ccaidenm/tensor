@@ -16,28 +16,9 @@ import type { TranslationProvider } from '@/lib/editor/translate/client';
 import type { TranslationLanguage } from '@/lib/editor/translate/types';
 import { cn } from 'cn';
 
-/**
- * TRANSLATE SETUP — the consent surface (the SpellSetupDialog twin):
- * translation is OFF until the user configures a provider with the
- * trade-offs stated up front. THE PROVIDER CARDS (the spell setup's
- * online/local card pattern):
- *
- *   - LibreTranslate: the open engine. Self-hosted = free + keyless
- *     (the privacy-first choice — the user's own instance is the
- *     destination). The hosted instance needs a PAID key; its language
- *     list answers keyless, so Test works either way.
- *   - Google Cloud Translation: an API key with billing; text goes to
- *     Google's cloud.
- *   - DeepL: an API key; free tier keys (ending ':fx') auto-route to
- *     the free host; 500k chars/month on the free tier.
- *
- * A fourth card — LOCAL MODELS — runs translation ON DEVICE through
- * downloaded per-pair models (Mozilla's registry, ≈25MB each): nothing
- * is ever sent, downloads happen only when the user picks a pair. Its
- * Connect needs no test (there is no destination to verify — the card
- * IS the informed choice; the catalog fetch + pair downloads come
- * later, on demand).
- */
+// The translation consent surface: OFF until the user configures a
+// provider. The cards state where text goes; per-provider caveats live
+// in the PROVIDERS table below.
 
 const PROVIDERS: Array<{
   id: TranslationProvider;
@@ -76,15 +57,10 @@ const PROVIDERS: Array<{
   },
 ];
 
-/**
- * THE PROVIDER FORM, SURFACE-FREE: the setup dialog's body AND the
- * first-run wizard's Translate step render the SAME fields (the
- * testids are the shared contract — translatePanel.test.tsx pins
- * them). `onConnected` fires after the config writes (the dialog
- * closes itself; the wizard just re-renders configured). Seeds from
- * the current config on mount — the dialog remounts it per open (the
- * render gate below), the wizard per step.
- */
+/** Shared by the setup dialog and the first-run wizard's Translate step —
+ *  the testids are the contract (translatePanel.test.tsx pins them).
+ *  Seeds from config on mount, so it must remount per open (the render
+ *  gate below). `onConnected` fires after the config writes. */
 export function TranslateSetupForm({
   onConnected,
   showCancel = true,
@@ -146,8 +122,7 @@ export function TranslateSetupForm({
   const active = PROVIDERS.find((p) => p.id === provider)!;
   const needsEndpoint = provider === 'libretranslate';
   const needsKey = provider === 'google' || provider === 'deepl';
-  // Local has no destination to verify — the card itself is the
-  // informed choice; the catalog and pair downloads come later.
+  // Local has no destination to verify — no test; downloads come later.
   const needsTest = provider !== 'local';
 
   return (
@@ -268,8 +243,7 @@ export function TranslateSetupDialog() {
           </div>
         </div>
 
-        {/* The form mounts ONLY when open — its seed-on-mount law then
-            matches the dialog-open rhythm exactly. */}
+        {/* Mount only when open — the form seeds from config on mount. */}
         {open && <TranslateSetupForm onConnected={closeSetup} />}
       </DialogContent>
     </Dialog>

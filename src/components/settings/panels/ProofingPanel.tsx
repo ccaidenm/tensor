@@ -100,10 +100,8 @@ export function ProofingPanel() {
     withConsent(grammar, () => setSpellGrammar(!grammar));
   }
 
-  /** Download right here — the setup dialog is only for the FIRST
-   *  enable; by the time the user is in Settings, the Local runtime is
-   *  the thing they are acting on, so this installs inline (the shared
-   *  spelling: progress, config writes, success toast). */
+  /** Download inline here — the setup dialog is only for the first enable;
+   *  this is the shared install flow (progress, config writes, toast). */
   async function downloadLocal() {
     const ok = await install();
     if (ok) await probe(); // refresh installed state + server status
@@ -295,10 +293,8 @@ export function ProofingPanel() {
   );
 }
 
-/** TRANSLATE LOCAL — the pair manager (the spell local-runtime row's
- *  twin): what's on disk, how much it occupies, and the remove path.
- *  Disk is the truth — the probe reads Rust's manifests. Removing
- *  disposes the engine so the next run rebuilds without the pair. */
+/** The translation-pair manager: what's on disk and the remove path.
+ *  Removing disposes the engine so the next run rebuilds without the pair. */
 function InstalledModelsRow() {
   const [installed, setInstalled] = useState<InstalledPair[] | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -366,13 +362,10 @@ function InstalledModelsRow() {
   );
 }
 
-/** TRANSLATE — the provider/key management (the Privacy panel
- *  documents; this manages). Direct config writes (the measurement
- *  unit's live-write law) — credentials are validated by the test
- *  button, never silently mutated by a typo. The provider choice and
- *  the full informed-consent flow live in the setup dialog
- *  ("Reconfigure…"); this row edits credentials for the CHOSEN
- *  provider. */
+/** The provider/key management (the Privacy panel documents; this
+ *  manages). Credentials are validated by the test button, never
+ *  silently mutated by a typo. The consent flow lives in the setup
+ *  dialog; this row edits credentials for the chosen provider. */
 function TranslateEndpointRow() {
   const configured = useConfigStore((s) => s.config.translation.configured);
   const provider = useConfigStore((s) => s.config.translation.provider);
@@ -390,8 +383,7 @@ function TranslateEndpointRow() {
   const [error, setError] = useState<string | null>(null);
   const [tested, setTested] = useState(false);
 
-  // The persisted truth is the draft when the panel isn't being edited
-  // (fresh mounts, config reloads).
+  // Fresh mounts / config reloads re-seed the drafts from the persisted config.
   useEffect(() => setDraftEndpoint(endpoint), [endpoint]);
   useEffect(() => setDraftKey(apiKey), [apiKey]);
 

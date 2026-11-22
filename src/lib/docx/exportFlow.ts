@@ -5,14 +5,9 @@ import { buildDocx, docxReportLines, type DocxExportInput } from './export';
 import { baseName, stripExt } from '@/lib/markdown/paths';
 
 /**
- * M-DOCX — the DOCX export flow: build (the mapping, fully tested) →
- * the lossy confirm gate (ruling 2's posture — the SAME in-app shadcn
- * dialog the markdown flow uses, now generalized) → save dialog →
- * write. Never mutates filePath/isDirty — an export is a copy.
- *
- * The gate fires only when the report carries losses; a document whose
- * content maps 1:1 exports with NO dialog (the classifier decides,
- * never a hardcoded list of file types).
+ * The DOCX export flow: build → the lossy confirm gate → save dialog →
+ * write. Never mutates filePath/isDirty — an export is a copy. The
+ * gate fires only when the report carries losses.
  */
 
 export type ExportDocxOutcome = 'exported' | 'cancelled' | null;
@@ -24,11 +19,9 @@ export function docxDefaultPath(filePath: string | null): string {
   return `${stripExt(baseName(filePath))}.docx`;
 }
 
-/** THE IN-PLACE SAVE (the user's vision): write the Word file at ITS
- *  OWN path — no dialog, the document's file IS the target. The lossy
- *  gate still runs (a document carrying unrepresentable content gets
- *  the shadcn confirm before bytes land — cancelling leaves the file
- *  and the dirty state untouched). */
+/** The in-place save: write the Word file at its own path — no dialog.
+ *  The lossy gate still runs (cancelling leaves the file and the dirty
+ *  state untouched). */
 export async function saveDocxToPath(
   input: DocxExportInput,
   path: string,

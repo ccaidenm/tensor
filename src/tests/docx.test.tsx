@@ -6,12 +6,11 @@ import { DEFAULT_MARGINS, type PageSetup } from '@/lib/document/pageSetup';
 import { BUILTIN_DEFINITIONS } from '@/lib/styles/builtins';
 
 /**
- * M-DOCX — the #37a export suite. STRUCTURAL assertions only (never
+ * #37a — the docx export suite. STRUCTURAL assertions only (never
  * string-compare whole XML — the lib's attribute order is not a
- * contract): unzip the produced bytes with fflate, probe the parts for
- * the specific constructs the mapping promises. The round-trip gate
- * (export → import → normalized JSON) lands with #38a; "opens without
- * corruption warnings in Word" is the user-validated spike gate.
+ * contract): unzip with fflate, probe the parts for the promised
+ * constructs. The round-trip gate (export → import → normalized JSON)
+ * lands with #38a.
  */
 
 // A valid 1x1 red PNG (the smallest image the format can express).
@@ -55,7 +54,7 @@ async function exportParts(input: DocxExportInput): Promise<{ parts: Record<stri
   return { parts, text: (part: string) => decoder.decode(parts[part]!), report };
 }
 
-describe('docx export — M-FLOW pagination properties', () => {
+describe('docx export — m-flow pagination properties', () => {
   it('paragraph flags map to their w: spellings (keepNext/keepLines/pageBreakBefore)', async () => {
     const { text } = await exportParts(makeInput(doc(
       para('bonded', { keepNext: true, keepLines: true }),
@@ -92,8 +91,8 @@ describe('docx export — M-FLOW pagination properties', () => {
     const styles = text('word/styles.xml');
     // heading-1's builtin carries keepNext (Word's own Heading default):
     expect(styles).toContain('<w:keepNext/>');
-    // The pre-M-FLOW hardcode kept lines together on EVERY heading —
-    // retired: only a style that SAYS keepLines emits it.
+    // Only a style that SAYS keepLines emits it (no hardcode on
+    // every heading).
     expect(styles).not.toContain('<w:keepLines/>');
   });
 
@@ -332,11 +331,9 @@ describe('docx export — tables', () => {
 
 describe('docx export — the NaN regression + horizontal rule', () => {
   it('fontSize STRING spellings coerce through the unit seam (the reported export failure)', async () => {
-    // TipTap's FontSize extension stores the user's spelling — '18px',
-    // '10pt' — and pxToHalfPoints(NaN) made the docx lib's
-    // hpsMeasureValue throw "Invalid value 'NaN' specified. Must be an
-    // integer." (surfaced through the app's error dialog, which read as
-    // a Rust failure).
+    // TipTap's FontSize stores the user's spelling — '18px', '10pt' —
+    // and pxToHalfPoints(NaN) once made hpsMeasureValue throw, which
+    // surfaced through the app's error dialog as a Rust failure.
     const { text } = await exportParts(makeInput(doc(para('x', {}, [
       { type: 'textStyle', attrs: { fontSize: '18px' } },
     ]))));
@@ -400,7 +397,7 @@ describe('docx export — images and equations', () => {
     expect(body).toContain('<wp:wrapNone/>'); // the overlay model
     // 24px → 228600 EMU (the anchor-relative offset)
     expect(body).toContain('228600');
-    // floats MAP now — no reported loss
+    // floats MAP — no reported loss
     expect(docxReportLines(report)).toEqual([]);
   });
 
@@ -504,7 +501,7 @@ describe('docx export — bands, styles, properties, degradation', () => {
     expect(text('word/settings.xml')).toContain('updateFields');
     // the derived entries do NOT export (Word owns them Word-side)
     expect(body).not.toContain('An entry');
-    // and it is no longer a reported loss — the round-trip is clean
+    // and it is not a reported loss — the round-trip is clean
     expect(docxReportLines(report)).toEqual([]);
   });
 

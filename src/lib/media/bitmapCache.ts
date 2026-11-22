@@ -1,21 +1,8 @@
 /**
- * M-IMAGES-2 — the shared media bitmap cache. One resolution point for
- * CANVAS painting (the paginated inline draws + the ImageLayer): the
- * MediaStore owns the bytes/URLs; this module owns the DECODED
- * HTMLImageElements, loaded lazily per sha, with a version counter so
- * paint surfaces repaint exactly once when a bitmap lands (the
- * M-IMAGES-1 arrival law — one repaint, no relayout).
- *
- * M-IMAGES-2.2 — FAILURE IS NOT SILENT: the old onerror forgot the
- * load with ZERO diagnostics, so a decode failure (a webview codec
- * gap, a truncated file) painted the pending tint FOREVER — the
- * reported "gray placeholder that never resolves" with no trace of
- * why. Now: a dev diagnostic (sha/ext/bytes/attempts — the loud
- * posture every other failure path in this app follows), a BOUNDED
- * re-kick (transient decode/alloc failures are real; an eternal retry
- * loop is not), and a terminal FAILED state that bumps the version —
- * surfaces paint the failed box (a distinct tint + cross-hatch)
- * instead of the pending tint, and getBitmapFailed() tells them which.
+ * Shared media bitmap cache for canvas painting: the MediaStore owns
+ * bytes/URLs; this owns the decoded HTMLImageElements, lazy per sha,
+ * with a version counter so surfaces repaint exactly once per arrival.
+ * Decode failures retry boundedly, then paint a terminal failed state.
  */
 
 const bitmapCache = new Map<string, HTMLImageElement>();
@@ -31,11 +18,9 @@ const versionListeners = new Set<() => void>();
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 250;
 
-// M-IMAGES-2.2 — the two placeholder states, shared by every paint
-// surface (the tint literals were inline at each site before — one
-// derivation, no forks): PENDING = a load in flight or unresolved
-// media; FAILED = a terminal decode failure (darker + cross-hatch —
-// never mistaken for "still loading").
+// The two placeholder states, shared by every paint surface: PENDING
+// = a load in flight or unresolved media; FAILED = a terminal decode
+// failure (darker + cross-hatch — never mistaken for "still loading").
 export const PENDING_TINT = 'rgba(0,0,0,0.08)';
 export const FAILED_TINT = 'rgba(0,0,0,0.16)';
 export const FAILED_HATCH = 'rgba(0,0,0,0.35)';
@@ -70,8 +55,8 @@ function loadBitmap(sha: string, url: string): void {
       window.setTimeout(() => loadBitmap(sha, url), RETRY_BASE_MS * (attempt + 1));
       return;
     }
-    // TERMINAL: the failed state is VISIBLE (version bump — surfaces
-    // repaint once into the failed box) and no more loads churn.
+    // Terminal: the version bump repaints surfaces once into the
+    // failed box; no more loads churn.
     retryCounts.delete(sha);
     failedLoads.add(sha);
     bitmapVersion += 1;
@@ -86,8 +71,8 @@ export function getBitmap(sha: string): HTMLImageElement | undefined {
   return bitmapCache.get(sha);
 }
 
-/** M-IMAGES-2.2: TRUE when the sha's load terminally failed — paint
- *  the failed box (distinct from the pending tint), never re-kick. */
+/** True when the sha's load terminally failed — paint the failed
+ *  box, never re-kick. */
 export function getBitmapFailed(sha: string): boolean {
   return failedLoads.has(sha);
 }
@@ -99,12 +84,9 @@ export function ensureBitmap(sha: string, url: string): void {
 }
 
 /**
- * The PAINT-TIME resolver (M-IMAGES-2.1): the bitmap when decoded;
- * otherwise KICKS the load from the MediaStore URL (if the media is
- * in the store) and returns undefined — the placeholder branch is
- * for THIS pending state only, never a permanent state: when the load
- * lands, bitmapVersion bumps and the subscribers repaint once (the
- * arrival law — one paint, no relayout).
+ * The paint-time resolver: the bitmap when decoded; otherwise kicks
+ * the load and returns undefined — the placeholder is pending-only;
+ * on arrival bitmapVersion bumps and subscribers repaint once.
  */
 export function resolveMediaBitmap(sha: string): HTMLImageElement | undefined {
   const cached = bitmapCache.get(sha);
@@ -132,7 +114,7 @@ export function bitmapVersionNow(): number {
   return bitmapVersion;
 }
 
-/** TEST SEAM: jsdom never fires img.onload — resolve a sha manually. */
+/** Test seam: jsdom never fires img.onload — resolve a sha manually. */
 export const __bitmapTestSeam = {
   resolve(sha: string, img: HTMLImageElement): void {
     bitmapCache.set(sha, img);
@@ -140,7 +122,7 @@ export const __bitmapTestSeam = {
     bitmapVersion += 1;
     for (const fn of versionListeners) fn();
   },
-  /** M-IMAGES-2.2: drive the terminal-failure state from tests. */
+  /** Drive the terminal-failure state from tests. */
   fail(sha: string): void {
     failedLoads.add(sha);
     bitmapVersion += 1;

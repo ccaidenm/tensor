@@ -1,14 +1,7 @@
 /**
- * LOCAL MODELS — shared types: the Rust DTOs (the installed registry),
- * the wrapper's request/response shape, and the module shim for the
- * untyped @browsermt/bergamot-translator package.
- *
- * THE ARCHITECTURE (the spell-installer posture): Rust owns the
- * network and disk (catalog fetch, per-pair downloads, gunzip, hash
- * verification, manifests); the TS engine loads the DOWNLOADED model
- * bytes through the asset protocol (convertFileSrc) — the webview
- * never fetches a model URL from the internet, and translation is
- * fully offline after download.
+ * LOCAL MODELS — shared types: the Rust DTOs, the wrapper's shapes.
+ * Rust owns the network and disk; the TS engine loads the DOWNLOADED
+ * bytes via convertFileSrc — fully offline after download.
  */
 
 /** One direction in Mozilla's catalog (translate_catalog's DTO). */
@@ -60,7 +53,7 @@ export interface WrapperRegistryFile {
 }
 
 /** The wrapper registry: keys are from+to concatenated (it parses them
- *  back with substring(0,2)/substring(2,4) — the 2-letter law). */
+ *  back with substring(0,2)/substring(2,4) — pairs are 2-letter codes). */
 export type WrapperRegistry = Record<
   string,
   Partial<Record<'model' | 'lex' | 'vocab' | 'srcvocab' | 'trgvocab', WrapperRegistryFile>>

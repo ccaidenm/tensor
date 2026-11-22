@@ -121,9 +121,8 @@ export function SettingsDialog() {
                 })}
               </div>
 
-              {/* Persistent footer, always reachable regardless of which
-                  panel is active — not really a "setting" so it lives in
-                  the nav rail itself rather than inside any one panel. */}
+              {/* Persistent footer in the nav rail — not a "setting",
+                  so it belongs to no single panel. */}
               <div className="flex-none border-t border-border p-2">
                 <button
                   type="button"

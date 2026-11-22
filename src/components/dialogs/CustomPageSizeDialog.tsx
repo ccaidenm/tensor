@@ -29,20 +29,10 @@ import {
 const MIN_PT = 2 * 72;
 const MAX_PT = 52 * 72;
 
-/**
- * Layout > Paper Size > Custom… : width/height inputs displayed in the
- * user's measurement unit (config.editor.measurementUnit). Changes apply
- * only on "Done" — Cancel (or X / click-away) leaves the current page
- * size untouched. The store holds POINTS (customWidth/customHeight);
- * this dialog converts at the boundary. If the entered dimensions
- * match a preset, the preset is used instead of 'custom'.
- *
- * #58 — TWO TARGETS: 'document' (the ribbon's path — Done applies
- * document-wide, the quick-controls scope) or 'draft' (the Page Setup
- * dialog's path — Done hands the pick BACK through customSizeOnPick;
- * the page-setup scope then decides where it lands, and a Cancel
- * changes nothing).
- */
+// Custom page size — the store holds POINTS; this dialog converts at the
+// boundary. A matching preset wins over 'custom'. #58: the 'document'
+// target applies Done document-wide; 'draft' hands the pick back via
+// customSizeOnPick (Cancel changes nothing).
 export function CustomPageSizeDialog() {
   const isOpen = useDocumentPropertiesStore((s) => s.customSizeIsOpen);
   const closeCustomSize = useDocumentPropertiesStore((s) => s.closeCustomSize);
@@ -57,9 +47,8 @@ export function CustomPageSizeDialog() {
 
   useEffect(() => {
     if (!isOpen) return;
-    // The DRAFT target seeds from the caller's pick (the page-setup
-    // draft's current size — possibly a custom one mid-edit); the
-    // document target seeds from the store.
+    // The draft target seeds from the caller's pick (possibly a custom
+    // size mid-edit); the document target seeds from the store.
     const source = (target === 'draft' && seed) || pageSetup;
     const preset = PAGE_SIZES[source.pageSize] ?? PAGE_SIZES[FALLBACK_PAGE_SIZE];
     const widthPt = source.customWidth ?? preset.width;
@@ -100,8 +89,7 @@ export function CustomPageSizeDialog() {
     }
     if (valid) {
       const preset = findMatchingPreset(wPt!, hPt!);
-      // #58 — DOCUMENT-WIDE (the ribbon quick controls' scope): the
-      // size merges into every section + the store in one commit.
+      // #58 — document-wide: the size merges into every section + the store in one commit.
       if (preset) {
         applyPageSetup('document', { ...pageSetup, pageSize: preset }, { pageSize: preset });
       } else {
@@ -127,9 +115,7 @@ export function CustomPageSizeDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        {/* The margins' ticker treatment: letter-prefixed, unit inside,
-            steppers — ONE provider so the tooltips carry between the
-            two fields. */}
+        {/* One TooltipProvider so the tooltips carry between the two fields. */}
         <TooltipProvider delay={300} closeDelay={0}>
           <div className="flex items-end justify-between gap-1.5">
             <RibbonIconInput

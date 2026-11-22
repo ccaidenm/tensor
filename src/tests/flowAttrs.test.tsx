@@ -11,15 +11,15 @@ import { renderTensor, renderTensorInScrollContainer, settleLayout } from './har
 import { FakeMetrics } from './fakeMetrics';
 
 /**
- * M-FLOW — the pagination-flags MODEL suite: schema attrs (clipboard
- * spellings), the setFlowAttrs writer, the flowSelectionState
- * mixed-state reader, adapter projection (attr-over-style cascade, the
- * pageBreak stamp merge, the float pass-through), the builtin heading
- * bond (Word's Heading 1–3 default), table cantSplit, the document
- * widow default, break badges, the print ride-along, and end-to-end
- * reflow through the real engine. (The popover/dialog UI suite lives
- * in flowPopover.test.tsx.) FakeMetrics: line height == fontSize (16px
- * at 16pt, 54 lines/page), 62 chars/line at 16pt, width scales with
+ * The pagination-flags MODEL suite: schema attrs (clipboard spellings),
+ * the setFlowAttrs writer, the flowSelectionState mixed-state reader,
+ * adapter projection (attr-over-style cascade, the pageBreak stamp
+ * merge, the float pass-through), the builtin heading bond (Word's
+ * Heading 1–3 default), table cantSplit, the document widow default,
+ * break badges, the print ride-along, and end-to-end reflow through
+ * the real engine. (The popover/dialog UI suite lives in
+ * flowPopover.test.tsx.) FakeMetrics: line height == fontSize (16px at
+ * 16pt, 54 lines/page), 62 chars/line at 16pt, width scales with
  * fontSize.
  */
 
@@ -35,7 +35,7 @@ function directLayout(editor: Editor) {
   };
 }
 
-describe('M-FLOW: writer + reader', () => {
+describe('writer + reader', () => {
   it('setFlowAttrs writes the flags on the caret paragraph (and on headings); untouched flags stay unset', async () => {
     const { editor } = renderTensorInScrollContainer('<p>one</p><h2>head</h2>');
     await settleLayout();
@@ -127,7 +127,7 @@ describe('M-FLOW: writer + reader', () => {
   });
 });
 
-describe('M-FLOW: adapter projection', () => {
+describe('adapter projection', () => {
   it('all-unset paragraphs emit NO flow field; a full attr set projects verbatim', async () => {
     const { editor } = renderTensorInScrollContainer('<p>plain</p>');
     await settleLayout();
@@ -178,9 +178,9 @@ describe('M-FLOW: adapter projection', () => {
   });
 
   it('a pending forced break passes THROUGH a floated image to the next in-flow block', async () => {
-    // Pre-M-FLOW the unconditional stamp landed breakBefore on the
-    // float — validateFloatFlow's THROW at layout. The pass-through is
-    // the engine's own ruled spelling ("put the forced break on the
+    // The unconditional stamp once landed breakBefore on the float —
+    // validateFloatFlow's THROW at layout. The pass-through is the
+    // engine's own ruled spelling ("put the forced break on the
     // following text block").
     const { editor } = renderTensorInScrollContainer(
       '<p>before</p><div data-page-break="true"></div><p>after</p>'
@@ -209,7 +209,7 @@ describe('M-FLOW: adapter projection', () => {
   });
 });
 
-describe('M-FLOW: tables', () => {
+describe('tables', () => {
   it('the table-level flow attrs project (the five-flag subset); all-unset emits no flow', async () => {
     const { editor } = renderTensorInScrollContainer('<table><tr><td>a</td></tr></table>');
     await settleLayout();
@@ -260,7 +260,7 @@ describe('M-FLOW: tables', () => {
   });
 });
 
-describe('M-FLOW: end-to-end reflow (the real engine)', () => {
+describe('end-to-end reflow (the real engine)', () => {
   it('a builtin heading at a page bottom keeps with its paragraph; keepNext:false opts out', async () => {
     // 52 filler lines = 832px; the h1 (fontSize 32 via the heading-1
     // style) is one 32px line → 832+32 = 864 fills page 0 EXACTLY, so
@@ -304,7 +304,7 @@ describe('M-FLOW: end-to-end reflow (the real engine)', () => {
   });
 });
 
-describe('M-FLOW: document-level widow control, break badges, print ride-along', () => {
+describe('document-level widow control, break badges, print ride-along', () => {
   it('toLayoutOptions carries the document-level widow default (absent = ON)', () => {
     expect(toLayoutOptions(PAGE_SETUP).preventWidowsAndOrphans).toBe(true);
     expect(toLayoutOptions({ ...PAGE_SETUP, widowControl: false }).preventWidowsAndOrphans).toBe(false);

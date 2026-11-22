@@ -34,26 +34,12 @@ import { IconButton } from '@/components/layout/IconButton';
 import { cn } from 'cn';
 
 /**
- * M-A11Y — the Accessibility Check panel: the document-content
- * checker's results list, docked through the same SidebarHost
- * infrastructure as Find/Replace and the Table panel (the
- * SearchResultsSidebar is the list blueprint — count header, click-to-
- * navigate rows; the Table panel's close pattern — focus returns to
- * the document).
- *
- * LIVE WHILE OPEN (the locked rescan ruling): the scan runs on open
- * and re-runs when the doc/style-registry/page background change
- * while the panel is visible — the scan module's WeakMap memo means a
- * re-scan walks nothing until something actually changed. Nothing at
- * all runs while the panel is closed (the "not continuously in the
- * background" AC is the closed-panel law).
- *
- * THE JUMP (each row navigates to its flagged location, both view
- * modes): images select the NODE (the floating toolbar and alt dialog
- * become reachable), headings place the caret through the references
- * scan's ONE navigation path, contrast spans select the flagged
- * range. All three ride PM's scroll-into-view intent — the ScrollGuard
- * routes it per view mode.
+ * The Accessibility Check panel's results list. Live while open: the
+ * scan runs on open and re-runs when the doc/style-registry/page
+ * background change (WeakMap memo — nothing re-walked until changed);
+ * nothing runs while closed. The jump: images select the NODE, headings
+ * place the caret via the references scan's one path, contrast spans
+ * select the range — all via PM's scroll-into-view intent.
  */
 
 const GROUPS: Array<{ kind: A11yIssueKind; label: string; icon: typeof ImageOff }> = [
@@ -98,9 +84,7 @@ export function AccessibilityCheckPanel() {
   const issues = scanResult.issues;
   const total = issues.length;
 
-  /** THE JUMP — three shapes, one scroll law (the panel header
-   * comment): node selection / caret-through-the-references-path /
-   * range selection, every one via PM's scroll-into-view intent. */
+  /** The jump: node selection / caret / range selection — all via PM's scroll-into-view intent. */
   const jumpTo = (issue: A11yIssue): void => {
     if (!editor) return;
     if (issue.kind === 'altText') {
@@ -114,9 +98,8 @@ export function AccessibilityCheckPanel() {
     }
   };
 
-  /** The alt rows' assist (the locked ruling): SELECTING is the jump's
-   * job; the dialog is where the user writes the fix — assisted, never
-   * automated. */
+  /** SELECTING is the jump's job; the dialog is where the user writes
+   * the fix — assisted, never automated. */
   const openAltDialog = (issue: A11yIssue): void => {
     // Flagged images are never decorative (decorative ones are exempt
     // by definition) — the store's default-off covers the toggle.

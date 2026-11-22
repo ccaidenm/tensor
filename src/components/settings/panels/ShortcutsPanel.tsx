@@ -86,12 +86,9 @@ function ShortcutRow({ def }: { def: ShortcutDefinition }) {
 
   const handleSwap = () => {
     if (!conflict) return;
-    // Give the OTHER command whatever binding this row currently has,
-    // rather than leaving it fully unbound — this is exactly the bug
-    // that made Find & Replace silently stop working: the old
-    // "Overwrite" set the loser to '' with zero indication anything had
-    // happened. A swap guarantees both commands always keep SOME
-    // binding, so this failure mode can't recur.
+    // Give the other command this row's binding instead of leaving it
+    // unbound — a swap keeps both commands bound (an unbound loser once
+    // made Find & Replace silently stop working).
     setKeybinding(conflict.otherId, current);
     setKeybinding(def.id, conflict.keys);
     setConflict(null);

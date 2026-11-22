@@ -8,29 +8,12 @@ import { aaThreshold, contrastRatio, isLargeText } from './contrast';
 import type { A11yIssue, A11yScanContext, A11yScanResult } from './types';
 
 /**
- * M-A11Y — the scan: three content checks over the PM doc, pure and
- * on-demand (the issue's "not continuously in the background" is the
- * caller's law — this module just computes when asked).
- *
- * THE BAND RULING (the session's locked decision): band content —
- * headers and footers — IS screen-reader content, so the alt and
- * contrast checks INCLUDE it (a header's background chain is its
- * section's page color, the same math as body text); band HEADINGS
- * stay OUT of the hierarchy check — a header's H2 is chrome, not body
- * outline (the ToC scan's ruling, and Word's own reading).
- *
- * THE BACKGROUND CHAIN for a text run, first-present-layer-wins
- * (matching the paint order — the highlight fillRect covers the cell
- * fill covers the page): highlight (the resolveRun cascade, with the
- * adapter's #fef08a default) → the enclosing table cell's
- * backgroundColor → the containing section's pageColor (the
- * breakOrdinalList math, bit-for-bit with the paint side) → white.
- * Paint-only approximations (the blockquote/code tints are hardcoded
- * constants, not document data) are deliberately NOT in the chain.
- *
- * The foreground resolves through resolveRun — THE one cascade (the
- * adapter's own law, never a parallel resolver): color/highlight marks
- * > charStyle > paragraph/heading style > the #000000 baseline.
+ * Three on-demand checks over the PM doc. Band ruling: alt and
+ * contrast include header/footer content, but band headings stay out
+ * of the hierarchy check (chrome, not body outline). Text background
+ * resolves first-present-layer-wins — highlight > cell fill > section
+ * page color > white; the foreground always goes through resolveRun,
+ * never a parallel resolver.
  */
 
 /** Top-level band container names (HeaderFooterNodes' containers). */
@@ -42,8 +25,7 @@ const PAGE_WHITE = '#ffffff';
 /** The adapter's DEFAULT_HIGHLIGHT — a colorless highlight mark. */
 const DEFAULT_HIGHLIGHT = '#fef08a';
 
-/** The merged-span snippet cap — enough context to recognize the text,
- * never enough to become a wall. */
+/** Snippet cap: enough context to recognize the text, never a wall. */
 const SNIPPET_MAX = 60;
 
 interface SectionBreakInfo {
@@ -65,9 +47,7 @@ function sectionBreaksOf(doc: PMNode): SectionBreakInfo[] {
   return out;
 }
 
-/** The section page color for a top-level block starting at
- * `topStart` — the sections.ts index math (breaks strictly before),
- * with an unset break inheriting the doc default. */
+/** The section page color for a top-level block; unset breaks inherit the doc default. */
 function pageColorFor(
   breaks: SectionBreakInfo[],
   docPageColor: string | undefined,
@@ -93,8 +73,7 @@ function cellBackgroundAt($pos: ResolvedPos): string | undefined {
   return undefined;
 }
 
-/** The paragraph/heading style definition for a text node's parent
- * block (the effectiveSelectionRunStyle spelling, node-side). */
+/** The parent block's style definition (heading level or paragraph styleId). */
 function paragraphStyleOf(
   parent: PMNode,
   definitions: Record<string, StyleDefinition>,
@@ -112,10 +91,7 @@ function paragraphStyleOf(
   return null;
 }
 
-/** One bad-contrast span: adjacent text leaves with the SAME resolved
- * style merge into one issue (PM splits text at formatting
- * boundaries; an identical verdict across the boundary is one
- * finding, not fragments). */
+/** One bad-contrast span; adjacent leaves with the same resolved style merge into one issue. */
 interface ContrastSpan {
   from: number;
   to: number;
@@ -136,12 +112,8 @@ const scanCache = new WeakMap<
   }
 >();
 
-/**
- * The scan. Memoized on the PM doc object (the references scan's
- * stability law): the panel's live re-checking walks nothing until the
- * doc reference, the registry's merged definitions object, or the
- * page color actually changes.
- */
+/** Memoized on the PM doc — nothing recomputes until the doc, the
+ * definitions, or the context inputs change. */
 export function scanAccessibility(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
   const cached = scanCache.get(doc);
   if (
@@ -177,17 +149,12 @@ function computeScan(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
     resolveNormalBase(ctx.baseFontFamily, ctx.baseFontSize, ctx.definitions),
   );
 
-  // ── ALT + CONTRAST (bands included — header/footer content is
-  // screen-reader content; the locked band ruling) ──────────────────
+  // ── Alt + contrast (bands included) ───────────────────────────────
   const spans: ContrastSpan[] = [];
   doc.descendants((node, pos) => {
     const name = node.type.name;
     if (name === 'image' || name === 'inlineImage') {
-      // MISSING ALT (unless DECORATIVE — the explicit intent
-      // spelling): '' alone is "not yet written" and flags; a
-      // decorative image is presentational ink, exempt by design
-      // (the marking lives on the node attr; the checker honors it
-      // before it asks).
+      // Missing alt flags; decorative === true is explicit presentational intent and exempts.
       const alt = node.attrs?.alt;
       const decorative = node.attrs?.decorative === true;
       if (!decorative && (typeof alt !== 'string' || alt.trim() === '')) {
@@ -232,8 +199,7 @@ function computeScan(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
       direct,
     });
 
-    // The background chain: highlight > cell fill > section page
-    // color > white (first present layer — the paint order).
+    // First present layer wins — the paint order.
     const background =
       resolved.highlight !== ''
         ? resolved.highlight
@@ -243,17 +209,14 @@ function computeScan(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
 
     const ratio = contrastRatio(resolved.color, background);
     if (ratio == null) {
-      // A color in the chain was unparseable or semi-transparent —
-      // counted, never guessed (a checker that can't see declines to
-      // pass or fail by assumption).
+      // Unparseable or semi-transparent color: counted, never guessed.
       skippedRuns += 1;
       return;
     }
     const large = isLargeText(resolved.fontSize, resolved.bold);
     if (ratio >= aaThreshold(large)) return;
 
-    // Merge adjacent leaves with the identical style tuple (the
-    // verdict's whole input) into one span.
+    // Merge adjacent leaves with the identical style tuple.
     const key = `${resolved.color}\u0000${background}\u0000${resolved.fontSize}\u0000${resolved.bold}`;
     const last = spans[spans.length - 1];
     if (last && last.to === pos && last.key === key) {
@@ -276,8 +239,7 @@ function computeScan(doc: PMNode, ctx: A11yScanContext): A11yScanResult {
     });
   }
 
-  // ── HEADING HIERARCHY (bands excluded — a header's heading is
-  // chrome, never body outline; the ToC scan's ruling) ─────────────
+  // ── Heading hierarchy (bands excluded) ─────────────────────────────
   let prevLevel = 0;
   let h1Count = 0;
   doc.descendants((node, pos) => {

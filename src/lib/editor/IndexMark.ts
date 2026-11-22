@@ -4,8 +4,7 @@ import type { EditorState } from '@tiptap/pm/state';
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     indexMark: {
-      /** Mark the selection as an index entry (the issue's "invisible
-       * index-marked span"). Non-empty text selections only. */
+      /** Mark the selection as an index entry. Non-empty text selections only. */
       setIndexEntry: () => ReturnType;
       /** Remove the mark from the selection (caret: the touched span). */
       unsetIndexEntry: () => ReturnType;
@@ -14,22 +13,9 @@ declare module '@tiptap/core' {
 }
 
 /**
- * M-REFS — the INDEX ENTRY mark: an INVISIBLE, presence-only span. The
- * marked text IS the term (no attrs; sub-entries/see-also are M3 —
- * attrs are the extension point). The scanner (references/scan.ts)
- * groups marked spans by exact trimmed text and lists each occurrence
- * as its own location.
- *
- * VISIBILITY: none in reading mode — the Index itself is the
- * feedback. With non-printing characters ON, the NPC affordance
- * (index.css: `.show-non-printing [data-tensor-index]`) shows a
- * dotted underline so authors can audit their marks — the pilcrow
- * law, applied to a mark.
- *
- * CLIPBOARD (the equation/clipboard law): parseHTML matches ONLY
- * Tensor's own marker — an external HTML <span> never carries it, so
- * nothing foreign parses in; internal copy/paste round-trips the mark
- * through the marker, exactly like the equation node.
+ * The INDEX ENTRY mark: invisible, presence-only (no attrs); the
+ * scanner (references/scan.ts) groups marked spans by exact trimmed
+ * text. Visible only via the non-printing affordance (index.css).
  */
 export const IndexMark = Mark.create({
   name: 'indexEntry',
@@ -65,9 +51,8 @@ export const IndexMark = Mark.create({
           const markType = state.schema.marks.indexEntry;
           if (dispatch) {
             if (empty) {
-              // Caret case: clear the touched BLOCK's marks (Word's
-              // remove-mark-at-caret shape — an explicit selection
-              // narrows it).
+              // Caret case: clear the touched BLOCK's marks (an explicit
+              // selection narrows it).
               const $from = state.doc.resolve(from);
               tr.removeMark($from.before(), $from.after(), markType);
             } else {

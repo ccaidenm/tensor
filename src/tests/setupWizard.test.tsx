@@ -5,12 +5,9 @@ import { useConfigStore } from '@/lib/config/store';
 import { DEFAULT_CONFIG } from '@/lib/config/schema';
 
 /**
- * #103 — THE FIRST-RUN WIZARD. The gate is config-driven
- * (firstRunCompleted), every step commits LIVE through the store's
- * existing writers, and Skip/Finish are the only exits (the installer
- * posture — overlay clicks and Esc do nothing). App-level mounting is
- * trivial JSX (startActive && <SetupWizard/>); this suite pins the
- * wizard's own contract.
+ * #103 — the first-run wizard: config-gated (firstRunCompleted), every
+ * step commits LIVE through the store's existing writers, and
+ * Skip/Finish are the only exits (overlay clicks and Esc do nothing).
  */
 
 const q = (testid: string) => document.querySelector(`[data-testid="${testid}"]`) as HTMLElement | null;
@@ -71,7 +68,7 @@ describe('SetupWizard — the gate', () => {
     expect(q('setup-wizard')).not.toBeNull();
     expect(q('setup-step-welcome')).not.toBeNull();
     // The position lives in the header's dots — the footer's redundant
-    // count is gone (the user's redundancy ruling).
+    // count is gone.
     expect(q('setup-step-count')).toBeNull();
     // No close affordance (the installer posture); the landing has NO
     // Skip either — its escape is the preset button. The header is
@@ -129,8 +126,8 @@ describe('SetupWizard — the flow', () => {
   it('walks all seven steps, committing each choice live, and Finish sets the flag', async () => {
     harness();
 
-    // APPEARANCE: the name question LIVES HERE (the user's merge),
-    // beside the theme + accent — all committing live.
+    // APPEARANCE: the name question LIVES HERE, beside the theme +
+    // accent — all committing live.
     goto('appearance');
     act(() => {
       fireEvent.change(q('setup-name-input')!, { target: { value: 'Caiden' } });
@@ -199,7 +196,7 @@ describe('SetupWizard — the flow', () => {
     expect(q('setup-privacy-link-previews')!.getAttribute('aria-checked')).toBe('false');
     expect(useConfigStore.getState().config.privacy.fetchLinkMetadata).toBe(false);
 
-    // ACCESSIBILITY: its OWN step (the panel's two laws).
+    // ACCESSIBILITY: its OWN step.
     goto('accessibility');
     act(() => {
       fireEvent.click(q('setup-motion-on')!);

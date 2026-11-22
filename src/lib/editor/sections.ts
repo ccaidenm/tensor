@@ -5,17 +5,9 @@ import { pushPageSetupUndo, PAGE_SETUP_MARKER } from '@/lib/editor/pageSetupHist
 import type { PageSetup, PageStyles } from '@/lib/document/pageSetup';
 
 /**
- * #58 SECTIONS — the section RESOLUTION helpers (the dialog's and the
- * surfaces' shared facts). ONE derivation of "which section is the
- * caret in" and "which target owns a section's props" — never a
- * second count (the one-derivation law; the adapter and the engine
- * resolve their own views of the same breaks).
- *
- * THE SPELLING (Word's): sectionBreak node ordinal k carries section
- * k's props (the PRECEDING section — everything above it); the
- * store's pageSetup IS the final section's. Section index i:
- *   i < breaks → props live on break node i's attrs.setup
- *   i === breaks (the final) → props live in the store
+ * #58 — the section resolution helpers: ONE derivation of "which section
+ * is the caret in" and "which holder owns its props" — break ordinal k
+ * carries section k's props; the store holds the FINAL section's.
  */
 
 export interface SectionFacts {
@@ -29,10 +21,9 @@ export interface SectionFacts {
    */
   breakPos: number | null;
   /**
-   * #58 — the break whose `type` governs how this section STARTS (the
-   * boundary AT the section's begin = the break BEFORE it — a section
-   * k's start type lives on break k−1). null for section 0 (the doc
-   * start — not editable) and for a uniform doc.
+   * #58 — the break whose `type` governs how this section STARTS (a
+   * section k's start type lives on break k−1). null for section 0
+   * (doc start) and a uniform doc.
    */
   startBreakPos: number | null;
   /** The section's EFFECTIVE setup (the break's attrs, else the store's). */
@@ -48,10 +39,9 @@ function breakOrdinalList(doc: PMNode): { pos: number; before: number }[] {
   return out;
 }
 
-/** The caret's section facts (the dialog's open target). A caret
- *  inside any depth (band container, table cell) resolves through its
- *  top-level block — before(1) is the doc child's start either way. A
- *  NodeSelection ON a break resolves to THAT break's section. */
+/** The caret's section facts. A caret inside any depth resolves
+ *  through its top-level block (before(1) is the doc child's start);
+ *  a NodeSelection ON a break resolves to THAT break's section. */
 export function sectionAtCaret(editor: Editor | null, storeSetup: PageSetup): SectionFacts {
   if (!editor) return { total: 1, index: 0, breakPos: null, startBreakPos: null, setup: storeSetup };
   const { selection, doc } = editor.state;
@@ -59,9 +49,7 @@ export function sectionAtCaret(editor: Editor | null, storeSetup: PageSetup): Se
   const breaks = breakOrdinalList(doc);
   const total = breaks.length + 1;
   // The caret's section = the breaks strictly before its block (a
-  // break at exactly caretBlockStart sits AT the caret's block start —
-  // the NodeSelection case resolves to it as the section's props
-  // holder, and the section index is its ordinal).
+  // break AT the block start resolves to it — the NodeSelection case).
   const index = breaks.filter((b) => b.pos < caretBlockStart).length;
   // The START boundary: break index−1 (the break the section begins
   // after). Section 0 starts at the doc start — not editable.
@@ -98,12 +86,9 @@ export function sectionAtBreak(editor: Editor | null, pos: number, storeSetup: P
   };
 }
 
-/** #101 — SPLIT VIEW: the section's EFFECTIVE setup by ordinal — the
- *  rulers' margin drags seed their write from the DRAGGED PAGE's
- *  section (each ruler affects its own page's section), so a
- *  mixed-geometry doc never clobbers the section's own size with the
- *  store's. Same holder law as sectionAtCaret: ordinal k's props live
- *  on breaks[k] when that break exists, else the store. */
+/** #101 — the section's EFFECTIVE setup by ordinal: the rulers' margin
+ *  drags seed their write from the DRAGGED PAGE's section, so a mixed-
+ *  geometry doc never clobbers it with the store's. */
 export function sectionSetupAt(editor: Editor | null, storeSetup: PageSetup, ordinal: number): PageSetup {
   if (!editor || ordinal < 0) return storeSetup;
   const breaks = breakOrdinalList(editor.state.doc);
@@ -145,34 +130,9 @@ export function sectionAfterCaret(editor: Editor | null, storeSetup: PageSetup):
 }
 
 /**
- * #58 — the APPLY-to-SCOPES (the Page Setup dialog's and the ribbon's
- * ONE write surface; never a second path):
- *  - 'document': the PARTIAL merges into EVERY break's setup (one PM
- *    transaction) + the store — one commit, one reflow. Not added to
- *    the undo history: the store side isn't undoable either (the
- *    margins dialog's standing behavior) — an undo that restored the
- *    breaks but not the store would desync the two sources. (Also what
- *    the RULER's per-frame drag writes — no-history keeps drags out of
- *    the undo stack.)
- *  - 'section': the FULL setup writes the caret's section's props
- *    holder (setNodeMarkup on its break, or the store for the final).
- *  - 'sections': the FULL setup writes EACH chosen section's holder
- *    (`sectionSet` — the dialog's individual-section chooser); the
- *    final section's write merges into the store. One transaction for
- *    the break-owned targets + at most one store write.
- *  - 'forward': inserts a break at the caret (the split-dance, seeded
- *    with the caret's section's EFFECTIVE setup — the content above is
- *    untouched) then writes the FULL setup to the FOLLOWING section's
- *    holder (the next break's attrs, or the store). The inserted
- *    break's `type` = `startType` (how the new section starts). Word's
- *    "this point forward".
- *  - 'page' (#48): writes ONE PAGE STYLE (the positional map — a page
- *    owns DECOR, never geometry; the engine's law). `options.page`
- *    names the 0-based index and the background (null = CLEAR the
- *    entry, back to the section/doc chain). Store-only: the marker tr
- *    + co-undo carry it; one Ctrl+Z reverts it.
- *  - `startType`: when given, ALSO writes the section-start type (the
- *    target's startBreakPos attrs — the break BEFORE the section).
+ * #58 — the ONE write surface for the dialog and ribbon. 'document'
+ * merges the partial everywhere, OUT of undo (half-undo would desync);
+ * 'forward' seeds a break, writes the next holder; 'page' is one STYLE.
  */
 export type PageSetupScope = 'document' | 'section' | 'sections' | 'forward' | 'page';
 
@@ -216,15 +176,13 @@ export function applyPageSetup(
   // BEFORE any dispatch; the writeStore's docAfter reads the post-tr
   // state, which view.dispatch applies synchronously).
   const docBefore = editor?.state.doc ?? null;
-  // Whether OUR marker already rode a dispatched tr (the mixed paths);
-  // a STORE-ONLY write dispatches a marker-only empty tr so the
-  // pending law sees it (the plugin applies to marker-only trs even
-  // though history records nothing).
+  // Whether OUR marker already rode a dispatched tr; a STORE-ONLY
+  // write dispatches a marker-only empty tr so the pending-state
+  // tracker sees it (history records nothing for it).
   let markerDispatched = false;
   /** The store write + its co-undo push (AFTER the PM tr dispatches —
-   *  the snapshot carries the post-write document; the pageSetupHistory
-   *  module's law: one Ctrl+Z reverts the PM part and the store part
-   *  together, never half). */
+   *  the snapshot carries the post-write document; one Ctrl+Z reverts
+   *  the PM part and the store part together). */
   const writeStore = (next: PageSetup): void => {
     if (pushUndo) {
       if (editor && !markerDispatched) {
@@ -238,12 +196,9 @@ export function applyPageSetup(
     store.setPageSetup(next);
   };
   if (scope === 'page') {
-    // #48 — ONE PAGE STYLE (the positional map). Geometry is never
-    // page-owned (the engine's law); the dialog disables everything
-    // but the background under this scope. Store-only write: the
-    // marker-only tr + the co-undo entry carry it (one Ctrl+Z), the
-    // same writeStore law — mirrored inline because the payload is
-    // the pageStyles map, not the setup.
+    // #48 — ONE PAGE STYLE (decor; geometry is never page-owned).
+    // Store-only: the marker-only tr + co-undo entry carry it —
+    // mirrored inline because the payload is the map, not the setup.
     const target = options?.page;
     if (!target) return;
     const prevStyles = store.pageStyles;
@@ -273,11 +228,10 @@ export function applyPageSetup(
     if (editor) {
       const tr = editor.state.tr;
       // The break merges JOIN history by default (one commit = one
-      // history item); the co-undo's store restore fires with it
-      // (the doc-snapshot correlation). The ruler's frames pass
-      // addToHistory false — the drag's end commit is the ONE item.
+      // item); the ruler's frames pass addToHistory false (the drag's
+      // end commit is the one item).
       if (!addToHistory) tr.setMeta('addToHistory', false);
-      // OURS — the co-undo's pending law tracks this tr (the marker
+      // OURS — the co-undo's pending state tracks this tr (the marker
       // rides only the history-joined trs; the ruler's preview frames
       // stay out entirely).
       if (addToHistory) tr.setMeta(PAGE_SETUP_MARKER, true);
@@ -285,12 +239,9 @@ export function applyPageSetup(
       for (const pos of breakPositions(editor)) {
         const node = editor.state.doc.nodeAt(pos);
         if (!node) continue;
-        // #WATERMARK — a break with NO setup inherits the doc defaults
-        // (the two-level model); a PARTIAL merge onto that null base
-        // would mint a margins-less setup (the adapter's section
-        // geometry reads margins and THROWS). Seed from the store's
-        // effective setup when the break carries none — a partial
-        // can never strip a required field this way.
+        // A break with NO setup inherits the doc defaults; a PARTIAL
+        // merge onto a null base would mint a margins-less setup (the
+        // adapter THROWS). Seed from the store's effective setup.
         const base = (node.attrs.setup as PageSetup | undefined) ?? store.pageSetup;
         const merged = { ...base, ...partial };
         tr.setNodeMarkup(pos, undefined, { ...node.attrs, setup: merged });
@@ -310,7 +261,7 @@ export function applyPageSetup(
     const positions = breakPositions(editor);
     const tr = editor.state.tr;
     // The ruler's preview frames pass addToHistory false — the drag's
-    // end commit is the ONE item (the 'document' scope's law).
+    // end commit is the ONE item (as in the 'document' scope).
     if (!addToHistory) tr.setMeta('addToHistory', false);
     if (addToHistory) tr.setMeta(PAGE_SETUP_MARKER, true);
     markerDispatched = true;
@@ -335,8 +286,7 @@ export function applyPageSetup(
     }
     // The caret's section's EFFECTIVE setup seeds the new break (the
     // content above keeps its look); the FOLLOWING section's holder
-    // gets the draft. The inserted break's type = startType (how the
-    // new section starts).
+    // gets the draft.
     const facts = sectionAtCaret(editor, store.pageSetup);
     editor.commands.insertSectionBreak(facts.setup, options?.startType ?? 'nextPage');
     // The insertion shifted the breaks: the following section's
@@ -359,9 +309,8 @@ export function applyPageSetup(
     return;
   }
   // 'section' — the caret's section by default; an explicit sectionSet
-  // (the dialog's auto-selected chips — the user may toggle others)
-  // writes each chosen section instead (the chooser power under one
-  // scope).
+  // (the dialog's auto-selected chips) writes each chosen section
+  // instead.
   if (options?.sectionSet && options.sectionSet.length > 0 && editor) {
     const positions = breakPositions(editor);
     const tr = editor.state.tr;

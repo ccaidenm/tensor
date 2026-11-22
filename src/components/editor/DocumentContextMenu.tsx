@@ -55,20 +55,13 @@ import {
 } from '@/components/ui/context-menu';
 
 /**
- * M-T4 — the DOCUMENT CONTEXT MENU: the app-wide replacement for the
+ * The DOCUMENT CONTEXT MENU — the app-wide replacement for the
  * WebView's native right-click menu (App.tsx suppresses `contextmenu`
- * globally; this is the custom surface, wrapping BOTH view modes at
- * Editor.tsx's routing — one mount, every mode).
- *
- * The variant reads the LIVE selection at OPEN time (the popup renders
- * on open): a NodeSelection on an image → the image ops; a CellSelection
- * or a caret parked in a table → the table ops; a non-empty text
- * selection → cut/copy/paste + formatting; otherwise the bare paste
- * surface. The FLOATING TOOLBAR keeps text formatting; this menu owns
- * the STRUCTURAL and CONTEXTUAL ops (Word's split).
- *
- * Controlled open: palette swatches are plain buttons (not menu items),
- * so they close the menu manually through the same open state.
+ * globally). The variant reads the LIVE selection at OPEN time
+ * (variantOf below); the floating toolbar keeps text formatting —
+ * this menu owns the STRUCTURAL and CONTEXTUAL ops. Palette swatches
+ * are plain buttons, so they close the menu manually via the same
+ * open state.
  */
 
 type MenuVariant = 'image' | 'table' | 'text' | 'none';
@@ -148,10 +141,9 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
       variant: e ? variantOf(e) : 'none' as MenuVariant,
       hasMerged: e ? selectionHasMergedCells(e.state) : false,
       inHeaderRow: e?.isActive('tableHeader') ?? false,
-      // M-IMAGES-2.2 (carried to the menu surface): align is a
-      // BLOCK-only fact — the cluster RENDERS only when usable (an
-      // inline object is seated by baseline; its align attr is inert),
-      // never disabled-but-visible.
+      // Align is a BLOCK-only fact — the cluster renders only when
+      // usable (an inline object is seated by baseline; its align attr
+      // is inert), never disabled-but-visible.
       isInlineImage: e?.isActive('inlineImage') ?? false,
       isBold: e?.isActive('bold') ?? false,
       isItalic: e?.isActive('italic') ?? false,
@@ -167,11 +159,9 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
 
   const chain = () => editor.chain().focus();
 
-  // M-T4 — DEVELOPER MODE (Settings > General > Advanced; gated behind
-  // an accepted warning there): Reload + Inspect Element ride the
-  // BOTTOM of every variant. Reload is unconditional; Inspect Element
-  // goes through the Rust open_devtools command (browser dev runs get
-  // an explanatory toast — the tools are Tauri webview features).
+  // DEVELOPER MODE (gated behind an accepted warning in Settings):
+  // Reload + Inspect Element ride the BOTTOM of every variant. Inspect
+  // goes through Rust's open_devtools (browser dev runs get a toast).
   const developerMode = useConfigStore((s) => s.config.developerMode);
   const developerItems = developerMode ? (
     <>
@@ -306,9 +296,8 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
   if (state?.variant === 'text') {
     return (
       <>
-        {/* M-T4 (focused menus): a text selection shows the CLIPBOARD
-            group only — formatting lives on the floating toolbar and
-            the ribbon, which are selection surfaces already. */}
+        {/* A text selection shows the CLIPBOARD group only — formatting
+            lives on the floating toolbar and the ribbon. */}
         <ContextMenuItem data-testid="ctx-cut" onClick={() => void document.execCommand('cut')}>
           <Scissors size={14} /> Cut
         </ContextMenuItem>
@@ -318,10 +307,8 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
         <ContextMenuItem data-testid="ctx-paste" onClick={() => void pasteFromSystemClipboard(editor)}>
           <ClipboardPaste size={14} /> Paste
         </ContextMenuItem>
-        {/* M-REFS: the index mark lives here — the STRUCTURAL ops home
-            (the floating toolbar keeps formatting). The marked span is
-            the term; the same command the palette runs (never a
-            re-implementation). */}
+        {/* The index mark lives with the structural ops; it runs the
+            same command the palette runs (never a re-implementation). */}
         <ContextMenuSeparator />
         <ContextMenuItem data-testid="ctx-mark-index" onClick={() => void getCommand('markIndexEntry')?.run()}>
           <BookmarkPlus size={14} /> Mark as Index Entry
@@ -399,7 +386,7 @@ function EditorContextMenuItems({ editor, close }: { editor: Editor; close: () =
     );
   }
 
-  // The bare surface: paste (the proven middle-click path) + select all.
+  // The bare surface: paste + select all.
   return (
     <>
       <ContextMenuItem data-testid="ctx-paste" onClick={() => void pasteFromSystemClipboard(editor)}>

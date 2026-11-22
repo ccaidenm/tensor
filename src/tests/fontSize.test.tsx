@@ -24,7 +24,7 @@ beforeEach(() => {
   }));
 });
 
-// ─── Chrome conversion rule (pt at the chrome, px in the core) ────────────
+// Chrome conversion rule (pt at the chrome, px in the core)
 
 describe('font-size pt↔px conversion', () => {
   it('display: px × 0.75, rounded — 16px shows "12"', () => {
@@ -48,7 +48,7 @@ describe('font-size pt↔px conversion', () => {
   });
 });
 
-// ─── The Font Size box ────────────────────────────────────────────────────
+// The Font Size box
 
 function mockEditor() {
   const committed: string[] = [];
@@ -109,7 +109,7 @@ describe('FontSizeInput (pt chrome, px core)', () => {
   });
 });
 
-// ─── Stepping on a real editor (the shared ±2pt law) ─────────────────────
+// Stepping on a real editor (the shared ±2pt step)
 
 describe('stepFontSize', () => {
   it('16px ↑2pt → 19px, ↓2pt back → 16px (mark attr stays a px string)', async () => {
@@ -150,7 +150,7 @@ describe('stepFontSize', () => {
   });
 });
 
-// ─── Shortcuts: registry, matcher aliases, live dispatch ─────────────────
+// Shortcuts: registry, matcher aliases, live dispatch
 
 describe('font-size shortcuts', () => {
   it('registered: ctrl+shift+. up, ctrl+shift+, down (editor context)', () => {
@@ -201,7 +201,7 @@ describe('font-size shortcuts', () => {
   });
 });
 
-// ─── Data boundary: the adapter converts pt attrs to core px ──────────────
+// Data boundary: the adapter converts pt attrs to core px
 
 describe('adapter font-size/line-height pt paths', () => {
   it('a pasted fontSize "12pt" attr lands in the core as 16px; "18pt" line-height → multiplier 1.5', async () => {

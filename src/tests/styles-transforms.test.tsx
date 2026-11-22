@@ -11,15 +11,15 @@ import { useStyleRegistryStore } from '@/lib/styles/registry';
 import type { StyleDefinition } from '@/lib/styles/types';
 
 /**
- * M-STYLES addendum 3: TRANSFORMED MEASUREMENT integration. The
- * adapter transforms run text; the engine measures the TRANSFORMED
- * string; the caret, hitTest, and search stay in source coordinates
- * via the length-preserving invariant (offsets identity-mapped).
+ * Transformed-measurement integration: the adapter transforms run
+ * text; the engine measures the TRANSFORMED string; the caret,
+ * hitTest, and search stay in source coordinates via the
+ * length-preserving invariant (offsets identity-mapped).
  *
- * WiderCapsMetrics: uppercase text measures 14px/char, everything else
- * 10px/char (FakeMetrics' rate) — so a paragraph that WRAPS under the
- * transform but would NOT wrap if measured against source proves the
- * measurement flows through the transformed text.
+ * WiderCapsMetrics: uppercase text measures 14px/char, everything
+ * else 10px/char — a paragraph that WRAPS under the transform but
+ * would NOT wrap against source proves measurement flows through the
+ * transformed text.
  */
 
 const WiderCapsMetrics: TextMetrics = {

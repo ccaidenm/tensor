@@ -45,27 +45,13 @@ import { TranslateSetupForm } from '@/components/dialogs/TranslateSetupDialog';
 import { cn } from 'cn';
 
 /**
- * #103 — THE FIRST-RUN SETUP WIZARD: Tensor's installer moment, in-app
- * (the classic .msi walkthrough's honest equivalent — the OS bundle
- * installs the files; THIS personalizes the app). One pass, once:
- * `config.firstRunCompleted` is the gate (absent in every pre-#103
- * config, so existing users get their nostalgic tour too — the
- * ruling), completed OR skipped, never nagging again.
- *
- * MOUNT LAW: App renders this beside the start screen (a dialog OVER
- * it, not a takeover — the start screen + status bar stay live behind,
- * and the theme step re-themes the app in real time through the
- * overlay). The wizard sits at the z-40 tier so the REAL setup dialogs
- * it opens (Spell/Translate, z-50) stack above it, installer-style.
- * Non-dismissable: no overlay-click or Esc exit — Skip is the way
- * out, and every step commits live so nothing is ever lost.
- *
- * STEP LAW: every step writes its choice the MOMENT it's made (the
- * store's existing writers — no draft buffer, no Finish-commit). Back
- * revisits; the config already holds the answer; the step UI reflects
- * the store, so a revisit shows the choice. Import (Welcome) applies a
- * whole exported config the same way — the remaining steps then show
- * the imported values, and the user can adjust or just Finish.
+ * #103 — THE FIRST-RUN SETUP WIZARD: one pass, once — gated by
+ * config.firstRunCompleted, completed or skipped, never nagging again.
+ * A dialog OVER the start screen (not a takeover) at the z-40 tier —
+ * the real setup dialogs it opens (Spell/Translate, z-50) stack above
+ * it, installer-style. Non-dismissable: Skip/Finish are the only
+ * exits, and every step commits live (no draft buffer) — Back revisits
+ * the already-committed choice.
  */
 
 const STEPS = [
@@ -160,13 +146,8 @@ function WelcomeStep() {
     }
   }
 
-  /** THE DEFAULT PRESET (the user's law): the schema defaults —
-   *  System where System exists — with every EXTERNAL gate off
-   *  (update checks, link previews, font catalogs, spell/translate
-   *  all stay unconfigured), and exports landing in the user's
-   *  Documents folder (the one destination a fresh install can
-   *  assume). The one-click skip that still installs an honest
-   *  config. */
+  /** The default preset: the schema defaults with every EXTERNAL gate
+   *  off, and exports landing in the user's Documents folder. */
   async function useDefaultSettings() {
     let documentsDir = '';
     try {
@@ -223,8 +204,7 @@ function WelcomeStep() {
   );
 }
 
-/* ── Step 2: Appearance — theme, accent, and the name (the #102
-      pickers, live; the name question rides here) ────────────────── */
+/* ── Step 2: Appearance — theme, accent, and the name ───────────── */
 
 function AppearanceStep() {
   const theme = useConfigStore((s) => s.config.theme);
@@ -311,7 +291,7 @@ function AppearanceStep() {
   );
 }
 
-/* ── Step 4: Pages vs Pageless ─────────────────────────────────── */
+/* ── Step 3: Pages vs Pageless ─────────────────────────────────── */
 
 function ViewStep() {
   const layout = useConfigStore((s) => s.config.editor.defaultPageLayout);
@@ -360,7 +340,7 @@ function ViewStep() {
   );
 }
 
-/* ── Step 5: Spell check (the SpellSetupDialog's flow, inline) ─── */
+/* ── Step 4: Spell check ────────────────────────────────────────── */
 
 function SpellStep() {
   const setSpellCheckProvider = useConfigStore((s) => s.setSpellCheckProvider);
@@ -440,7 +420,7 @@ function SpellStep() {
   );
 }
 
-/* ── Step 6: Translate (the real setup dialog, opened over) ─────── */
+/* ── Step 5: Translate ───────────────────────────────────────────── */
 
 function TranslateStep() {
   return (
@@ -452,8 +432,8 @@ function TranslateStep() {
           you choose, each time you press Translate. Nothing is sent otherwise.
         </p>
       </div>
-      {/* THE PROVIDER FORM, INLINE — the setup dialog's exact fields
-          (the shared TranslateSetupForm; Connect commits live). */}
+      {/* The provider form, inline — the shared TranslateSetupForm;
+          Connect commits live. */}
       <TranslateSetupForm showCancel={false} />
       <p className="text-xs text-muted-foreground">
         Skipping is fine — set it up any time from Review → Translate.
@@ -462,7 +442,7 @@ function TranslateStep() {
   );
 }
 
-/* ── Step 7: Privacy & features ────────────────────────────────── */
+/* ── Step 6: Privacy & features ────────────────────────────────── */
 
 function PrivacyStep({ seedExternals }: { seedExternals: () => void }) {
   const autoCheckForUpdates = useConfigStore((s) => s.config.privacy.autoCheckForUpdates);
@@ -470,10 +450,9 @@ function PrivacyStep({ seedExternals }: { seedExternals: () => void }) {
   const fetchLinkMetadata = useConfigStore((s) => s.config.privacy.fetchLinkMetadata);
   const setFetchLinkMetadata = useConfigStore((s) => s.setFetchLinkMetadata);
 
-  // THE FIRST-VISIT SEED: reaching this step IS the consent moment —
-  // the recommended externals arrive pre-checked (untick to refuse).
-  // The wizard's ref makes this once-per-run: a revisit after an
-  // untick never silently re-enables.
+  // THE FIRST-VISIT SEED: reaching this step is the consent moment —
+  // the recommended externals arrive pre-checked (untick to refuse);
+  // once-per-run, so a revisit after an untick never re-enables.
   useEffect(seedExternals, [seedExternals]);
   const allowFontCatalogs = useConfigStore((s) => s.config.privacy.allowFontCatalogs);
   const setAllowFontCatalogs = useConfigStore((s) => s.setAllowFontCatalogs);
@@ -543,7 +522,7 @@ function PrivacyStep({ seedExternals }: { seedExternals: () => void }) {
   );
 }
 
-/* ── Step 8: Accessibility (the panel's two laws, live) ─────────── */
+/* ── Step 7: Accessibility ────────────────────────────────────────── */
 
 function AccessibilityStep() {
   const reduceMotion = useConfigStore((s) => s.config.accessibility.reduceMotion);
@@ -612,9 +591,8 @@ export function SetupWizard() {
     <Dialog
       open={!firstRunCompleted}
       onOpenChange={(o) => {
-        // NON-DISMISSABLE (the installer posture): overlay clicks and
-        // Esc do nothing — Skip/Finish are the only exits, and every
-        // choice is already committed live.
+        // NON-DISMISSABLE: overlay clicks and Esc do nothing —
+        // Skip/Finish are the only exits.
         void o;
       }}
     >
@@ -631,10 +609,8 @@ export function SetupWizard() {
           </DialogHeader>
         )}
 
-        {/* THE FIXED STAGE: the dialog is ONE height — the step swap
-            scrolls inside this region, never resizes the window (the
-            installer-window posture). Horizontal overflow is dead by
-            decree. */}
+        {/* THE FIXED STAGE: the dialog is one height — the step swap
+            scrolls inside, never resizes the window. */}
         <div
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
           data-testid="setup-step-content"
@@ -648,10 +624,8 @@ export function SetupWizard() {
           {stepId === 'accessibility' && <AccessibilityStep />}
         </div>
 
-        {/* THE INSTALLER FOOTER, three zones: Back at the FAR LEFT
-            (the user's placement), the dots centered, the actions
-            right. Back revisits committed choices; Skip completes
-            with what's chosen so far; Next becomes Finish at the end. */}
+        {/* The installer footer: Back far-left, dots centered,
+            actions right. */}
         <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center border-t border-border pt-3">
           <div>
             {step > 0 && (

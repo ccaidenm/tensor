@@ -3,17 +3,9 @@ import { useConfigStore } from '@/lib/config/store';
 import type { TranslateBlock, TranslationLanguage } from './types';
 
 /**
- * THE NETWORK MODULE — every call translation ever makes, behind one
- * gate. THE PRIVACY LAW (the catalogsAllowed precedent): nothing
- * here reaches the network unless config.translation.configured is
- * true AND a provider is usable — a call site cannot forget the gate
- * because the gate is the module's entry, not a caller habit.
- *
- * THREE PROVIDERS, ONE CONTRACT (the spell wire law): the Rust layer
- * (src-tauri/src/translate.rs) normalizes every provider's protocol
- * to the same array-in → array-out shape. The WebView never issues
- * cross-origin fetches for this feature (the spell/fetch_url posture
- * — one wire, reqwest, tight CSP).
+ * THE NETWORK MODULE — one gate: nothing reaches the network unless
+ * configured AND a provider is usable. Rust normalizes every provider
+ * to one wire shape; the WebView never fetches cross-origin here.
  */
 
 export class TranslationNotEnabledError extends Error {
@@ -26,10 +18,8 @@ export class TranslationNotEnabledError extends Error {
 export type TranslationProvider = 'libretranslate' | 'google' | 'deepl' | 'local';
 
 /** Reads + validates the config, or throws. The ONLY way past the gate.
- *  Usability per provider: libretranslate needs an endpoint (self-host
- *  = keyless); google/deepl need an API key (deepl's ':fx' suffix
- *  auto-routes to the free host); local needs nothing but the consent
- *  itself — downloads happen per pair, on demand, later. */
+ *  libretranslate needs an endpoint; google/deepl need an API key;
+ *  local needs nothing but consent (downloads happen per pair, later). */
 export function requireTranslationConfig(): {
   provider: TranslationProvider;
   endpoint: string;
@@ -53,7 +43,7 @@ export async function fetchLanguages(provider: TranslationProvider, endpoint?: s
 }
 
 /** One batch: HTML block fragments in, translated HTML fragments out,
- *  1:1 (the Rust layer enforces the array law per provider). */
+ *  1:1 (the Rust layer enforces the same array shape per provider). */
 export async function translateBatch(
   provider: TranslationProvider,
   endpoint: string | undefined,

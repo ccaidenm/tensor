@@ -143,7 +143,7 @@ describe('PaginatedView integration', () => {
   it('e. sentinel-only fallback: a hardBreak doc degrades to pageless; lists now render PAGINATED', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // M6.1 parity: lists PROJECT — a list doc renders sheets, no throw.
+    // Parity: lists PROJECT — a list doc renders sheets, no throw.
     const { editor } = renderTensor();
     await settle();
     act(() => {
@@ -258,7 +258,7 @@ describe('PaginatedView integration', () => {
   });
 });
 
-// ─── M5.13/M6: margins — presets, commit-gated Apply, persistence ────────
+// Margins: presets, commit-gated Apply, persistence
 
 describe('margins (M5.13 presets, M6 Apply dialog)', () => {
   it('k. presets convert to Word’s physical sizes in engine px; Normal ≡ DEFAULT_MARGINS', () => {

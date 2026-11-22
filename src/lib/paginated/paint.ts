@@ -7,24 +7,15 @@ import { fitDownImage } from '@tensor-editor/engine';
 import { FAILED_HATCH, FAILED_TINT, PENDING_TINT } from '@/lib/media/bitmapCache';
 
 /**
- * Painting LineBox[] onto a per-block-per-page canvas.
- * L1: the shell paints, never computes — every coordinate here comes from
- * the engine's positioned facts (LineBox.rect/baseline/segments); nothing
- * is re-derived or re-measured except glyph advances, which go through
- * the SAME metrics instance the engine measured with (widths painted ==
- * widths measured, by construction).
+ * Painting LineBox[] onto a per-block-per-page canvas. L1: the shell
+ * paints, never computes — coordinates come from the engine's
+ * positioned facts; the only measurements are glyph advances through
+ * the SAME metrics instance the engine measured with.
  *
- * Text color, highlight, underline, and strike ride the segments'
- * run decor (adapter RunDecor); alignment rides the same shared
- * alignOffset the caret and hitTest use. ctx.font comes from the one
- * shared fontString (metrics.ts).
- *
- * BLOCK DECOR (M6.1, paint-only — the engine ignores the hints):
- * block backgrounds/borders/rule draw per line so fragments tile
- * seamlessly across pages; list markers draw on the block's first
- * line only (this canvas holds the block start iff lines[0].lineIndex
- * is 0), in the indent gutter [indent − 32, indent) — bullets
- * left-aligned in the gutter, ordered numbers right-aligned into it.
+ * BLOCK DECOR (paint-only — the engine ignores the hints):
+ * backgrounds and borders draw per line so fragments tile seamlessly
+ * across pages; list markers draw on the block's first line only, in
+ * the indent gutter [indent − 32, indent).
  */
 
 const DEFAULT_TEXT_COLOR = '#000';
@@ -37,27 +28,20 @@ const NPC_COLOR = 'rgba(0, 0, 0, 0.45)';
 const QUOTE_BORDER_COLOR = '#d4d4d8';
 const QUOTE_BG_COLOR = 'rgba(0, 0, 0, 0.04)';
 const CODE_BG_COLOR = '#f4f4f5';
-/** M-REFS: the GDocs-style field border — light gray, 1px, rounded.
- * Concrete hex by law (canvas cannot resolve theme variables — the
- * hyperlink-seed ruling family). */
+/** The field border — concrete hex (canvas cannot resolve theme
+ * variables). */
 const REF_BORDER_COLOR = '#d4d4d8';
 const RULE_COLOR = '#a1a1aa';
 const LIST_INDENT_PX = 32;
 
-/** M-HEADER-FOOTER-2: muted ink for INACTIVE band text (canvas has no
- * theme — the muted-foreground prose look's pageless-look
- * approximation, the NPC precedent's opacity family). */
+/** Muted ink for inactive band text (canvas has no theme). */
 const MUTED_TEXT_COLOR = 'rgba(0, 0, 0, 0.55)';
 
 /**
- * M-HEADER-FOOTER-3 — the DESATURATE ruling: an inactive band's ink
- * keeps its LUMA and loses its HUE (grayscale at 55% opacity), never
- * a flat gray. A colored header stays recognizable as the author's
- * color choice; default black text desaturates to exactly the old
- * MUTED_TEXT_COLOR. (The debate's answer: flat gray erases author
- * intent — desaturation is honest "inactive" while preserving the
- * document's color identity.) Unparseable colors fall back to the
- * flat gray.
+ * The DESATURATE ruling: an inactive band's ink keeps its LUMA and
+ * loses its HUE (grayscale at 55% opacity), never a flat gray — a
+ * colored header stays recognizable as the author's choice.
+ * Unparseable colors fall back to the flat gray.
  */
 export function mutedColorOf(color: string | undefined): string {
   if (!color) return MUTED_TEXT_COLOR;
@@ -82,88 +66,63 @@ export interface PaintExtras {
   align: TextAlign;
   contentWidth: number;
   /**
-   * #74 COLUMNS — the group's COLUMN frame (content-box-relative): the
-   * decor surfaces (blockquote/code tints, the reference border, the
-   * rule line, the leader extent) span the COLUMN, not the content
-   * box, and the align container is the column's. Absent ≡ the content
-   * box (single-column — every existing doc paints bit-identically).
-   * The group is per-column (the canvas grouping keys blockId+column),
-   * so ONE frame covers the whole paint call.
+   * #74 — the group's COLUMN frame (content-box-relative): the decor
+   * surfaces span the COLUMN, not the content box. Absent ≡ the
+   * content box (single-column — bit-identical).
    */
   columnLeft?: number;
   runDecor: readonly RunDecor[];
   /**
-   * NON-PRINTING CHARACTERS (M6, paint-only v1): ¶ at every block
-   * end (from the block's text boundary — an empty block paints it at
-   * the line start), middle-dot for non-breaking spaces, arrow for
-   * tabs. OFF unless explicitly set: the on-screen painter passes the
-   * user's config toggle (config.editor.showNonPrintingChars); NO
-   * print/export path passes it (none exists today — .wpdoc export
-   * serializes document JSON, never pixels). Glyph substitution is
-   * INK only: x still advances by the MEASURED layout widths, so
-   * painted positions never move. Hard breaks have no paginated model
-   * (the adapter throws loudly and falls back to pageless, whose CSS
-   * trick keeps showing them); list-marker glyphs are M6-proper scope.
+   * NON-PRINTING CHARACTERS (paint-only): ¶ at every block end,
+   * middle-dot for nbsp, arrow for tabs. OFF unless explicitly set —
+   * no print/export path passes it. Glyph substitution is INK only:
+   * x still advances by the MEASURED widths, so painted positions
+   * never move.
    */
   npc?: boolean;
   /** Block paint hints (adapter BlockPaint): list marker, blockquote
    * border/tint, rule line. Absent = plain block, nothing extra. */
   paint?: BlockPaint;
   /**
-   * M-REFS — the reference-table FIELD BORDER is SELECTION-DRIVEN (the
-   * user's ruling: the gray outline shows only while the caret sits
-   * inside the table). `paint.reference` is the KIND fact; this flag
-   * is the SELECTION fact the shell computes per projection — the
-   * border paints only when BOTH hold. Rides BlockCanvas's boxKey (a
-   * flip repaints the block once).
+   * The reference-table FIELD BORDER is selection-driven:
+   * paint.reference is the KIND fact, this the SELECTION fact — the
+   * border paints only when BOTH hold.
    */
   referenceBorder?: boolean;
   /**
-   * M-REFS-8 — the container's sidecar entries (leaderLen per row):
-   * the LEADER INK's tag. For each line belonging to a leader row,
-   * extra dots are drawn after the row's refLeader span — at the
-   * SPAN'S OWN MEASURED STYLE (a smaller font ⇒ narrower dots ⇒ MORE
-   * of them fill the same gap — the user's "always 100% of the gap,
-   * responding to formatting" ruling) — up to the page number. Pure
-   * ink: the block-text contract holds (the engine never rewrites
-   * run text — the round-8 stretch revert).
+   * The leader-ink tag (leaderLen per row): for each leader row,
+   * extra dots draw after the refLeader span — at the span's OWN
+   * measured style — up to the page number. Pure ink: the
+   * block-text contract holds.
    */
   referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
-    /**
-     * M-PAGEFIELD — the per-page field resolution: THIS page's 1-based
-     * number + the document's total. A segment whose run carries
-     * fieldKind draws the resolved text instead of the measured
-     * placeholder (the pages field draws EXACTLY the placeholder —
-     * total == measured; the page field right-anchors in the slot, the
-     * units column staying put across pages). Absent = no fields.
-     */
-    fieldPage?: { number: number; total: number };
+  /**
+   * The per-page field resolution: THIS page's 1-based number + the
+   * document's total. A fieldKind segment draws the resolved text
+   * instead of the measured placeholder. Absent = no fields.
+   */
+  fieldPage?: { number: number; total: number };
   /** The marker's font — resolved by the caller from the block's first
    *  run, falling back to the document default for empty items
    *  ("style from the block's runs"). */
   markerStyle?: TextStyle;
-  /** M-IMAGES-1: caption DISPLAY toggle — false = skip this block's
-   *  text ink entirely (the space stays: presentation-only, the NPC
-   *  precedent; the model and layout are untouched). */
+  /** Caption display toggle — false = skip this block's text ink
+   *  entirely (the space stays). */
   showCaptions?: boolean;
-  /** M-IMAGES-2: the block's BASE wrap width — the inline-object
-   *  clamp's input (the engine's breakLines maxWidth, layout.ts:392).
-   *  The paint clamp calls the SAME fitDownImage primitive on the
-   *  SAME value; dims are never re-derived. */
+  /** The block's BASE wrap width — the inline-object clamp's input;
+   *  the paint clamp calls the same fitDownImage on the same value. */
   objectMaxWidth?: number;
-  /** M-IMAGES-2: resolve a decoded bitmap for an inline image's sha
-   *  (media/bitmapCache). Absent bitmap → the tinted placeholder;
-   *  TERMINAL failure (getBitmapFailed) → the failed box. */
+  /** Resolve a decoded bitmap for an inline image's sha; absent → the
+   *  tinted placeholder, terminal failure → the failed box. */
   resolveBitmap?: (sha: string) => HTMLImageElement | undefined;
   /**
-   * M-HEADER-FOOTER-2: MUTED ink — the INACTIVE header/footer band
-   * look (grayed when not being edited). When true, text ink takes
-   * MUTED_TEXT_COLOR over decor color (decor.highlight/underline stay:
-   * they're the user's own content). Layout ink is untouched.
+   * MUTED ink — the inactive header/footer band look: text ink takes
+   * MUTED_TEXT_COLOR over decor color; the user's own highlight and
+   * underline stay.
    */
   muted?: boolean;
-  /** M-IMAGES-2.2: terminal-failure probe for the placeholder split
-   *  (pending tint vs failed box) — same module as resolveBitmap. */
+  /** Terminal-failure probe for the placeholder split (pending tint
+   *  vs failed box). */
   bitmapFailed?: (sha: string) => boolean;
 }
 
@@ -191,24 +150,16 @@ export function paintLines(
   const runDecor = extras.runDecor;
   const npc = extras.npc === true;
   const paint = extras.paint;
-  // M-IMAGES-1: caption blocks with the display toggle OFF paint
-  // nothing — blank space, layout intact (display-only ink).
+  // Caption blocks with the display toggle OFF paint nothing.
   if (paint?.caption && extras.showCaptions === false) return;
   const markerStyle = extras.markerStyle;
 
-  // M-REFS — the FIELD BORDER (GDocs-style): one light gray rounded box
-  // around the block's per-page fragment, pure ink behind the text. A
-  // table fragmenting across pages gets one box per page. CANVAS-LOCAL
-  // LAW: BlockCanvas's bitmap spans exactly [0, width] × [0, height]
-  // of the block's line extent — coordinates outside that (the first
-  // version's −6.5/−4 padding) CLIP to nothing, which is why the
-  // border never showed (the reported bug). The box hugs the INSIDE
-  // edge, 0.5px in for a crisp 1px stroke. FULL EXTENT ONLY: the
-  // damage path passes a mid-block SLICE (lines starting below the
-  // block's first line) — a box around a slice would be garbage; the
-  // slice's cleared region doesn't touch the border pixels anyway.
-  // SELECTION-DRIVEN: only while the caret sits inside (the
-  // referenceBorder fact — the user's GDocs ruling).
+  // The FIELD BORDER: one light gray rounded box around the block's
+  // per-page fragment, pure ink. The canvas-local law: BlockCanvas's
+  // bitmap spans exactly the block's line extent — outside coordinates
+  // clip to nothing, so the box hugs the inside edge, 0.5px in. Full
+  // extent only (a mid-block slice would be garbage); selection-driven
+  // (the caret must sit inside).
   if (paint?.reference && extras.referenceBorder && lines.length > 0 && lines[0].rect.y === minY) {
     let bottom = -Infinity;
     for (const line of lines) {
@@ -236,8 +187,7 @@ export function paintLines(
     const baselineY = line.rect.y - minY + line.baseline;
     const baseX = line.rect.x + off;
 
-    // BLOCK DECOR (before ink, per line — fragments tile seamlessly):
-    // #74 — the tints span the COLUMN, not the content box.
+    // BLOCK DECOR (before ink, per line); tints span the COLUMN.
     if (paint?.blockquote) {
       const prev = ctx.fillStyle;
       ctx.fillStyle = QUOTE_BG_COLOR;
@@ -252,17 +202,11 @@ export function paintLines(
       ctx.fillRect(columnLeft, line.rect.y - minY, columnWidth, line.rect.height);
       ctx.fillStyle = prev;
     }
-    // M-REFS-8 — THE LEADER INK (gap-filling dots): for a leader row
-    // (sidecar leaderLen > 0), the refLeader span's own text paints
-    // via the segment loop below (real text, the user's style); the
-    // REMAINING gap to the page number is filled with EXTRA dots at
-    // the span's own measured style — a smaller font ⇒ narrower dots
-    // ⇒ MORE dots fill the same gap (the user's ruling: the leader is
-    // always ~100% of the gap, responding to formatting). Pure ink:
-    // found from the line's OWN placed segments (the span's last
-    // segment = the one ending at the tab; the number = the first
-    // non-empty segment after the tab). No number (unresolved) ⇒ no
-    // extra dots (the seed stands alone).
+    // THE LEADER INK (gap-filling dots): for a leader row, the
+    // refLeader span's own text paints via the segment loop below
+    // (real text, the user's style); the remaining gap to the page
+    // number fills with extra dots at the span's own measured style.
+    // No number (unresolved) ⇒ no extra dots.
     if (paint?.reference && extras.referenceEntries && line.segments.length > 1) {
       const segText = (s: (typeof line.segments)[number]) => text.slice(s.start, s.end);
       const tabIdx = line.segments.findIndex((s) => segText(s) === '\t');
@@ -309,31 +253,19 @@ export function paintLines(
         }
       }
     }
-    // M-REFS-5 — THE LEADER IS REAL TEXT NOW (round 5): the dots are a
-    // real run in the entry (refLeader-marked, user-formattable,
-    // normal ink) that the ENGINE stretches to fill the gap at the
-    // run's own style — painted by the ordinary segment path below.
-    // The old painted-leader ink (muted gray, unselectable) is GONE.
 
     for (let si = 0; si < line.segments.length; si++) {
       const segment = line.segments[si]!;
       const run = runs[segment.runIndex];
       if (!run) continue;
-      // M-RULER Phase 4: each segment's x is the ENGINE's placed pen,
-      // seeded per segment — never accumulated. Prefix sums cannot
-      // model tab advances (a \t's jump is pen-dependent; center/right
-      // stops reposition their text).
+      // Each segment's x is the ENGINE's placed pen, never accumulated
+      // — prefix sums cannot model tab advances.
       const x = baseX + segment.x;
-      // M-PAGEFIELD — THE PER-PAGE RESOLUTION + INK SHIFT: the field's
-      // segment text is the MEASURED placeholder (the warm total's
-      // digits — the slot, stable across pages because the engine
-      // ECHOES one line geometry); the drawn text is THIS page's
-      // resolution, LEFT-anchored in the slot, and every following
-      // segment shifts left by the accumulated slack (fieldShiftBefore
-      // — the same derivation the caret/selection/hit consume, so the
-      // ink and the mapping agree by construction). Word re-lays
-      // footers per page; the shared geometry cannot, so the slack
-      // closes as ink: page 3 renders "Page 3 of 10" exactly.
+      // The per-page resolution + ink shift: the field's segment text
+      // is the measured placeholder; the drawn text is THIS page's
+      // resolution, left-anchored, and every following segment shifts
+      // by the accumulated slack (fieldShiftBefore — the same
+      // derivation the caret/selection/hit consume).
       const shift = fieldShiftBefore(line, { runs, text } as never, metrics, si);
       const fieldResolved =
         run.kind !== 'inlineImage' && run.fieldKind && extras.fieldPage
@@ -341,13 +273,10 @@ export function paintLines(
             ? String(extras.fieldPage.total)
             : String(extras.fieldPage.number)
           : null;
-      // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): the U+FFFC token paints
-      // as the image itself, BASELINE-SEATED (bottom at the baseline;
-      // the engine grew the line's ascent for it — the shell fills the
-      // engine's box, never computes one). The clamp is the engine's
-      // OWN fitDownImage on the SAME base wrap width (never
-      // re-derived); the x advance is the CLAMPED width — exactly the
-      // advance the engine measured for the token.
+      // INLINE OBJECTS: the U+FFFC token paints as the image,
+      // baseline-seated; the clamp is the engine's OWN fitDownImage on
+      // the same base wrap width; the x advance is the clamped width —
+      // exactly what the engine measured.
       if (run.kind === 'inlineImage') {
         const dims = fitDownImage(
           run.width,
@@ -360,7 +289,7 @@ export function paintLines(
         if (bitmap) {
           ctx.drawImage(bitmap, x - shift, baselineY - dims.height, dims.width, dims.height);
         } else if (sha != null && (extras.bitmapFailed?.(sha) ?? false)) {
-          // TERMINAL failure (M-IMAGES-2.2): darker tint + cross-hatch.
+          // TERMINAL failure: darker tint + cross-hatch.
           // save/restore keeps the hatch's stroke state off the text.
           ctx.save();
           ctx.fillStyle = FAILED_TINT;
@@ -410,25 +339,20 @@ export function paintLines(
         ctx.fillRect(drawX, baselineY - ascent, paintWidth, ascent + descent);
       }
 
-      // M-HEADER-FOOTER-3: muted band ink DESATURATES the run's own
-      // color (luma kept, hue dropped, 55% opacity) — never a flat
-      // gray that erases the author's color choice.
+      // Muted band ink DESATURATES the run's own color (luma kept,
+      // hue dropped) — never flat gray.
       ctx.fillStyle = extras.muted
         ? mutedColorOf(decor.color ?? DEFAULT_TEXT_COLOR)
         : decor.color ?? DEFAULT_TEXT_COLOR;
       ctx.font = fontString(run.style);
-      // SMALL-CAPS (M-STYLES): the same applyVariantCaps the metrics
-      // singleton used to MEASURE this run — painted advances can
-      // never diverge from measured widths (the one-ruler rule).
+      // The same applyVariantCaps the metrics singleton measured
+      // with — painted advances never diverge from measured widths.
       applyVariantCaps(ctx, run.style);
       ctx.fillText(drawn, drawX, baselineY);
 
-      // TODO(typographic polish): proper underline/strike metrics per
-      // font (nskipping ink gaps, weight-scaled thickness) — the
-      // typographic-fraction approximations below are the honest
-      // starting point.
-      // M-HEADER-FOOTER-3: decorations desaturate with the text (the
-      // one muted-ink ruling, applied consistently).
+      // Underline/strike metrics are typographic-fraction
+      // approximations; proper per-font metrics are future polish.
+      // Decorations desaturate with the text.
       const decorationColor = extras.muted
         ? mutedColorOf(decor.color ?? DEFAULT_TEXT_COLOR)
         : decor.color ?? DEFAULT_TEXT_COLOR;
@@ -481,17 +405,12 @@ export function paintLines(
       ctx.fillStyle = prev;
     }
 
-    // Block-end pilcrow, from the block boundary: only the line whose
-    // range ends at the block's text end (an empty block's zero-length
-    // range qualifies — its ¶ sits at the line start). A split block's
-    // earlier fragments stay bare; the final one paints it. P1: the
-    // glyph renders in the block's PLAIN style — bold/italic stripped
-    // (a bold paragraph's ¶ is not bold), size/family from the block's
-    // effective style (markerStyle; the P1 empty-textblock projection
-    // guarantees a run even for empty blocks). Hard-break glyphs have
-    // no paginated model (the adapter's sentinel hands such docs to
-    // the pageless CSS trick) — noted for whenever the engine grows
-    // an inline-break model.
+    // Block-end pilcrow: only the line whose range ends at the
+    // block's text end; a split block's earlier fragments stay bare.
+    // The glyph renders in the block's PLAIN style — bold/italic
+    // stripped (a bold paragraph's ¶ is not bold). Hard-break glyphs
+    // have no paginated model (the adapter's sentinel hands such docs
+    // to pageless).
     if (npc && line.rangeEnd === text.length) {
       const restore = ctx.fillStyle;
       const restoreFont = ctx.font;
@@ -502,8 +421,7 @@ export function paintLines(
         });
       }
       ctx.fillStyle = NPC_COLOR;
-      // The line-end pen: the loop's per-segment x's end at the placed
-      // width (M-RULER Phase 4 — segments carry their own x).
+      // The line-end pen: segments carry their own placed x.
       ctx.fillText('¶', baseX + line.rect.width, baselineY);
       ctx.fillStyle = restore;
       ctx.font = restoreFont;
@@ -512,29 +430,13 @@ export function paintLines(
 }
 
 /**
- * Dev-only contiguity assertion: the FLOW TRACK must tile the page
- * content box with no seams — each page's flow items, in y order, run
- * y=0, y+height, y+height+height... The walk machine guarantees this
- * by construction (the y cursor only resets at a page close); this
- * assert is the tripwire if that invariant ever breaks. Runs under
- * vitest too (import.meta.env.DEV is true there) — test (a) pins it.
- *
- * M-IMAGES-2.1 RECIPT — the flow track is lines[] + NON-FLOATED
- * placed[] MERGED: an image block consumes flow through its internal
- * synthetic "line" (getLines, layout.ts) but emits ONLY its PlacedRect
- * — lines[] alone have a y-gap exactly where an image sits (the false
- * "contiguity violated" this assert reported on every image doc,
- * pre-2.1). FLOATS are excluded: placeFloat has ZERO flow presence
- * (the anchor block's space is never reserved — floats may overlap
- * text by design; z is paint order).
- *
- * M-TABLES RECIPT — the flow track is BAND-wise where tables are
- * concerned. A table's cell LINES are parallel lanes INSIDE their band
- * (inset by the cell padding, shared y) — they are lane content, not
- * flow items, and are skipped. The tableCell rects ARE the bands'
- * flow representatives (each covers [bandTop, bandTop + bandHeight)
- * exactly — the walk's y advance per band) and participate in the
- * tiling like any placed[] item.
+ * Dev-only contiguity assertion: each page's flow items, in y order,
+ * must tile the content box with no seams (the walk machine guarantees
+ * it; this is the tripwire). The flow track is lines[] + NON-FLOATED
+ * placed[] MERGED — an image consumes flow through its synthetic line
+ * but emits only its PlacedRect; floats are excluded (zero flow
+ * presence); table cell LINES are parallel lanes inside their band
+ * (skipped — the tableCell rects carry the flow accounting).
  */
 export function assertContiguity(result: LayoutResult): void {
   if (!import.meta.env.DEV) return;
@@ -554,12 +456,10 @@ export function assertContiguity(result: LayoutResult): void {
     };
     for (const line of result.lines) {
       if (line.pageIndex !== p) continue;
-      // Table cell lines: lane content inside their band — the band's
-      // rects carry the flow accounting below.
+      // Table cell lines: lane content inside their band.
       if (line.tableCell) continue;
-      // M-HEADER-FOOTER-2: band lines sit in the MARGIN strips — never
-      // flow-track content (the body track starts at the content box,
-      // which the engine already inset by the band reservation).
+      // Band lines sit in the MARGIN strips — never flow-track
+      // content.
       if (line.band) continue;
       push(line.column ?? 0, { y: line.rect.y, h: line.rect.height, what: `line(block ${line.blockId})` });
     }

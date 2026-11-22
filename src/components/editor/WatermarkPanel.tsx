@@ -4,6 +4,7 @@ import { ImagePlus, Percent, RotateCcw, Scaling, X } from 'lucide-react';
 import { useDocumentStore } from '@/lib/document/store';
 import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { applyPageSetup, sectionAtCaret } from '@/lib/editor/sections';
+import { registerImageFromPicker } from '@/lib/media/insert';
 import {
   WATERMARK_DEFAULT_COLOR,
   WATERMARK_DEFAULT_IMAGE_ROTATION,
@@ -23,18 +24,12 @@ import { IconButton } from '@/components/layout/IconButton';
 import { cn } from 'cn';
 
 /**
- * #WATERMARK — the docked panel (the fourth SidebarHost consumer):
- * LIVE-WRITE by design — every control commits immediately through
- * applyPageSetup's scope arms (each knob = one co-undo step), and the
- * page behind the open panel IS the preview: a watermark is paint-only
- * ink, so a commit re-renders without a relayout (unlike geometry, no
- * settle waits, no layout flicker). The commit-gated dialog shape was
- * rejected for exactly this reason — tuning rotation/opacity behind an
- * Apply round-trip would be tuning blind.
- *
- * SCOPE (the locked decision): Whole document / This section. The
- * watermark rides PageSetup, so the section arm writes the caret's
- * section's holder with the setup verbatim (the pageColor mechanism).
+ * The docked watermark panel: LIVE-WRITE — every control commits
+ * immediately via applyPageSetup's scope arms (each knob = one co-undo
+ * step), and the page behind the open panel IS the preview (paint-only
+ * ink: a commit re-renders without a relayout, no flicker). Scope:
+ * Whole document / This section — the section arm writes the caret's
+ * section's holder with the setup verbatim.
  */
 
 const PRESETS = ['ASAP', 'CONFIDENTIAL', 'DO NOT COPY', 'DRAFT', 'SAMPLE'];
@@ -64,11 +59,9 @@ export function WatermarkPanel() {
   const pageSetup = useDocumentStore((s) => s.pageSetup);
   const isOpen = useSidebarStore((s) => s.active?.id === 'watermark');
 
-  // The reactivity ticks (the TablePanel pattern): docRef for edits,
-  // caretFrom for caret moves — selection-only transactions leave the
-  // doc reference IDENTICAL (PM structural sharing), so the caret
-  // tick must ride along; the facts below recompute per render (see
-  // the comment there).
+  // Reactivity ticks: docRef for edits, caretFrom for caret moves —
+  // selection-only transactions leave the doc reference IDENTICAL
+  // (structural sharing), so the caret tick must ride along.
   const docRef = useEditorState({ editor, selector: (ctx) => ctx.editor?.state.doc });
   const caretFrom = useEditorState({ editor, selector: (ctx) => ctx.editor?.state.selection.from });
   void docRef;
@@ -82,12 +75,9 @@ export function WatermarkPanel() {
     if (!isOpen) setScope('document');
   }, [isOpen]);
 
-  // The facts recompute per render — sectionAtCaret is a cheap walk
-  // and a memo here goes STALE on selection-only moves (structural
-  // sharing leaves the doc object identical, so a doc-keyed memo
-  // never re-derives). The re-render ticks are the subscriptions
-  // above (docRef for edits, caretFrom for caret moves); both are
-  // referenced to keep them load-bearing.
+  // The facts recompute per render: a doc-keyed memo would go STALE on
+  // selection-only moves (structural sharing leaves the doc identical).
+  // docRef/caretFrom are both referenced to stay load-bearing.
   const facts = editor ? sectionAtCaret(editor, pageSetup) : null;
   // The TARGET's effective watermark: the section's own (break-carried)
   // or the doc default (the store's) — the same chain the view paints.
@@ -130,7 +120,6 @@ export function WatermarkPanel() {
     try {
       // jsdom tests call registerImageBytes directly; the picker is
       // the OS dialog — the ingest variant handles either route.
-      const { registerImageFromPicker } = await import('@/lib/media/insert');
       const picked = await registerImageFromPicker();
       if (picked) {
         commitImage({ src: picked.src, width: picked.width, height: picked.height });
@@ -144,12 +133,10 @@ export function WatermarkPanel() {
 
   if (!isOpen || !editor) return null;
 
-  // THE INPUT VALUE LAW: the DRAFT leads while typing. The Text tab
-  // commits 'DRAFT' the moment it's picked, so the STORE value is
-  // never 'the user's typing in progress' — an input controlled by
-  // the store alone would freeze on the committed word (every
-  // keystroke updates the draft the value ignored — the reported
-  // can't-type bug). Draft wins until commit; commit clears it.
+  // The DRAFT leads while typing: the store value is never "typing in
+  // progress", and a store-controlled input would freeze on the
+  // committed word (the can't-type bug). Draft wins until commit;
+  // commit clears it.
   const storedText = effective?.kind === 'text' ? (effective.text ?? '') : '';
   const textValue = textDraft ?? storedText;
   const fontSizeValue = effective?.kind === 'text' ? (effective.fontSize ?? '') : '';
@@ -177,9 +164,9 @@ export function WatermarkPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        {/* THE SCOPE — the sections machinery verbatim (Whole document
-            merges into every break + the store; This section writes the
-            caret's section's holder). */}
+        {/* THE SCOPE — the sections machinery: Whole document merges
+            into every break + the store; This section writes the
+            caret's section's holder. */}
         <div className="flex flex-col gap-1">
           <div className="flex items-baseline justify-between">
             <span className="text-xs font-medium text-muted-foreground">Apply to</span>
@@ -211,7 +198,6 @@ export function WatermarkPanel() {
           </div>
         </div>
 
-        {/* THE TYPE — None / Text / Image. */}
         <Tabs
           value={kind}
           onValueChange={(value: unknown) => {

@@ -12,10 +12,10 @@ import { useConfigStore } from '@/lib/config/store';
 import { AboutPanel } from '@/components/settings/panels/AboutPanel';
 
 /**
- * #97 — THE ACCENT ENGINE: the catalog, the schema field, the token
- * writer, the asset parity, and the About heart. The ENGINE's law:
- * ONE variable (--primary) carries the brand — every echo resolves
- * through it, the writer owns it, the catalog is the one source.
+ * #97 — the accent engine: the catalog, the schema field, the token
+ * writer, the asset parity, and the About heart. ONE variable
+ * (--primary) carries the brand — every echo resolves through it, the
+ * writer owns it, the catalog is the one source.
  */
 
 const read = (rel: string): string =>

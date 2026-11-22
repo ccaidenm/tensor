@@ -42,7 +42,7 @@ function layoutBlocks(blocks: ReturnType<typeof adapt>['doc']['blocks']) {
   return { engine, result: engine.layout({ baseStyle: BASE, blocks }, toLayoutOptions(PAGE_SETUP)) };
 }
 
-// ─── PART 1: the projection itself ───────────────────────────────────────
+// 1. The projection itself
 
 describe('projection: lists', () => {
   it('bullet list: one paragraph block per item, indentLeft 32, disc markers 1..n', async () => {
@@ -178,7 +178,7 @@ describe('projection: blockquote, codeBlock, horizontalRule', () => {
   });
 });
 
-// ─── The identity-cache contract, both directions ────────────────────────
+// The identity-cache contract, both directions
 
 describe('projection identity (list items)', () => {
   function itemBlocks(blocks: AdapterBlock[]) {
@@ -234,15 +234,14 @@ describe('projection identity (list items)', () => {
     // ...but its hash-relevant content is unchanged (the engine's
     // splice keeps the cached placement — markers are ink, not flow).
     expect(afterItems[0].runs).toEqual(beforeItems[1].runs);
-    // And the edit-SURVIVAL invariant still holds for untouched items:
-    // item 'three' moved up a slot but its node object is unchanged —
-    // its marker index changed (2→... wait: after deleting item 1,
-    // 'two' is index 1 and 'three' index 2 (was 3): ALSO reindexed.
+    // The edit-SURVIVAL invariant holds for untouched items: 'three'
+    // moved up a slot with its node object unchanged — but its marker
+    // index reindexed (3→2) along with everything after the deletion.
     expect(afterItems[1].paint?.marker?.index).toBe(2);
   });
 });
 
-// ─── PART 2: input correctness on indented blocks ─────────────────────────
+// 2. Input correctness on indented blocks
 
 describe('indented-block input', () => {
   async function listDoc() {
@@ -297,7 +296,7 @@ describe('indented-block input', () => {
   });
 });
 
-// ─── PART 3: the kitchen-sink acceptance document ────────────────────────
+// 3. The kitchen-sink acceptance document
 
 describe('kitchen-sink document (M6.1 acceptance)', () => {
   const longText = 'a'.repeat(62 * 30); // 30 lines

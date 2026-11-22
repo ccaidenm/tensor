@@ -4,51 +4,19 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { nanoid } from 'nanoid';
 
 /**
- * Author-assigned, stable block ids on every block the paginated
- * projection turns into an engine Block — top-level paragraphs and
- * headings, list items' inner paragraphs (at ANY nesting depth),
- * blockquote bodies, codeBlocks, horizontalRules, and images
- * (M-IMAGES-1: PlacedRect carries the same edit-survival blockId). The engine's
- * LineBox/FragmentBreak records carry `blockId` as the edit-survival
- * identity ("author-assigned, stable across edits by contract" —
- * engine/src/types.ts), and its caches are id-keyed, so the shell must
- * guarantee two invariants before any layout call:
- *
- *  - MISSING ids are minted (legacy .wpdoc files saved before ids
- *    existed load through here — the "load pass" — and so does the
- *    editor's INITIAL content, which is created without a transaction
- *    and therefore never reaches appendTransaction; that path is
- *    covered by onCreate + ensureBlockIds).
- *  - DUPLICATE ids are re-minted on the LATER node — the earlier
- *    occurrence keeps its id. PASTE is the canonical duplicate source:
- *    copied content carries the source's ids, so a paste re-mints
- *    every id it collides with. Pinned by test.
- *
- * The engine independently throws loudly on any duplicate that still
- * slips through (validateDuplicateIds, engine/src/layout.ts) — this
- * plugin is the shell-side guarantee, not the enforcement.
+ * Stable block ids on ID_BEARING_KINDS: the engine's caches are
+ * id-keyed and throw on duplicates — mint missing ids (legacy docs,
+ * initial content) and re-mint duplicates on the LATER node.
  */
 
-// M-TABLES: the table node joins the ID-bearing set — the paginated
-// adapter turns one table into ONE engine TableBlock, so the id lives
-// on the table node alone (rows/cells are positional inside it).
-// M-EQ: the equation joins too (one EquationBlock per node; PlacedRect
-// echoes the same id — the edit-survival contract's atomic family).
-// M-HEADER-FOOTER-2: the header/footer containers' INNER paragraphs —
-// the band blocks carry the same id contract (stable across edits).
-// M-REFS: the referenceTable atom joins (one engine block per node —
-// the paginated arm's sidecar + two-pass page resolution key on it).
+// Each kind here maps to exactly one engine Block per node (table
+// rows/cells are positional inside it), so each node needs its own id.
 const ID_BEARING_KINDS = ['paragraph', 'heading', 'codeBlock', 'horizontalRule', 'image', 'equation', 'table', 'headerBlock', 'footerBlock', 'referenceTable'];
 
 /**
  * Mint ids for missing/duplicate ID-bearing blocks INTO `tr` (positions
- * are doc-relative, so tr must belong to the same doc). Returns whether
- * anything was written. Shared by appendTransaction (every doc change)
- * and ensureBlockIds (editor creation / setContent-from-JSON paths that
- * never dispatch a doc-changed transaction the plugin would see).
- * Full-tree walk (doc.descendants): list items' and blockquote bodies'
- * paragraphs are ID-bearing too — the M6.1 projection gives every one
- * of them an engine Block.
+ * are doc-relative — tr must belong to the same doc). Full-tree walk:
+ * nested list-item/blockquote paragraphs get engine Blocks too.
  */
 function mintIds(doc: PMNode, tr: Transaction): boolean {
   const seen = new Set<string>();
@@ -61,8 +29,7 @@ function mintIds(doc: PMNode, tr: Transaction): boolean {
       seen.add(id);
       return;
     }
-    // Missing id, or a duplicate: the LATER node loses — the earlier
-    // occurrence (the original, when the later one is a paste) keeps its id.
+    // A duplicate re-mints on the LATER node; the earlier keeps its id.
     const minted = nanoid();
     seen.add(minted);
     tr.setNodeMarkup(pos, undefined, { ...node.attrs, blockId: minted });
@@ -90,9 +57,7 @@ export const BlockIdExtension = Extension.create({
         attributes: {
           blockId: {
             default: null,
-            // Splitting a block must NOT clone the id — the halves would
-            // duplicate and the mint pass would have to guess which half
-            // keeps it. Mint fresh on split instead.
+            // Splitting must mint fresh: cloning would duplicate the id.
             keepOnSplit: false,
           },
         },

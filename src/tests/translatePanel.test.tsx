@@ -11,10 +11,10 @@ import { useTranslateStore } from '@/lib/editor/translate/store';
 import { renderTensor } from './harness';
 
 /**
- * THE TRANSLATE PANEL + SETUP DIALOG — the UI half of the issue: the
- * unconfigured panel is the consent surface; a configured panel runs
- * scope → translate → preview → apply, with the privacy line always
- * visible. `invoke` is mocked; no Rust, no instance.
+ * The translate panel + setup dialog — the UI half: the unconfigured
+ * panel is the consent surface; a configured panel runs scope →
+ * translate → preview → apply, with the privacy line always visible.
+ * `invoke` is mocked; no Rust, no instance.
  */
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -34,8 +34,7 @@ vi.mock('@/lib/editor/translate/local/engine', () => ({
 import { invoke } from '@tauri-apps/api/core';
 const invokeMock = vi.mocked(invoke);
 
-/** Mount the panel the way App.tsx does, opened through the real
- *  command (the a11yCheck mount law). */
+/** Mount the panel the way App.tsx does, opened through the real command. */
 function mountPanel() {
   render(
     <>
@@ -64,7 +63,7 @@ function configureTranslation(endpoint = 'https://lt.example', apiKey = '', prov
 }
 
 /** The instance mock: the languages list + the array-in/array-out
- *  translation law. */
+ *  translation body. */
 function mockInstance(): void {
   invokeMock.mockImplementation(async (cmd, args) => {
     if (cmd === 'translate_languages') {

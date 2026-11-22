@@ -16,17 +16,8 @@ import { renderPrintDocument } from './render';
 import type { PrintPage } from './types';
 
 /**
- * M-PRINT (#43) — THE PRINT DOCUMENT BUILD: the preview/print path's
- * ONE assembly. Mirrors buildDocxInput's posture (one input shared by
- * every consumer): the REAL metrics singletons (identical layout to
- * the on-screen view — #43's core AC), the RESOLVED registry, the
- * document's pageSetup, and the warm-total field fixpoint.
- *
- * THE FIXPOINT (the PaginatedView two-pass, print-side): pass 1
- * measures fields at the warm guess; the real total resolves off pass
- * 1's page count; a widened placeholder re-converts + re-lays-out
- * (bounded at 2, the M-REFS shape). The walk then runs once on the
- * settled layout.
+ * #43 — the print document build: the real metrics, resolved registry,
+ * pageSetup, and field fixpoint — identical layout to the on-screen view.
  */
 
 export interface PrintBuildResult {
@@ -55,8 +46,7 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
   const pageSetup = doc.pageSetup;
   const layoutOptions = toLayoutOptions(pageSetup);
 
-  // THE FIELD FIXPOINT: pass 1 at the warm guess ('8' — one digit, the
-  // cheap cold start), pass 2 iff the real total is wider.
+  // The field fixpoint: pass 1 at the warm one-digit guess, pass 2 iff wider.
   const fieldTotalIn = 8;
   const pass1 = pmDocToSemantic(editor.state.doc, baseStyle, registry, {
     differentFirstPage: doc.headerFooter?.differentFirstPage ?? false,
@@ -65,12 +55,11 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
     config.editor.showHeadersFooters === false
       ? { ...pass1.doc, bands: undefined }
       : pass1.doc,
-    // #58 — the sections ride (ONE geometry source: the preview, the
-    // print, and the PDF consume the same table).
+    // #58 — one geometry source: preview, print, and PDF share the sections table.
     { ...layoutOptions, ...(pass1.sections ? { sections: pass1.sections } : {}) },
   );
   const total = result1.pages.length;
-  const guess = fieldTotalIn ?? 8;
+  const guess = fieldTotalIn;
   let adapted = pass1;
   let layout = result1;
   if (String(total).length > String(guess).length) {
@@ -93,11 +82,8 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
     fieldTotal: total,
   });
 
-  // #48 — the PAGE BACKGROUND chain, resolved once per printed page:
-  // the positional per-page map → the section break's color → the
-  // doc default — the SAME chain the on-screen view paints
-  // (backgroundForPage), so what previews is what prints (the
-  // one-walk law). White stays UNSET (the sheet/PDF default).
+  // #48 — background chain: per-page map → section color → doc default;
+  // white stays unset (sheet/PDF default).
   const sectionColors: (string | undefined)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -113,12 +99,8 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
     if (background) page.background = background;
   });
 
-  // #WATERMARK — the same chain, one resolution per printed page:
-  // section override → doc default (the on-screen watermarkForPage's
-  // twin). resolveWatermark is the ONE derivation (font/size/rotation/
-  // opacity all resolved HERE — the consumers never re-derive); the
-  // image spelling carries the dual handle (src = the bitmap URL the
-  // view paints, sha = the bytes key the PDF embeds).
+  // Same chain for watermarks (section override → doc default), resolved
+  // here so consumers never re-derive; image spelling carries dual src/sha.
   const sectionWatermarks: (WatermarkSettings | undefined)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -155,9 +137,8 @@ export function buildPrintDocument(editor: Editor): PrintBuildResult {
   return { pages, layout, blocks: adapted.blocks, total };
 }
 
-/** A "1-3, 7" page-range string → the 0-based index set (the preview's
- *  range filter). Invalid tokens are skipped loudly-quietly (the
- *  input's placeholder documents the format; garbage never crashes). */
+/** "1-3, 7" page-range string → 0-based index set; invalid tokens
+ *  are skipped (garbage never crashes). */
 export function parsePageRange(raw: string, total: number): Set<number> | null {
   const trimmed = raw.trim();
   if (!trimmed) return null; // all pages

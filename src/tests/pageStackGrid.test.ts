@@ -8,12 +8,11 @@ import {
 } from '@/lib/paginated/pageStack';
 import type { PageGeometry } from '@tensor-editor/engine';
 
-// #101 — SPLIT VIEW: the column-aware grid arithmetic. The LAW the
-// split view lives by: columns 1 collapses to the classic vertical
-// stack BIT-FOR-BIT (every existing consumer keeps its exact
-// coordinates), columns 2 arranges row-major — pages in a row share
-// the row's top, each column owns a left. The point hit disambiguates
-// a y spanning two side-by-side pages by x.
+// #101 — split view: the column-aware grid arithmetic. Columns 1
+// collapses to the classic vertical stack BIT-FOR-BIT (every existing
+// consumer keeps its exact coordinates); columns 2 arranges row-major
+// — pages in a row share the row's top, each column owns a left. The
+// point hit disambiguates a y spanning two side-by-side pages by x.
 
 const PAGE_W = 816;
 const PAGE_H = 1056;
@@ -132,8 +131,7 @@ describe('pageIndexAtPoint — the column-disambiguated hit', () => {
   it('routes ROW-GAP clicks by column (the second gap half belongs to the next row)', () => {
     // y inside the inter-row gap (1056..1088), x in each column: the
     // second half of the gap belongs to the NEXT ROW — of the CLICK'S
-    // column (the old y-only bump jumped to the next row's OTHER
-    // column on the right side).
+    // column (a y-only bump would jump to the other column).
     expect(pageIndexAtPoint(grid, ps, 100, PAGE_H + GAP / 2 + 4, GAP)).toBe(2);
     expect(pageIndexAtPoint(grid, ps, PAGE_W + GAP + 100, PAGE_H + GAP / 2 + 4, GAP)).toBe(3);
     // The gap's FIRST half stays with the current row.

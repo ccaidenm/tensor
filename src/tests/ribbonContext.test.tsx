@@ -9,7 +9,7 @@ import { CONTEXTUAL_TABS } from '@/lib/ribbon/contextualTabs';
 import { selectionInTable } from '@/lib/ribbon/useRibbonContext';
 import { renderTensor, settleLayout } from './harness';
 
-// ─── Fixtures ────────────────────────────────────────────────────────────
+// Fixtures
 
 /** A doc with one table (2×2, header row) + a paragraph after it. */
 const TABLE_DOC = '<p>before</p><table><tr><th>a</th><th>b</th></tr><tr><td>c</td><td>d</td></tr></table><p>after</p>';
@@ -35,7 +35,7 @@ function renderRibbon() {
 
 beforeEach(() => {
   // The document store persists between tests (module singleton) —
-  // reset the parts this suite touches, the paginated precedent.
+  // reset the parts this suite touches.
   useDocumentStore.setState({
     pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP },
     editor: useDocumentStore.getState().editor,
@@ -49,7 +49,7 @@ afterEach(() => {
   useRibbonContextStore.setState({ active: null });
 });
 
-// ─── Store contract ──────────────────────────────────────────────────────
+// Store contract
 
 describe('contextStore contract', () => {
   it('a. enter appends + focuses the contextual tab and remembers the previous tab', () => {
@@ -145,7 +145,7 @@ describe('contextStore contract', () => {
   });
 });
 
-// ─── Registry ────────────────────────────────────────────────────────────
+// Registry
 
 describe('contextualTabs registry', () => {
   it('every entry is well-formed and uniquely keyed', () => {
@@ -162,7 +162,7 @@ describe('contextualTabs registry', () => {
   });
 });
 
-// ─── Selection producers (end to end) ────────────────────────────────────
+// Selection producers (end to end)
 
 describe('selection producers', () => {
   it('a table selection enters the table context; leaving it exits + restores', async () => {
@@ -227,7 +227,7 @@ describe('selection producers', () => {
   });
 });
 
-// ─── Accessibility ───────────────────────────────────────────────────────
+// Accessibility
 
 describe('reduce motion gate', () => {
   it("reduceMotion 'on' suppresses the entrance animation class", () => {

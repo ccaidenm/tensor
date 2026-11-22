@@ -20,7 +20,7 @@ import {
 } from '@/lib/editor/symbols/catalog';
 
 /**
- * THE SYMBOLS CATALOG — the runtime half of the generated dataset:
+ * The symbols catalog — the runtime half of the generated dataset:
  * gz fetch → decompress → parse → cache. Common is bundled and
  * instant; core loads as one unit; CJK chunks load only when opened;
  * concurrent callers share one fetch. The decompressor runs through a

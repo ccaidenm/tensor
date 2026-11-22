@@ -26,16 +26,13 @@ export function useAutosave() {
         lineNumbers,
         coreProperties,
         headerFooter,
-        // #COMMENTS: snapshots carry the threads (snapshot parity — the
-        // styles precedent; a restored doc must not lose comments).
+        // Snapshots carry the threads — a restored doc must not lose comments.
         commentThreads: useCommentStore.getState().threadsForSave(),
       });
 
-      // M-DOCX: the timed write is WPDOC-ONLY. A .docx document's file
-      // may be open in real Word (file locks) and every Save is a full
-      // export — churn to avoid. Word-backed documents rely on the
-      // recovery snapshots (above) between explicit Saves; .wpdoc
-      // documents keep the transparent timed save.
+      // The timed write is .wpdoc-only: a .docx file may be open in real
+      // Word (file locks) and every Save is a full export — Word-backed
+      // docs rely on the recovery snapshots between explicit Saves.
       if (filePath && filePath.toLowerCase().endsWith('.wpdoc')) {
         await saveDocument(editor, filePath, {
           pageSetup,

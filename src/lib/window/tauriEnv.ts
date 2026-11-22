@@ -1,13 +1,7 @@
 /**
- * #100 — the Tauri environment seams (one source, test-friendly):
- * `inTauriWindow` gates every window-API call the titlebar makes (the
- * real app always satisfies it; a plain-browser `vite dev` session and
- * the jsdom test env don't — the calls no-op instead of throwing, and
- * the components stay renderable/assertable everywhere), and
- * `isMacOS` picks the titlebar's platform lane (macOS: the native
- * traffic lights overlay the row's left + the document name sits far
- * right; Linux/Windows: the name centers + the custom controls sit
- * far right).
+ * #100 — the Tauri environment seams: `inTauriWindow` gates every
+ * window-API call (browser/jsdom no-op instead of throwing); `isMacOS`
+ * picks the titlebar lane (traffic lights left on macOS, else centered).
  */
 
 export function inTauriWindow(): boolean {

@@ -11,42 +11,21 @@ import { announce } from '@/lib/accessibility/announce';
 import { CommentThreadCard } from './CommentThreadCard';
 
 /**
- * #COMMENTS — THE BOUNDARY GUTTER: the anchored thread cards living in
- * the document's right whitespace.
- *
- * THE OVERLAY RULING (the user's walk-back of the GDocs model): the
- * document NEVER moves — no margin reservation, no desk shift, ever
- * (the reservation de-synced the ruler's centered-page assumption
- * twice; the column just attaches at the sheet's right edge and
- * overlays whatever whitespace exists, like a print margin note).
- * Mounted by BOTH view modes inside their own coordinate space:
- *
- *  - getAnchorTop(threadId) → the anchor's top in the GUTTER'S OWN
- *    coordinate space (paginated: stack-space × zoom — the gutter is
- *    an unscaled sibling of the zoom-wrapper; pageless: content-space
- *    ÷ zoom — the gutter rides the scaled strip). Null = orphaned
- *    (or unmeasurable).
- *  - scale: the gutter-space → VISUAL-px factor for the jump scroll
- *    (paginated 1 — the gutter is unscaled chrome; pageless zoom).
- *
- * STACKING: cards sit at their anchor's top; overlaps push DOWN (the
- * measured-height collision pass — stackCards, pure + unit-tested).
- * Orphaned threads (anchor deleted) pin to the top in creation order
- * with an Unanchored badge — the defined state, never silently gone.
+ * The anchored thread cards in the document's right whitespace; the
+ * document never moves — the column overlays existing space. Props:
+ * getAnchorTop → gutter-space tops (null = orphan); scale → visual px.
  */
 
-export const COMMENTS_GUTTER_WIDTH = 320;
 /** Card-to-card breathing room in the stack. */
 export const COMMENTS_GUTTER_GAP = 12;
 
-/** THE SHARED VISIBILITY LAW — the gutter renders iff this is true,
- *  and the views reserve exactly this much space iff this is true. */
+/** The shared visibility contract — the gutter renders iff this is true,
+ *  and the views reserve space iff this is true. */
 export function useCommentsGutterVisible(): boolean {
   const showBoundary = useConfigStore((s) => s.config.editor.showBoundaryContent);
   const focusActive = useFocusStore((s) => s.active);
   // A right-anchored sidebar owns the same edge (Find & Replace,
-  // Translate, …) — the gutter yields (the Focus Mode sidebar law's
-  // twin; left/bottom docks don't overlap the column).
+  // Translate, …) — the gutter yields; left/bottom docks don't overlap.
   const sidebar = useSidebarStore((s) => s.active);
   const threadCount = useCommentStore((s) => Object.keys(s.threads).length);
   return showBoundary && threadCount > 0 && !focusActive && sidebar?.anchor !== 'right';
@@ -109,12 +88,11 @@ export function CommentsGutter({ getAnchorTop, scale }: CommentsGutterProps) {
 
   const visibleThreads = useMemo(() => {
     const list = Object.values(threads);
-    // Resolved threads hide by default (the issue's show toggle).
+    // Resolved threads hide by default.
     const shown = list.filter((t) => showResolved || !t.resolved);
-    // THE ORDER: orphans (no live anchor) pin to the top in creation
-    // order; anchored threads follow in anchor order. getAnchorTop is
-    // a fresh read (pure store/PM reads) — calling it at render is the
-    // house's recompute-per-render pattern (scrolls/zooms re-anchor).
+    // Orphans pin to the top in creation order; anchored threads follow
+    // in anchor order. getAnchorTop is a fresh read — recompute per
+    // render (scrolls/zooms re-anchor).
     const orphans = shown.filter((t) => !anchoredIds.has(t.id) || getAnchorTop(t.id) == null);
     const anchored = shown
       .filter((t) => anchoredIds.has(t.id) && getAnchorTop(t.id) != null)
@@ -124,12 +102,9 @@ export function CommentsGutter({ getAnchorTop, scale }: CommentsGutterProps) {
   }, [threads, anchoredIds, showResolved, epoch, getAnchorTop]);
 
   useLayoutEffect(() => {
-    // THE MEASURE + STACK PASS. Deps = every real trigger: thread
-    // content (store identity — entry edits ride it too), anchored
-    // membership, the parent's fresh anchor closure (per render), and
-    // editor transactions (geometry moves). jsdom measures zero
-    // heights: stacking degenerates to anchor order, which the tests
-    // assert. The equality guard keeps identical results from looping.
+    // The measure + stack pass. jsdom measures zero heights (tests
+    // assert anchor order); the equality guard keeps identical
+    // results from looping.
     const items: StackItem[] = visibleThreads.map((t) => ({
       id: t.id,
       top: anchoredIds.has(t.id) ? getAnchorTop(t.id) : null,
@@ -152,10 +127,9 @@ export function CommentsGutter({ getAnchorTop, scale }: CommentsGutterProps) {
     );
     const root = rootRef.current;
     if (spans.length > 0) {
-      // THE RANGE: select the thread's full extent + focus — the
-      // selection makes it the ACTIVE thread (the tracking plugin's
-      // caret read), which deepens its text tint (commit 3) and marks
-      // the card. THE SR LAW: jumping announces.
+      // Select the thread's full extent + focus — the selection makes
+      // it the ACTIVE thread (the tracking plugin's caret read).
+      // Jumping announces.
       ed.commands.setTextSelection({ from: spans[0]!.from, to: spans[spans.length - 1]!.to });
       ed.commands.focus();
       announce('Jumped to comment thread');
@@ -178,16 +152,10 @@ export function CommentsGutter({ getAnchorTop, scale }: CommentsGutterProps) {
       role="list"
       aria-label="Comments"
       data-testid="comments-gutter"
-      // THE STEAL-STOP BOUNDARY: the gutter is self-contained chrome —
-      // its events must NEVER reach the desk/document handlers. Both
-      // mounts are inside interactive surfaces that steal focus:
-      // paginated's zoom-wrapper onMouseDown PREVENTS THE DEFAULT
-      // (killing the browser's native textarea-focus-on-mousedown) and
-      // focuses the hidden input; pageless's strip onClick runs
-      // editor.commands.focus('end') (its click-anywhere focus). Without
-      // this stop the Reply box literally cannot be focused by
-      // clicking. Double-click/context-menu too: textareas own their
-      // native behaviors inside the cards.
+      // Events must never reach the desk/document handlers: both mounts
+      // sit in surfaces that steal focus (the zoom-wrapper prevents
+      // default; pageless focuses the editor) — without this stop the
+      // Reply box cannot be clicked into focus.
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -195,7 +163,7 @@ export function CommentsGutter({ getAnchorTop, scale }: CommentsGutterProps) {
       // The column itself never intercepts desk clicks — only cards do.
       className="pointer-events-none absolute top-0 bottom-0 left-full z-10 ml-3 w-[320px]"
     >
-      {/* The show-resolved toggle (the issue's reveal control). */}
+      {/* The show-resolved toggle. */}
       <div className="pointer-events-auto mb-2 flex justify-start">
         <button
           type="button"

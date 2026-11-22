@@ -11,14 +11,9 @@ import { inlineStyle } from '@/lib/styles/resolve';
 import { useStyleDialogStore } from '@/lib/styles/dialogStore';
 
 /**
- * M-STYLES STEP 4. The dropdown lists the merged registry (built-ins +
- * customs) grouped by kind; applying a PARAGRAPH style sets styleId
- * (or CONVERTS the node for heading entries / converts a heading
- * back for the rest — the styleCommands); applying a CHARACTER style
- * sets the charStyle mark (one per span, replaced on re-apply). The
- * old preset-stamp path (styleDefinitions.ts: imperative chains
- * stamping concrete attrs/marks onto nodes) is DELETED — this is its
- * deliberate replacement, not a parallel mechanism.
+ * Lists the merged registry grouped by kind. Applying a paragraph style
+ * sets styleId (converting the node for headings); a character style
+ * sets the charStyle mark — one per span, replaced on re-apply.
  */
 
 function stylePreviewStyle(def: StyleDefinition): React.CSSProperties {
@@ -120,9 +115,8 @@ export function StylesDropdown({ editor }: { editor: Editor }) {
     );
   };
 
-  // The trigger NAMES the current style (Word's spelling of the same
-  // affordance) — the caret block's paragraph style, truncated when a
-  // custom name runs long.
+  // The trigger names the caret block's paragraph style (Word's
+  // affordance), truncated when a custom name runs long.
   const currentStyleName = active?.paragraph ? (merged[active.paragraph]?.name ?? active.paragraph) : 'Styles';
 
   return (

@@ -22,33 +22,9 @@ function easeOutCubic(t: number): number {
 }
 
 /**
- * Drives the sidebar's open/close slide by writing a real CSS box-offset
- * property (`right`/`left`/`bottom`, matching the dock anchor) via rAF —
- * NOT `transform`, and not a CSS `transition`.
- *
- * History (why this version looks the way it does): two earlier
- * approaches were tried and both had real, confirmed problems on this
- * dev machine's WebKitGTK:
- *   1. A CSS `transition` on `transform` could stall mid-flight when
- *      nothing else was generating paint/input activity.
- *   2. Switching to rAF-driven `transform` writes fixed the mid-flight
- *      stall, but every open/close cycle still switched between two
- *      different positioning mechanisms — `transform` while animating,
- *      plain static position at rest (transform cleared to '') — because
- *      leaving a non-`none` transform at rest broke Tooltip/Popover
- *      `position: fixed` math for anything mounted inside the panel.
- *      That mechanism-switch, on every single open, was itself a race
- *      WebKitGTK didn't always resolve correctly — the same general
- *      "layout-settling timing" class of issue already documented
- *      elsewhere in this project (pagination).
- *
- * This version uses the SAME property, `right`/`left`/`bottom`, for both
- * animating and resting — nothing to switch, nothing to race. Tradeoff:
- * forces real layout+paint each frame instead of a compositor-only
- * transform move. Accepted deliberately: short (~200ms), infrequent,
- * single-panel animation — correctness matters far more here than the
- * small perf cost, and this is not the same category of risk as this
- * project's known large-document performance issues (#45).
+ * rAF-writes the box-offset (`right`/`left`/`bottom`) — never transform or CSS transition
+ * (both raced on WebKitGTK). The same property animates and rests: nothing to switch or
+ * race. The per-frame layout cost is deliberate — not the #45 category of risk.
  */
 export function useImperativeSlide({
   ref,
@@ -65,9 +41,8 @@ export function useImperativeSlide({
     const el = ref.current;
     if (!el) return;
 
-    // #101 — REDOCK: the anchor changed → the previous dock's inline
-    // offset is STALE (right: 0px on a left-anchored panel keeps it on
-    // the right forever) — clear it and force the re-init below.
+    // #101 — the anchor changed → the previous dock's offset is stale;
+    // clear it and force the re-init below.
     if (lastAnchorRef.current !== null && lastAnchorRef.current !== anchor) {
       el.style.setProperty(OFFSET_PROPERTY[lastAnchorRef.current], '');
       currentValueRef.current = null;

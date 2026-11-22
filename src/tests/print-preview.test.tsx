@@ -9,11 +9,10 @@ import { getCommand } from '@/lib/commands/registry';
 import { useDocumentStore } from '@/lib/document/store';
 
 /**
- * M-PRINT (#43, Mark 3) — the preview suite: the page-range parser
- * (pure), the BUILD against the real editor (the walk consumes the
- * real adapter output — the Mark-1 contract end to end), and the
- * modal shell (open via the palette command, the options render, the
- * range filters what renders).
+ * #43 — the preview suite: the page-range parser (pure), the BUILD
+ * against the real editor (the walk consumes the real adapter
+ * output), and the modal shell (palette command, options, range
+ * filter).
  */
 
 describe('parsePageRange', () => {
@@ -91,8 +90,8 @@ describe('the preview modal shell', () => {
     // the options column
     expect(utils.getByTestId('print-preview-total')).toBeTruthy();
     expect(utils.getByTestId('print-preview-range-input')).toBeTruthy();
-    // Mark 2: Print is LIVE (the flow's suite pins it); Mark 4 (PDF)
-    // stays the disabled placeholder.
+    // Print is LIVE (the flow's suite pins it); PDF stays the
+    // disabled placeholder.
     const printBtn = utils.getByTestId('print-preview-commit') as HTMLButtonElement;
     expect(printBtn.disabled).toBe(false);
     void editor;

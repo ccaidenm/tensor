@@ -1,22 +1,9 @@
 /**
- * #97 BRANDING — THE ACCENT CATALOG: Tensor's twelve brand accents.
- * ONE SOURCE for the whole app: the config schema's enum, the token
- * writer in the config store, the (#102) picker UI, and the logo
- * assets all read from here — a second list anywhere is the drift bug
- * this module exists to prevent.
- *
- * THE MODEL (the brand's ruling): one hex per accent, applied in BOTH
- * light and dark modes (no per-mode variant); the foreground ink is
- * LUMINANCE-PICKED per accent and shipped as data (explicit and
- * reviewable, not runtime math) — the pale accents (azure, emerald,
- * gold, graphite, pink, teal) get the app's dark ink on top so
- * button/selected text stays readable; the deep accents keep white.
- *
- * ASSET PARITY: every accent has its matching 1024px logo at
- * public/tensor-logos/tensor-icon-<id>.png (pinned by test) — the
- * app icon set generates from ember, and the in-app logo marks ride
- * the CSS tokens instead (crisper at UI sizes), so the files are the
- * asset source of truth the catalog stays aligned with.
+ * #97 — Tensor's twelve brand accents: the ONE source for the config
+ * enum, the store's token writer, the picker UI, and the logo assets
+ * (a second list anywhere is the drift this prevents). One hex per
+ * accent in both modes; foreground ink is luminance-picked and shipped
+ * as data. Every accent has a matching logo in public/tensor-logos/.
  */
 
 export interface AccentDefinition {

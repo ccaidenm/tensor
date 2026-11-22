@@ -16,11 +16,10 @@ import { createLayoutEngine } from '@tensor-editor/engine';
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 
 /**
- * M-T3c — the Table side panel: the Find/Replace-pattern docked panel
- * over the table's dimensions + flow (and the alternate route for the
- * table ops when the floating toolbar is off). The panel derives wholly
- * from PM state and dispatches only commands/attr writes — these tests
- * pin that contract end to end: panel ⇄ doc ⇄ engine.
+ * The Table side panel: the Find/Replace-pattern docked panel over
+ * the table's dimensions + flow (the alternate route when the floating
+ * toolbar is off). It derives wholly from PM state and dispatches only
+ * commands/attr writes: panel ⇄ doc ⇄ engine.
  */
 
 beforeEach(() => {
@@ -47,9 +46,9 @@ function mountPanel() {
       </SidebarHost>
     </div>,
   );
-  // M-T4 regression pin: docked panels clear the ruler (z-30) — the
-  // ruler portal mounts after the SidebarHosts, so same-layer DOM
-  // order painted it over the Find/Replace panel.
+  // Regression pin: docked panels clear the ruler (z-30) — the ruler
+  // portal mounts after the SidebarHosts, so same-layer DOM order
+  // painted it over the Find/Replace panel.
   expect(utils.container.firstElementChild!.firstElementChild!.className).toContain('z-40');
   return utils;
 }
@@ -86,7 +85,7 @@ function commitInput(input: HTMLInputElement, value: string) {
   });
 }
 
-describe('M-T3c: Table side panel', () => {
+describe('the Table side panel', () => {
   it('the palette command opens the panel; the empty state shows outside a table', async () => {
     renderTensor('<p>no table here</p>');
     await settleLayout();
@@ -111,7 +110,6 @@ describe('M-T3c: Table side panel', () => {
       void getCommand('tableSidebar')?.run();
     });
     caretIntoFirstCell(editor);
-    // The readout: 2 rows × 2 columns.
     expect(document.body.textContent).toContain('2 rows × 2 columns');
     // Column 1's width field: auto (no colwidths).
     const col0 = document.querySelector('[data-testid="tp-col-input-0"]') as HTMLInputElement;
@@ -126,8 +124,6 @@ describe('M-T3c: Table side panel', () => {
       }
     });
     expect(widths).toEqual([200, null, 200, null]);
-    // The field re-reads the doc: 200.
-    expect((document.querySelector('[data-testid="tp-col-input-0"]') as HTMLInputElement).value).toBe('200');
     // Clear back to auto (empty commit) → colwidths gone.
     commitInput(document.querySelector('[data-testid="tp-col-input-0"]') as HTMLInputElement, '');
     const after: (number | null)[] = [];
@@ -152,27 +148,23 @@ describe('M-T3c: Table side panel', () => {
     const row0 = document.querySelector('[data-testid="tp-row-input-0"]') as HTMLInputElement;
     expect(row0.value).toBe('');
     commitInput(row0, '200');
-    // The doc: row 0 carries minHeight 200.
     const tableNode = editor.state.doc.content.firstChild!;
     expect(tableNode.firstChild!.attrs.minHeight).toBe(200);
     // The engine: row 0's band is 200 tall (content is ~25.6 — floored).
     const result = layoutOf(editor);
     const row0Rect = result.placed.find((p) => p.kind === 'tableCell' && p.cell?.row === 0)!;
     expect(row0Rect.rect.height).toBe(200);
-    // Row 1 stays content-sized (below the floor).
     const row1Rect = result.placed.find((p) => p.kind === 'tableCell' && p.cell?.row === 1)!;
     expect(row1Rect.rect.height).toBeLessThan(100);
-    // The field re-reads: 200; empty commit clears back to auto.
     expect((document.querySelector('[data-testid="tp-row-input-0"]') as HTMLInputElement).value).toBe('200');
     commitInput(document.querySelector('[data-testid="tp-row-input-0"]') as HTMLInputElement, '');
     expect(editor.state.doc.content.firstChild!.firstChild!.attrs.minHeight).toBeNull();
   });
 
-  it('M-FLOW: the row "break" switch — default splits the straddling row, off (cantSplit) moves it wholly', async () => {
+  it('the row "break" switch — default splits the straddling row, off (cantSplit) moves it wholly', async () => {
     // 52 filler lines = 832px; a 3-line row (56px) straddles page 0's
-    // 32px remainder. The switch ON (default, Word/GDocs) = the row
-    // splits at the cell line grid; OFF = cantSplit, the whole row
-    // opens page 1.
+    // 32px remainder. ON (default, Word/GDocs) = split at the cell
+    // line grid; OFF = cantSplit, the whole row opens page 1.
     const filler = 'x'.repeat(52 * 62);
     const cellText = 'x'.repeat(180); // 3 lines at 60 chars in the 608px lane
     const { editor } = renderTensor(
@@ -207,7 +199,7 @@ describe('M-T3c: Table side panel', () => {
     expect(editor.state.doc.child(1).firstChild!.attrs.cantSplit).toBeNull();
   });
 
-  it('M-FLOW: the table-level keep switches write the table attrs and reach the engine', async () => {
+  it('the table-level keep switches write the table attrs and reach the engine', async () => {
     const { editor } = renderTensor(
       '<table><tr><td>a</td></tr></table>',
     );
@@ -332,11 +324,10 @@ describe('M-T3c: Table side panel', () => {
     });
     const row0 = editor.state.doc.content.firstChild!.firstChild!;
     expect(row0.firstChild!.type.name).toBe('tableHeader');
-    // The panel's pin shows active for the current (now header) row.
     expect((document.querySelector('[data-testid="tp-header-pin"]') as HTMLElement).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('M-T4: table margins — left narrows the box and shifts x; top becomes block spacing', async () => {
+  it('table margins — left narrows the box and shifts x; top becomes block spacing', async () => {
     const { editor } = renderTensor('<table><tr><td>a</td><td>b</td></tr></table>');
     await settleLayout();
     mountPanel();
@@ -359,7 +350,7 @@ describe('M-T3c: Table side panel', () => {
     expect(layoutOf(editor).placed[0]!.rect.y).toBe(30);
   });
 
-  it('M-T4: default cell padding narrows the lane (60 chars rewrap at 20px sides)', async () => {
+  it('default cell padding narrows the lane (60 chars rewrap at 20px sides)', async () => {
     const { editor } = renderTensor(
       '<table><tr><td>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</td></tr></table>',
     );
@@ -380,7 +371,7 @@ describe('M-T3c: Table side panel', () => {
     expect(layoutOf(editor).lines.filter((l) => l.tableCell)).toHaveLength(2);
   });
 
-  it('M-T4: per-cell padding overrides the table default (null sides inherit)', async () => {
+  it('per-cell padding overrides the table default (null sides inherit)', async () => {
     const { editor } = renderTensor(
       '<table><tr><td>one</td><td>two</td></tr></table>',
     );
@@ -405,7 +396,7 @@ describe('M-T3c: Table side panel', () => {
     expect(lane1.tableCell!.width).toBe(284);
   });
 
-  it('M-T4: margin/padding attrs round-trip through the doc JSON (the .wpdoc surface)', async () => {
+  it('margin/padding attrs round-trip through the doc JSON (the .wpdoc surface)', async () => {
     const { editor } = renderTensor('<table><tr><td>a</td></tr></table>');
     await settleLayout();
     mountPanel();

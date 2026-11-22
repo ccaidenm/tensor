@@ -3,11 +3,8 @@ import { useDocumentStore } from '@/lib/document/store';
 import { resolveViewMode } from '@/lib/document/pageSetup';
 
 /**
- * THE VIEW-MODE HOOK — the ONE React read of the resolved rendering
- * mode: the document's own choice (pageSetup.viewMode) when set, else
- * the app default (config.editor.defaultPageLayout — the
- * new-document default). Every consumer that used to read the loose
- * config string routes through here (the resolveViewMode law).
+ * The one React read of the resolved rendering mode — every consumer
+ * routes through here (the document's choice, else the app default).
  */
 export function useViewMode(): 'Pages' | 'Pageless' {
   const docMode = useDocumentStore((s) => s.pageSetup.viewMode);

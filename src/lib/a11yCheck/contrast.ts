@@ -1,16 +1,8 @@
 /**
- * M-A11Y — WCAG contrast, the well-documented standard math (WCAG 2.x
- * success criterion 1.4.3). No external library (the issue's own
- * note): relative luminance, the contrast ratio, and the AA
- * thresholds — small, pure, and pinned with the canonical boundary
- * vectors (#767676 on white passes 4.5:1 by a hair; #777777 fails it).
- *
- * Color parsing mirrors the two in-repo precedents: hex 3/6-digit
- * case-insensitive (the DOCX import writes UPPERCASE hex, the ribbon
- * palette lowercase) and rgb()/rgba() (the rich-text paste path —
- * the PDF exporter defends against the same shapes). Anything else —
- * named colors, hsl(), CSS variables — parses to null and the caller
- * SKIPS the run rather than guessing.
+ * WCAG 2.x contrast math (criterion 1.4.3), no external library.
+ * Parsing accepts what in-repo producers write — hex 3/6-digit any
+ * case, rgb()/rgba() — anything else parses to null and the caller
+ * skips the run rather than guessing.
  */
 
 export interface Rgb {
@@ -80,10 +72,7 @@ export function contrastRatio(foreground: string, background: string): number | 
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-/**
- * WCAG "large text": ≥ 18pt regular or ≥ 14pt bold — 24px / 18.66px at
- * CSS 96dpi. Everything else needs the full 4.5:1.
- */
+/** WCAG "large text": ≥ 24px regular or ≥ 18.66px bold. */
 export function isLargeText(fontSizePx: number, bold: boolean): boolean {
   return fontSizePx >= 24 || (bold && fontSizePx >= 18.66);
 }

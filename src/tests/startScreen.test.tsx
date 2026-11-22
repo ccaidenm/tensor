@@ -65,13 +65,11 @@ vi.mock('@tauri-apps/api/path', () => ({
 }));
 
 /**
- * #103 — THE START SCREEN (the landing half): the greeting, the
- * template row (blank paginated/pageless + the starters + Open), the
- * recents, and the home chrome (TitleBarRow's home variant). The
- * start screen renders STANDALONE beside the harness's editor (the
- * Ribbon/topbar precedent — the harness mounts the Editor context;
- * the surface under test renders beside it, driven by the same
- * stores).
+ * #103 — the start screen: the greeting, the template row (blank
+ * paginated/pageless + starters + Open), the recents, and the home
+ * chrome. Renders STANDALONE beside the harness's editor (the harness
+ * mounts the Editor context; the surface under test is driven by the
+ * same stores).
  */
 
 beforeEach(() => {
@@ -158,8 +156,7 @@ describe('the start screen (#103)', () => {
     render(<TitleBarRow variant="editor" />);
     fireEvent.click(document.querySelector('button')!);
     const menu = document.body.textContent!;
-    // The naming (the user's ruling): Library, not Home — and it sits
-    // ABOVE Settings (the app pair).
+    // The naming: Library, not Home — and it sits ABOVE Settings.
     expect(menu).toContain('Library');
     expect(menu).not.toContain('Home');
     expect(menu.indexOf('Library')).toBeLessThan(menu.indexOf('Settings'));
@@ -180,8 +177,8 @@ describe('the start screen (#103)', () => {
     render(<StartScreen />);
     const row = document.querySelector('[data-testid="return-row"]')!;
     expect(row.textContent).toContain('Return to newsletter.wpdoc');
-    // The two cards are SEPARATE bordered buttons (the user's shape):
-    // distinct nodes, each carrying its own outline border.
+    // The two cards are SEPARATE bordered buttons: distinct nodes,
+    // each carrying its own outline border.
     const returnBtn = document.querySelector('[data-testid="return-to-document"]')!;
     const closeBtn = document.querySelector('[data-testid="save-and-close"]')!;
     expect(returnBtn).not.toBe(closeBtn);

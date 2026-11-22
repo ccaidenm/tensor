@@ -13,10 +13,9 @@ let GeneralPanel: (typeof import('@/components/settings/panels/GeneralPanel'))['
 let AboutPanel: (typeof import('@/components/settings/panels/AboutPanel'))['AboutPanel'];
 
 /**
- * #102 — APP CUSTOMIZATION: the theme system mode (matchMedia
+ * #102 — app customization: the theme system mode (matchMedia
  * resolution + the live OS-scheme listener), the accent picker riding
- * the #97 engine, and the Appearance reorg (selection color moved
- * home).
+ * the #97 engine, and the Appearance reorg.
  *
  * jsdom's matchMedia is stubbed per-test so 'system' is deterministic:
  * the harness controls `matches` and captures the change listeners.
@@ -30,8 +29,8 @@ const originalMatchMedia = (window as { matchMedia?: unknown }).matchMedia;
 
 /** Assigns DIRECTLY on the jsdom window: jsdom does not implement
  *  matchMedia, and the store reads window.matchMedia — vi.stubGlobal
- *  would set globalThis and the store would never see it (SEAM1's
- *  "not a function"). The original (absent) is restored per test. */
+ *  would set globalThis and the store would never see it. The
+ *  original (absent) is restored per test. */
 function stubMatchMedia(): void {
   (window as { matchMedia?: unknown }).matchMedia = vi.fn((query: string) => ({
     // LIVE: a snapshot would freeze the creation-time value (the

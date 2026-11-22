@@ -109,36 +109,25 @@ import { TooltipProvider } from '../ui/tooltip';
  *
  * THE LAWS:
  *  L1: the engine computes, never paints; the shell paints, never
- *      computes. Every coordinate below is an engine-issued positioned
- *      fact (LineBox/PageGeometry); this file only adds container
- *      offsets (zoom stack, page gap, content box).
- *  L2: ONE engine instance + ONE RealMetrics instance, React refs, for
- *      the lifetime of this view. The engine's caches live INSIDE the
- *      engine instance — remounting either throws away warm walk/line caches
- *      mid-session, and pairing a differently-warm metrics instance
- *      with a cached engine silently violates parity.
- *  L3: the hidden PM view is INPUT ONLY — never measured, never
- *      positioned from. The legacy pipeline died of coordsAtPos/
- *      posAtCoords dead-zone ambiguity at page-break spacers; here PM
- *      geometry is never consulted at all — clicks hit-test the
- *      engine's LineBoxes instead (hitTest.ts).
- *  L4: pageSetup is read from the document store PER LAYOUT CALL,
- *      never captured at editor creation — the legacy frozen-options
- *      bug had spacer heights computed from stale margins forever
- *      after opening a file with different setup.
+ *      computes — every coordinate is an engine-issued fact; this file
+ *      adds only container offsets (zoom stack, page gap, content box).
+ *  L2: ONE engine + ONE RealMetrics for the view's lifetime — remounts
+ *      throw away warm caches, and a mismatched metrics pairing
+ *      violates parity.
+ *  L3: the hidden PM view is INPUT ONLY — never measured or
+ *      positioned from; clicks hit-test the engine's LineBoxes
+ *      (hitTest.ts).
+ *  L4: pageSetup is read PER LAYOUT CALL, never captured at editor
+ *      creation (the legacy frozen-margins bug).
  *
- * NO DEBOUNCE, NO rAF BY DESIGN: PM update -> adapter ->
- * engine.layout -> setState -> paint, synchronously in one React
- * commit. The seam that makes that affordable is the engine's
- * incremental cache (blocksSpliced/linesRebroken) — a keystroke
- * re-walks only the edited block and its dependents.
- *
- * The selection overlay, search highlights, caret, floating
- * toolbar, and IME preview are all PROJECTIONS of PM state (see
- * positionMap.ts — the principle). All selection changes go through
- * PM transactions.
+ * NO DEBOUNCE, NO rAF BY DESIGN: PM update -> adapter -> layout ->
+ * setState -> paint in one commit; the engine's incremental cache
+ * makes a keystroke re-walk only the edited block. The overlay,
+ * highlights, caret, and toolbar are PROJECTIONS of PM state
+ * (positionMap.ts).
  */
 
+const SYNC_BUDGET_PER_FRAME = Infinity;
 const TOOLBAR_HEIGHT_EST = 44;
 const TOOLBAR_WIDTH_EST = 340;
 const EDGE_PAD = 8;
@@ -149,8 +138,8 @@ interface PaginatedViewProps {
    * single RealMetrics (L2). The first injected instance wins for the
    * view's lifetime. */
   metrics?: TextMetrics;
-  /** M-EQ TEST SEAM: inject the equation dims port the same way (the
-   * real one is the KaTeX DOM measurer — jsdom cannot measure it). */
+  /** TEST SEAM: inject the equation dims port the same way (the real
+   * one is the KaTeX DOM measurer — jsdom cannot measure it). */
   equationMetrics?: EquationMetrics;
 }
 
@@ -162,15 +151,12 @@ interface LayoutState {
   /** #101 — SPLIT VIEW: the column-aware page grid (the tops, the
    *  lefts, the stack size) the desk renders from. */
   pageGrid: import('@/lib/paginated/pageStack').PageGridLayout;
-  /**
-   * M-HEADER-FOOTER-3: the band blocks' ids — the cross-surface
-   * selection clamp's membership set (from the adapter sidecar).
-   */
+  /** The band blocks' ids — the cross-surface selection clamp's
+   *  membership set (from the adapter sidecar). */
   bandBlockIds: ReadonlySet<string>;
-  /** Registry epoch this layout was built under — rides the STATE (not
-   * a separate subscription) so BlockCanvas's epoch-keyed repaint can
-   * never fire ahead of the relayout that owns it (a stale intermediate
-   * paint of pre-edit ink). */
+  /** Registry epoch this layout was built under — rides the STATE so
+   *  BlockCanvas's epoch-keyed repaint can never fire ahead of the
+   *  relayout that owns it. */
   styleEpoch: number;
 }
 
@@ -179,11 +165,11 @@ interface SearchPaint {
   current: PaintedRect[];
 }
 
-/** #74 COLUMNS — the line-owns-x test for the text-track probes: the
- * line's column frame contains the content-box-relative x. Single-
- * column pages keep the y-only behavior (bit-identical — the additive
- * law); a columned page requires the click to fall in the line's own
- * slot band, so a column-2 click can never claim column-1 text. */
+/**
+ * #74 — the line-owns-x test for the text-track probes: the line's
+ * column frame must contain the x. Single-column pages keep the
+ * y-only behavior (bit-identical).
+ */
 function lineOwnsX(page: PageGeometry, line: LineBox, x: number): boolean {
   if (page.columns == null) return true;
   const slot = page.columns[line.column ?? 0];
@@ -195,16 +181,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // L2: one engine + one metrics for the view's lifetime.
   const engineRef = useRef<LayoutEngine | null>(null);
   const metricsRef = useRef<TextMetrics | null>(null);
-  // M-EQ: the equation port ref — the SAME instance rides every engine
-  // creation (initial + both recreate paths), so an injected test
-  // double survives a recreate and the pairing law holds.
+  // The equation port ref — the SAME instance rides every engine
+  // creation, so an injected test double survives a recreate.
   const equationMetricsRef = useRef<EquationMetrics | null>(null);
   if (!engineRef.current) {
     if (!metricsRef.current) metricsRef.current = injectedMetrics ?? getRealMetrics();
     if (!equationMetricsRef.current) equationMetricsRef.current = injectedEquationMetrics ?? getEquationMetrics();
-    // M-EQ: the equation dims port rides the engine from birth — the
-    // same pairing law as TextMetrics (one warm ruler; the port's
-    // cache is module-level, so recreate is measurement-cheap).
+    // The equation dims port rides the engine from birth (the same
+    // pairing law as TextMetrics).
     engineRef.current = createLayoutEngine({
       metrics: metricsRef.current,
       equationMetrics: equationMetricsRef.current,
@@ -224,17 +208,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     blinkTimerRef.current = setTimeout(() => setCaretBlinking(true), 500);
   }, []);
   const [selRects, setSelRects] = useState<PaintedRect[]>([]);
-  /** M-REFS: the reference tables whose bounds carry the FIELD BORDER
-   *  right now — the selection lives inside them (caret) or ON them
-   *  (NodeSelection). Selection-driven chrome, the muted-band
-   *  precedent; computed in the selection projection. */
+  /** The reference tables whose bounds carry the FIELD BORDER right
+   *  now — the selection lives inside them (caret) or ON them
+   *  (NodeSelection). */
   const [refBorders, setRefBorders] = useState<Set<string>>(() => new Set());
   const refBordersRef = useRef<Set<string>>(new Set());
   const [toolbarPos, setToolbarPos] = useState<FloatingToolbarPosition | null>(null);
-  // M-IMAGES-1: the selected image's placed rect + model dims.
-  // M-IMAGES-1.5: corner radius per image blockId (paint-only) —
-  // derived from the PM doc so attr writes change its identity and
-  // ImageLayer repaints; NO store epoch involved (no epoch churn).
+  // Corner radius per image blockId (paint-only) — attr writes change
+  // the memo's identity and ImageLayer repaints; no epoch churn.
   const imageRadii = useMemo(() => {
     const map = new Map<string, number>();
     editor?.state.doc.descendants((node) => {
@@ -245,11 +226,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     });
     return map;
   }, [editor?.state.doc]);
-  // M-EQ-2: the equations' PAINT-ONLY color, per blockId (the
-  // imageRadii precedent — paint facts stay out of the engine, so a
-  // color edit repaints without any relayout). null = INHERIT (the
-  // docDefaultText color below — the same derivation the canvas text
-  // uses). Derived from the immutable PM doc at render time.
+  // The equations' PAINT-ONLY color per blockId (null = inherit the
+  // docDefaultText derivation) — paint facts stay out of the engine,
+  // so a color edit repaints without any relayout.
   const equationColors = useMemo(() => {
     const map = new Map<string, string | null>();
     editor?.state.doc.descendants((node) => {
@@ -264,23 +243,22 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     placed: import('@tensor-editor/engine').PlacedRect;
     pos: number;
     float: { dx: number; dy: number; z: 'front' | 'behind' } | null;
-    /** M-IMAGES-2.1: an INLINE object's selection — the overlay owns
-     *  the visualization, float-drag is OFF (an in-flow object has no
-     *  float placement of its own to drag into), resize stays. */
+    /** An INLINE object's selection — the overlay owns the
+     *  visualization; float-drag is off (in-flow objects have no float
+     *  placement), resize stays. */
     inline: boolean;
   } | null>(null);
   const [searchPaint, setSearchPaint] = useState<SearchPaint | null>(null);
   // Spell/grammar flags: the flat-line projection (see updateSpellProjection).
   const [spellPaint, setSpellPaint] = useState<SpellBar[]>([]);
-  // #COMMENTS — the anchored threads' painted rects (see
-  // updateCommentProjection). Null = nothing to paint.
+  // The anchored threads' painted rects (see updateCommentProjection).
   const [commentPaint, setCommentPaint] = useState<{
     threads: CommentThreadPaint[];
     active: PaintedRect[];
   } | null>(null);
   // The suggestion bubble: set by a plain left-click on a flagged
-  // word (GDocs behavior); the anchor derives at render time from the
-  // error's painted extent (fresh through scrolls/zoom re-renders).
+  // word; the anchor derives at render time from the error's painted
+  // extent (fresh through scrolls/zoom re-renders).
   const [spellBubble, setSpellBubble] = useState<SpellError | null>(null);
   const [composing, setComposing] = useState<string | null>(null);
   const [adapterError, setAdapterError] = useState<Error | null>(null);
@@ -290,14 +268,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // Handlers below run inside PM's dispatch (outside React's render
   // cycle) — they read the fallback flag through this ref, not state.
   const adapterErrorRef = useRef<Error | null>(null);
-  /** M-REFS: the resolver's warm map (the two-pass fixpoint's state) —
-   *  identity-stable per the resolver; null on cold start/fallback. */
+  /** The resolver's warm map (the fixpoint's state) — identity-stable
+   *  per the resolver; null on cold start/fallback. */
   const refPagesRef = useRef<ReferencePagesMap | null>(null);
-  /** M-PAGEFIELD: the warm page TOTAL (the field placeholder's
-   *  measured width source — the max-width digit string). The
-   *  fixpoint: pass 1 measures with the warm total; the real total
-   *  resolves off pass 1's page count; a widened placeholder
-   *  re-lays-out (bounded, the M-REFS two-pass shape). */
+  /** The warm page TOTAL (the field placeholder's measured-width
+   *  source). The fixpoint: pass 1 measures with the warm total; a
+   *  widened placeholder re-lays-out. */
   const fieldTotalRef = useRef<number | null>(null);
 
   const layoutRef = useRef<LayoutState | null>(null);
@@ -308,12 +284,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const selectionProjectionRef = useRef<() => void>(() => {});
   const searchProjectionRef = useRef<() => void>(() => {});
   const spellProjectionRef = useRef<() => void>(() => {});
-  // #COMMENTS — the comment projection (the search/spell pattern).
+  // The comment projection (the search/spell pattern).
   const commentProjectionRef = useRef<() => void>(() => {});
   const pendingScrollRef = useRef(false);
   const prevSearchIndexRef = useRef(-1);
   const prevSearchStateRef = useRef<unknown>(null);
-  // #COMMENTS — the projection's skip-state (the search pattern).
+  // The projection's skip-state (the search pattern).
   const prevCommentRangesRef = useRef<ReadonlyArray<unknown> | null>(null);
   const prevActiveThreadRef = useRef<string | null>(null);
   const prevSpellErrorsRef = useRef<readonly unknown[] | null>(null);
@@ -328,64 +304,59 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   // read fresh at call time (L4) — these selectors never feed options
   // directly.
   const pageSetup = useDocumentStore((s) => s.pageSetup);
-  // #101 — SPLIT VIEW: the desk's page arrangement (1 = the classic
-  // stack). A store subscription like its siblings: its flips schedule
-  // the warm relayout (the frame adjustment lives at the commit).
+  // #101 — the desk's page arrangement (1 = the classic stack); flips
+  // schedule the warm relayout (the frame adjustment lives at the
+  // commit).
   const pageColumns = useConfigStore((s) => s.config.editor.pageColumns);
-  // #48 — the per-page styles (the positional map): paint-only ink,
-  // so a map change re-renders without a relayout (the pageSetup
-  // subscription's twin).
+  // #48 — the per-page styles (positional): paint-only ink — a map
+  // change re-renders without a relayout.
   const pageStyles = useDocumentStore((s) => s.pageStyles);
-  // M-HEADER-FOOTER-2: the active-band signal (muted band ink + the
-  // ruler's active-region accent) — selection-driven, one PM doc.
+  // The active-band signal (muted band ink + the ruler's
+  // active-region accent) — selection-driven.
   const inBand = useEditorState({
     editor,
     selector: ({ editor: e }) => selectionInBand(e ?? null),
   });
   const defaultFontFamily = useConfigStore((s) => s.config.editor.defaultFontFamily);
   const defaultFontSize = useConfigStore((s) => s.config.editor.defaultFontSize);
-  // REGISTRY EPOCH (M-STYLES): a definition edit bumps the epoch and
-  // this effect relayouts — the adapter cache invalidates wholesale
-  // (re-resolved runs/decor on every block) and the engine re-breaks
-  // exactly the blocks whose contentHash changed (or splices the
-  // paint-only ones; BlockCanvas's epoch key repaints those).
+  // REGISTRY EPOCH: a definition edit bumps the epoch and this effect
+  // relayouts — the adapter cache invalidates wholesale; the engine
+  // re-breaks exactly the changed-hash blocks, splices paint-only
+  // ones.
   const styleEpoch = useStyleRegistryStore((s) => s.epoch);
   const zoomLevel = useConfigStore((s) => s.config.editor.zoomLevel);
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
-  // #COMMENTS — the shared visibility law: the gutter renders and the
-  // desk reserves the same width iff this is true (one selector, the
-  // two can never drift).
+  // The shared visibility law: the gutter renders and the desk
+  // reserves the same width iff true (one selector — they never
+  // drift).
   const boundaryVisible = useCommentsGutterVisible();
-  // Display-only ink (M6): NPCs paint on screen; never a layout fact.
+  // Display-only ink: NPCs paint on screen; never a layout fact.
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   const showBreakMarks = useConfigStore((s) => s.config.editor.showBreakMarks);
-  // M-IMAGES-1: caption display toggle (NPC precedent — ink only).
+  // Caption display toggle (ink only).
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
-  // M-RULER: per-axis display gates (the command palette owns the
-  // granular show/hide; the ribbon button toggles both). FOCUS MODE:
-  // both bars hide with the chrome (the user ruling). THE HOOK LAW:
-  // the focus subscription is UNCONDITIONAL — an `&&` on the config
-  // selector would short-circuit the hook call itself, flipping the
-  // component's hook count with the toggle (the 'Should have a queue'
-  // crash). Combine AFTER both hooks have run.
+  // Per-axis display gates (the palette owns granular show/hide; the
+  // ribbon toggles both); both hide in focus mode. HOOK LAW: the
+  // focus subscription is UNCONDITIONAL — `&&`-gating the config
+  // selector would flip the hook count ('Should have a queue'
+  // crash); combine AFTER both hooks run.
   const showHorizontalRulerConfig = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRulerConfig = useConfigStore((s) => s.config.editor.showVerticalRuler);
   const focusActive = useFocusStore((s) => s.active);
   const showHorizontalRuler = showHorizontalRulerConfig && !focusActive;
   const showVerticalRuler = showVerticalRulerConfig && !focusActive;
-  // #WATERMARK — the display toggle (the captions NPC precedent):
-  // INK-ONLY — a hidden watermark gives back no space and triggers no
-  // relayout (unlike showHeadersFooters below, which rides layout).
+  // The watermark display toggle: INK-ONLY — a hidden watermark gives
+  // back no space and triggers no relayout (unlike showHeadersFooters).
   const showWatermark = useConfigStore((s) => s.config.editor.showWatermark);
-  // M-HEADER-FOOTER-2: the band display toggle (rides the layout —
-  // a hidden band gives back its reservation; see relayout).
+  // The band display toggle (rides the layout — a hidden band gives
+  // back its reservation; see relayout).
   const showHeadersFooters = useConfigStore((s) => s.config.editor.showHeadersFooters);
   // Accessibility: grammar flags as a double line (the pageless
   // fallback surface + PagelessEditor read this via a container class).
   const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
-  // M-IMAGES-2.1 — the INLINE paint's arrival law: bumps when any
-  // bitmap lands (pending inline objects repaint once; no relayout —
-  // the bitmapVersion is geometry-free, it only rides boxKey).
+  // The INLINE paint's arrival law: bumps when any bitmap lands
+  // (pending inline objects repaint once; no relayout — the
+  // bitmapVersion is geometry-free).
   const [bitmapEpoch, setBitmapEpoch] = useState(0);
   useEffect(
     () =>
@@ -394,9 +365,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       }),
     []
   );
-  // M-IMAGES-2.2 — the unresolved-ref report ALSO rides store changes:
-  // a MediaStore removal triggers no PM transaction (so no relayout),
-  // but the doc's refs may have just gone gray — re-scan (dev only).
+  // The unresolved-ref report also rides store changes: a MediaStore
+  // removal triggers no PM transaction, so re-scan (dev only).
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     return useMediaStore.subscribe(() => {
@@ -404,33 +374,23 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       if (ed) reportUnresolvedRefs(ed);
     });
   }, []);
-  // M-IMAGES-2.2 — the painted projections (floating toolbar, caret)
-  // track the VIEWPORT, not just the model: the desk's scroll moves
-  // the anchored overlays with the content, so an image scrolled to
-  // the desk's top edge keeps a toolbar computed for the OLD geometry
-  // and gets clipped by the overflow-hidden desk wrapper (the ribbon
-  // line). Recompute on scroll (the pageless hook's law, paginated
-  // side) — the projection is a pure function of (layout, selection).
-  // LISTENER PLACEMENT: the paginated root RE-MOUNTS across the view
-  // branches (the fonts-gate stub renders no refs at all), so a
-  // ref-anchored listener would attach to a node that doesn't exist
-  // yet and die on the branch flip. Scroll events don't BUBBLE, but
-  // they DO propagate down the CAPTURE phase from the document — one
-  // stable document-level listener sees every scroller, desk included.
+  // The painted projections (toolbar, caret) track the VIEWPORT, not
+  // just the model — recompute on scroll; the projection is a pure
+  // function of (layout, selection). LISTENER PLACEMENT: the root
+  // RE-MOUNTS across the view branches, so a ref-anchored listener
+  // would die on the branch flip — scroll doesn't BUBBLE but does
+  // propagate down the CAPTURE phase, so one document-level listener
+  // sees every scroller.
   useEffect(() => {
     if (!editor) return;
     const onScroll = () => selectionProjectionRef.current();
     document.addEventListener('scroll', onScroll, { passive: true, capture: true });
     return () => document.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions);
   }, [editor]);
-  // M-RULER: the ruler bar is chrome OUTSIDE the desk's scroll flow —
-  // this view portals it into the desk wrapper (the relative flex
-  // container between the Ribbon and the scroller) as a static overlay:
-  // flush under the ribbon, always visible, zero reflow on show/hide.
-  // The wrapper is App-owned DOM; this closest() lookup is the one
-  // structural contract between them. Re-runs on the layout flip: the
-  // fonts-gate stub mounts a different root, so rootRef is null until
-  // the real branch first commits.
+  // The ruler bar is chrome OUTSIDE the desk's scroll flow — portaled
+  // into the desk wrapper (App-owned DOM; this closest() lookup is
+  // the one structural contract) as a static overlay: flush under the
+  // ribbon, zero reflow on show/hide. Re-runs on the layout flip.
   const hasLayout = layout !== null;
   const [deskWrapper, setDeskWrapper] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -447,10 +407,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   );
   const selectionColor = useConfigStore((s) => s.config.editor.selectionColor);
   const setPageInfo = useDocumentStore((s) => s.setPageInfo);
-  // M-LINENUMS: document-level setting; the gutter is a pure
-  // projection of it + LayoutResult (renders nothing when off).
+  // Document-level setting; the gutter is a pure projection of it +
+  // LayoutResult (renders nothing when off).
   const lineNumbers = useDocumentStore((s) => s.lineNumbers);
-  // M-FONTS: install/uninstall epoch — see the font-epoch effect.
+  // Install/uninstall epoch — see the font-epoch effect.
   const fontEpoch = useFontRegistryStore((s) => s.epoch);
   const mergedStyles = useStyleRegistryStore((s) => s.merged);
   // The gutter speaks the document's baseStyle font (Editor.tsx's
@@ -459,12 +419,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     () => resolveNormalBase(defaultFontFamily, defaultFontSize, mergedStyles),
     [defaultFontFamily, defaultFontSize, mergedStyles]
   );
-  // M-EQ-2: the equations' DEFAULT text color — the resolved 'normal'
-  // run color (the same resolveRun the canvas painter consumes for
-  // every text run; baseline hardcodes #000000, the normal style's
-  // color property overrides). The DOM overlay must PAINT this
-  // explicitly or it inherits chrome's --foreground (the off-white
-  // mismatch the M-EQ-2 ruling fixes).
+  // The equations' DEFAULT text color — the resolved 'normal' run
+  // color (the same resolveRun the canvas painter consumes). The DOM
+  // overlay must PAINT this explicitly or it inherits chrome's
+  // --foreground.
   const docDefaultTextColor = useMemo(() => {
     const normalDef = lookupStyle('normal', mergedStyles);
     return resolveRun({
@@ -486,13 +444,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const gap = EDGE_PAD;
     const aboveTop = sr.top + bounds.top * z;
     const belowTop = sr.top + bounds.bottom * z;
-    // M-IMAGES-1.5: images anchor at their TOP edge (Word behavior) —
-    // M-IMAGES-2.2: BUT ONLY WHEN IT FITS. The old forceAbove override
-    // placed the toolbar above UNCONDITIONALLY, so an image scrolled
-    // to the top of the desk had its toolbar clipped by the
-    // overflow-hidden desk wrapper (right under the ribbon). The room
-    // check (toolbar height + the gap clearance) wins for EVERYTHING
-    // now: no room above → below the anchor.
+    // Images anchor at their TOP edge (Word behavior) — BUT ONLY WHEN
+    // IT FITS: the old unconditional forceAbove clipped an image's
+    // toolbar against the desk wrapper's top edge. The room check
+    // (toolbar height + gap) wins for EVERYTHING.
     const fitsAbove = aboveTop - TOOLBAR_HEIGHT_EST - EDGE_PAD >= view.top;
     const placement = fitsAbove ? 'above' : 'below';
     const left = Math.min(
@@ -510,11 +465,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // bubble — it anchors one word; a collapsed caret placement (our
     // own opening click) keeps it open.
     if (!selection.empty) setSpellBubble(null);
-    // M-HEADER-FOOTER-3: band selections project onto the ACTIVE page's
-    // echo (recorded by the hit-test; viewport fallback). The surface
-    // clamp: a selection whose ends sit on different surfaces (band vs
-    // body — reachable via shift+click) paints ONLY the anchor's side
-    // (PM state untouched — the painted projection stays honest).
+    // Band selections project onto the ACTIVE page's echo (the
+    // hit-test records it). The surface clamp: a selection spanning
+    // band and body paints only the anchor's side — PM state
+    // untouched.
     const inBandSel = selectionInBand(editor);
     const bandPage = inBandSel ? activeBandPage() : undefined;
     let surface: 'band' | 'body' | undefined;
@@ -532,9 +486,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       metricsRef.current!,
       bandPage
     );
-    // M-REFS: a NodeSelection on a reference table has NO text caret
-    // (the equation treatment — an atom's selection is the block, not
-    // a position in its projected text).
+    // A NodeSelection on a reference table has NO text caret (the
+    // equation treatment — an atom's selection is the block).
     const selNode0 = (selection as unknown as { node?: { type?: { name?: string } } }).node;
     const isReferenceTableNodeSelection = selNode0?.type?.name === 'referenceTable';
     setCaret(isReferenceTableNodeSelection ? null : geom);
@@ -544,19 +497,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // The status bar's page is VIEWPORT based (the
     // IntersectionObserver feed) — the caret no longer moves it.
     setPageInfo(current.result.pages.length, useDocumentStore.getState().currentPage);
-    // M-IMAGES-1: a NodeSelection on an image projects to the
-    // placed rect (selection state + resize handles).
-    // M-IMAGES-2.1: an INLINE object's NodeSelection projects to its
-    // PAINTED rect (inlineObjectRect — the token's line, baseline-
-    // seated) — the same overlay treatment, minus float-drag (an
-    // in-flow object has no float placement of its own to drag into).
+    // A NodeSelection on an image projects to the placed rect; an
+    // INLINE object projects to its PAINTED rect (inlineObjectRect) —
+    // the same overlay, minus float-drag.
     const selNode = (selection as unknown as { node?: { type?: { name?: string }; attrs?: Record<string, unknown> } }).node;
     const selName = selNode?.type?.name;
     const isBlockImageNodeSelection = selName === 'image';
     const isInlineImageNodeSelection = selName === 'inlineImage';
-    // M-EQ: an equation NodeSelection shows NO floating toolbar — the
-    // editor bubble is the equation's toolbar (it opens on the very
-    // same selection; a text-format strip over an atom is noise).
+    // An equation NodeSelection shows NO floating toolbar — the
+    // editor bubble is the equation's toolbar (it opens on the same
+    // selection; a text-format strip over an atom is noise).
     const isEquationNodeSelection = selName === 'equation';
     let inlineObjRect: import('@tensor-editor/engine').PlacedRect | null = null;
     if (isInlineImageNodeSelection) {
@@ -609,11 +559,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       width: pr.rect.width,
       height: pr.rect.height,
     });
-    // M-TABLES: a CELL selection paints the selected cells' rect
-    // slices (every page slice — a split cell highlights across its
-    // page fragments), matched by grid identity through the
-    // cell-paragraph map's table (prosemirror-tables findCell — the
-    // SAME grid identity the engine's cell rects echo).
+    // A CELL selection paints the selected cells' rect slices (every
+    // page fragment), matched by grid identity through the
+    // cell-paragraph map's table (the SAME grid identity the
+    // engine's cell rects echo).
     const isCellSelection = selection instanceof CellSelection;
     let cellRects: PaintedRect[] | null = null;
     if (isCellSelection) {
@@ -642,8 +591,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         }
       });
     }
-    // M-TABLES: a caret parked inside a cell anchors the toolbar at
-    // the CELL's slice on the caret's page (Word's context bar).
+    // A caret parked inside a cell anchors the toolbar at the CELL's
+    // slice on the caret's page (Word's context bar).
     let caretCellAnchor: PaintedRect | null = null;
     if (selection.empty && !isCellSelection) {
       try {
@@ -685,10 +634,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           );
     if (isInlineImageNodeSelection || isCellSelection || isReferenceTableNodeSelection) setCaret(null);
     setSelRects(rects);
-    // M-REFS: the FIELD BORDER set — reference blocks whose bounds
-    // hold the selection (caret strictly inside, or a NodeSelection ON
-    // the container). Ancestry-walk (the selectionInReferenceTable
-    // helper's shape), keyed by the node's stable blockId.
+    // The FIELD BORDER set — reference blocks whose bounds hold the
+    // selection (caret inside, or a NodeSelection on the container),
+    // keyed by blockId.
     const borders = new Set<string>();
     type RefNodeLike = { type?: { name?: string }; attrs?: { blockId?: string } } | null | undefined;
     const addRef = (node: RefNodeLike) => {
@@ -712,12 +660,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       imageNode?.attrs.blockId != null
         ? current.result.placed.find((pr) => pr.blockId === imageNode.attrs.blockId) ?? null
         : null;
-    // The image toolbar's rect is STACK-LOCAL (the same frame the text
-    // path feeds — pageIndex stride + contentBox included). The first
-    // cut passed content-relative coords, so the toolbar landed ~a
-    // page-top/center and 96px left of the image (the reported
-    // "center, a little left"). The INLINE object rides its painted
-    // rect (placed[] holds block images only — lines hold objects).
+    // The image toolbar's rect is STACK-LOCAL (the same frame the
+    // text path feeds). The INLINE object rides its painted rect
+    // (placed[] holds block images only — lines hold objects).
     const imageToolbarRect: PaintedRect | null = imageRectForToolbar
       ? stackRectOf(imageRectForToolbar)
       : inlineObjRect
@@ -779,23 +724,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     }
   }
 
-  /** The spell flags' projection — the search pattern, one word at a
-   *  time: PM plugin state (error ranges) mapped through positionMap
-   *  into flat underline bars, KIND-TAGGED (spelling red, grammar
-   *  blue — SpellHighlights owns the colors, and the optional double
-   *  line rides the same bars). Recomputed on relayout (geometry moved)
-   *  and on spell-meta transactions (results arrived — those dispatch
-   *  WITHOUT doc changes, the same seam search's index metas ride).
-   *  Doc-changing transactions reach this through relayout()'s force. */
-  /** #COMMENTS — the comment projection (the search pattern): the
-   *  tracking plugin's PM ranges mapped through positionMap into tinted
-   *  rects, grouped per thread, with the ACTIVE thread's deeper tier.
-   *  Recomputed on relayout (geometry moved) and on comment-store
-   *  changes (the subscription below — active thread rides selection
-   *  moves, anchored membership rides mark steps; neither can be seen
-   *  from the doc-change seam alone). Skips when the ranges array is
-   *  reference-identical AND the active thread is unchanged (the
-   *  search projection's skip law). */
+  /** The comment projection (the search pattern): tracked PM ranges
+   *  mapped into tinted rects, grouped per thread, with the ACTIVE
+   *  thread's deeper tier. Recomputed on relayout and comment-store
+   *  changes; skips when the ranges array is reference-identical AND
+   *  the active thread is unchanged. */
   function updateCommentProjection(force = false) {
     if (!editor) return;
     const st = commentTrackingKey.getState(editor.state);
@@ -821,6 +754,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     setCommentPaint(byThread.size > 0 ? { threads: [...byThread.entries()].map(([id, rects]) => ({ id, rects })), active } : null);
   }
 
+  /** The spell flags' projection — the search pattern: error ranges
+   *  mapped through positionMap into flat underline bars, KIND-TAGGED
+   *  (SpellHighlights owns the colors). Recomputed on relayout and on
+   *  spell-meta transactions (results arrive WITHOUT doc changes);
+   *  doc-changing transactions reach this through relayout()'s force. */
   function updateSpellProjection(force = false) {
     if (!editor) return;
     const current = layoutRef.current;
@@ -850,63 +788,50 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (!editor || !fontsReadyRef.current) return;
     // L4: read per call, never captured.
     const pageSetupNow = useDocumentStore.getState().pageSetup;
-    // M-HEADER-FOOTER-2: the band options read PER CALL (L4) — the
-    // different-first-page flag travels in .wpdoc metadata; the ENGINE
-    // owns the band geometry (placement, anchor, reservation) off the
-    // adapter's doc.bands. No shell-side reservation exists anymore.
+    // The different-first-page flag travels in .wpdoc metadata; the
+    // ENGINE owns the band geometry off doc.bands (no shell-side
+    // reservation).
     const hfSettings = useDocumentStore.getState().headerFooter;
     const { defaultFontFamily: family, defaultFontSize: size } =
       useConfigStore.getState().config.editor;
     const registryNow = useStyleRegistryStore.getState();
-    // baseStyle := resolve('normal') from the merged registry
-    // (amendment 6): unedited 'normal' falls to the config defaults;
-    // an edited 'normal' overrides them — and baseStyle's existing
-    // baseStyleHash path carries the change wholesale into the engine
-    // (empty lines measure under baseStyle, so they restyle too).
+    // baseStyle := resolve('normal') from the merged registry: an
+    // edited 'normal' overrides the config defaults, and baseStyle's
+    // hash path carries the change wholesale into the engine (empty
+    // lines measure under baseStyle, so they restyle too).
     const baseStyle = resolveNormalBase(family, size, registryNow.merged);
-    // ADAPTER-CONTRACT GUARD (M6.1 fallback audit): this view's mount
-    // effects run BEFORE the editor's onCreate (child effects first),
-    // so the FIRST relayout can race the BlockIdExtension's initial
-    // mint pass. The old blanket catch silently degraded every such
-    // race into a fallback boot; the sentinel-only catch exposed it.
-    // Running the idempotent mint pass here (a no-op once ids exist)
-    // makes the handoff contract true regardless of effect order.
-    // The heading styleId sync is the same load-path twin.
+    // ADAPTER-CONTRACT GUARD: this view's mount effects run BEFORE
+    // the editor's onCreate (child effects first), so the first
+    // relayout can race the BlockIdExtension's mint pass — running
+    // the idempotent mint here makes the handoff true regardless of
+    // effect order.
     ensureBlockIds(editor);
     ensureStyleSync(editor);
-    // M-IMAGES-2.2 — the UNRESOLVED-REF report (dev-only): a media://
-    // ref whose id is NOT in the MediaStore paints the placeholder in
-    // every surface with zero trace of WHY. The other silent-gray
-    // causes (decode failure) got their own diagnostic in bitmapCache;
-    // this is the missing-media half of the loud posture.
+    // The UNRESOLVED-REF report (dev-only): a media:// ref missing
+    // from the MediaStore gets a loud diagnostic (the missing-media
+    // half of the loud posture).
     if (import.meta.env.DEV) reportUnresolvedRefs(editor);
     try {
       const __t0 = performance.now();
-      // M-REFS — THE TWO-PASS FIXPOINT: pass 1 lays out with the WARM
-      // numbers (the resolver's identity-stable map, null on cold
-      // start → '' runs); the resolver reads pass 1's placement and,
-      // iff any entry's number moved, pass 2 re-converts + re-lays-out
-      // with the fresh map. Steady state: the resolver returns the
-      // SAME map → pass 2 skipped, conversion caches stay warm. The
-      // capped-at-2 ruling: numbers are read off pass 1; a number's
-      // own width change re-resolves on the NEXT relayout (one-pass
-      // lag in the pathological oscillation case, by ruling).
+      // THE TWO-PASS FIXPOINT: pass 1 lays out with the WARM numbers
+      // (null on cold start → '' runs); the resolver reads pass 1's
+      // placement and, iff a number moved, pass 2 re-converts +
+      // re-lays-out. Steady state: the resolver returns the SAME map
+      // → pass 2 skipped, conversion caches stay warm.
       const refPagesIn = refPagesRef.current;
       const fieldTotalIn = fieldTotalRef.current ?? undefined;
       const pass1 = pmDocToSemantic(editor.state.doc, baseStyle, {
         definitions: registryNow.merged,
         epoch: registryNow.epoch,
       }, {
-        // M-HEADER-FOOTER-2: per-call band options (L4) — the engine
-        // owns the band geometry from here.
+        // Per-call band options (L4) — the engine owns the band
+        // geometry from here.
         differentFirstPage: hfSettings?.differentFirstPage ?? false,
       }, refPagesIn ?? undefined, fieldTotalIn, pageSetupNow);
       const result1 = engineRef.current!.layout(
-        // M-HEADER-FOOTER-2: the View ▸ Show Headers & Footers toggle is
-        // DISPLAY-ONLY but rides the LAYOUT (the captions precedent is
-        // ink-only; a hidden band must also GIVE BACK its reservation —
-        // Word collapses the area). Stripping doc.bands pre-layout does
-        // both: no band lines, body reclaimed. Per-call read (L4).
+        // The Show Headers & Footers toggle is DISPLAY-ONLY but rides
+        // the LAYOUT: a hidden band must also GIVE BACK its reservation
+        // (Word collapses the area). Stripping doc.bands does both.
         useConfigStore.getState().config.editor.showHeadersFooters === false
           ? { ...pass1.doc, bands: undefined }
           : pass1.doc,
@@ -918,10 +843,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         },
       );
       const refPagesOut = resolveReferencePages(pass1.blocks, result1.lines, refPagesIn);
-      // M-PAGEFIELD: the total resolves off pass 1's page count — the
-      // fixpoint re-converts + re-lays-out when the placeholder's
-      // digit width must GROW (1 → 2 digits). Identity-stable when
-      // unchanged (the same number → pass 2 skipped, caches warm).
+      // The total resolves off pass 1's page count — the fixpoint
+      // re-lays-out when the placeholder's digit width must GROW;
+      // identity-stable when unchanged (pass 2 skipped).
       const totalNow = result1.pages.length;
       let adapted = pass1;
       let result = result1;
@@ -946,10 +870,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           },
         );
       }
-      // Permanent benchmark seam: total relayout time, readable
-      // by the self-driving bench and the coalescing test. The
-      // engine's lastStats ride along (M-STYLES acceptance receipt —
-      // devtools-quotable without touching engine internals).
+      // Permanent benchmark seam: total relayout time + the engine's
+      // lastStats, readable by the bench and the coalescing test.
       const __w = globalThis as {
         __benchRelayouts?: {
           relayouts: Array<{ total: number; at: number; lastStats?: unknown }>;
@@ -962,21 +884,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         lastStats: { ...engineRef.current!.lastStats },
       });
       assertContiguity(result);
-      // M-REFS-10 — THE LEADER ADOPTION (the "entire leading is
-      // selectable" ruling): measure the resolved dot counts off the
-      // FRESH layout; when any container's model span length differs,
-      // schedule the generator's FORCED pass (debounced — pagination
-      // churn coalesces) so the spans adopt the full count and the
-      // ENTIRE leader becomes real, selectable text. The fixpoint:
-      // after adoption the fill = 0, the counts recompute equal, no
-      // further writes.
+      // THE LEADER ADOPTION: measure the resolved dot counts off the
+      // FRESH layout; when a container's model span length differs,
+      // schedule the generator's FORCED pass (debounced) so the ENTIRE
+      // leader becomes real, selectable text.
       computeLeaderCounts(adapted.blocks, result.lines, metricsRef.current!);
       scheduleLeaderAdoption();
-      // M-REFS-7 — the relayout leg of the debug seam: one entry per
-      // layout call (version + walk stats). With the BlockCanvas leg,
-      // the user's next repro discriminates: layouts running + no
-      // canvas entries = the render path is dead; no layouts = the
-      // update pipeline is dead (the frozen-relayout ghost theory).
+      // The relayout leg of the debug seam: one entry per layout call
+      // — with the BlockCanvas leg, a repro discriminates a dead
+      // render path from a dead update pipeline.
       const dbgLayout = (globalThis as { __tensorPaintDebug?: { log: unknown[] } }).__tensorPaintDebug;
       if (dbgLayout) {
         dbgLayout.log.push({
@@ -985,23 +901,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           spliced: engineRef.current!.lastStats.blocksSpliced,
         });
       }
-      // #101 — SPLIT VIEW: THE FRAME ADJUSTMENT (the STACK frame). The
-      // shell arranges the pages row-major, so each page's stack-local
-      // origin gains its COLUMN offset — folded into contentBox.x ONCE
-      // here. The STACK-frame consumers then land in the page's own
-      // column with zero per-site changes: the stack-local overlay
-      // siblings (selection bands, the caret, spell/search/comment
-      // paint, break marks), the hit-testers, the coords callbacks,
-      // and the positionMap helpers that build stack rects internally.
-      // The rect.x values stay content-relative. columns 1 = the
-      // identity (no adjustment).
-      // THE OTHER FRAME: everything mounted INSIDE a PageSheet lives in
-      // the PAGE frame (the sheet is already positioned at the column's
-      // left), so the fold rolls back OFF at the sheet boundary — the
-      // render's `localPage` (the exact inverse, the commit grid's
-      // left) — before any in-sheet consumer (text canvases, images,
-      // tables, equations, band slots, gutters) reads it. Two frames,
-      // two one-place transformations.
+      // #101 — THE FRAME ADJUSTMENT (the STACK frame): pages arrange
+      // row-major, so each page's stack-local origin gains its COLUMN
+      // offset — folded into contentBox.x ONCE here. Every STACK-frame
+      // consumer (selection bands, caret, spell/search/comment paint,
+      // break marks, hit-testers, coords callbacks) then lands in the
+      // page's own column with zero per-site changes; rect.x stays
+      // content-relative; columns 1 = the identity.
+      // THE OTHER FRAME: content INSIDE a PageSheet lives in the PAGE
+      // frame — the fold rolls back OFF at the sheet boundary (the
+      // render's `localPage`, the exact inverse) before any in-sheet
+      // consumer reads it. Two frames, two one-place transformations.
       const pageColumns = useConfigStore.getState().config.editor.pageColumns;
       const grid = pageGridLayout(result.pages, pageSetup.pageGap, pageColumns);
       const adjustedPages =
@@ -1021,12 +931,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       };
       const next: LayoutState = adjusted;
       layoutRef.current = next;
-      // No flushSync — React batches setLayout calls
-      // from N input events into ONE render + ONE useLayoutEffect paint
-      // per frame (the "paint once per frame" model). For single keys,
-      // the microtask render fires within the same frame; for bursts,
-      // all keys' adapter+engine run in the input events, and the
-      // canvas paints once with the final state.
+      // No flushSync — React batches setLayout calls from N input
+      // events into ONE render + paint per frame; bursts run all the
+      // adapter+engine work in the input events and paint once with
+      // the final state.
       setLayout(next);
       setAdapterError(null);
       adapterErrorRef.current = null;
@@ -1035,15 +943,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       updateSpellProjection(true);
       updateCommentProjection(true);
     } catch (err) {
-      // FALLBACK AUDIT (M6.1, CONVENTIONS.md): the pageless fallback
-      // catches ONLY the sentinel family — a document using a node the
-      // projection doesn't support yet, or (M-EQ) an equation the
-      // engine refuses (taller than any page — user input, not a bug;
-      // the pageless surface renders the node view natively, no height
-      // limit). Anything else is a real adapter/engine bug: rethrow in
-      // dev so it crashes LOUDLY (a silent degrade would hide it); prod
-      // keeps the never-eat-the-document fallback behind a loud console
-      // error. Blanket Error catches that swallow bugs are banned.
+      // FALLBACK AUDIT: the pageless fallback catches ONLY the
+      // sentinel family — an unsupported node kind, or an equation the
+      // engine refuses (taller than any page — user input, not a bug).
+      // Anything else is a real bug: rethrow in dev; prod keeps the
+      // never-eat-the-document fallback behind a loud console error.
       if (
         !(err instanceof UnsupportedDocError) &&
         !(err instanceof EquationTooTallError) &&
@@ -1058,12 +962,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       setPageInfo(1, 1);
     }
   }
-  // M-HEADER-FOOTER-3: the ACTIVE BAND PAGE — the page whose band echo
-  // the caret/selection/toolbar project onto. Band blocks echo on every
-  // page with IDENTICAL ranges, so the projections need the page the
-  // user interacted with: pmPosAt records it on every band hit (the
-  // ONE hit-test seam); band selections without a click (Go-to-Header,
-  // enable) fall back to the viewport's current page.
+  // The ACTIVE BAND PAGE — band blocks echo on every page with
+  // IDENTICAL ranges, so the projections need the page the user
+  // interacted with: pmPosAt records it on every band hit; non-click
+  // band selections fall back to the viewport's page.
   const bandPageRef = useRef<number | null>(null);
   function activeBandPage(): number {
     return bandPageRef.current ?? Math.max(0, useDocumentStore.getState().currentPage - 1);
@@ -1091,13 +993,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       useConfigStore.getState().config.editor.pageColumns
     );
     if (!hit) return null;
-    // M-HEADER-FOOTER-3: every band hit records its page — the echo
-    // projections (caret/selection/toolbar/bubble) resolve THAT page.
+    // Every band hit records its page — the echo projections
+    // (caret/selection/toolbar/bubble) resolve THAT page.
     if (hit.band != null) bandPageRef.current = hit.pageIndex;
     const block = current.blocks.find((b) => b.id === hit.blockId);
-    // M-REFS: entry hits map to TRUE positions inside the container's
-    // real paragraphs (the sidecar bridge in blockOffsetToPmPos — the
-    // cell-map precedent); no unit mapping, no interception.
+    // Entry hits map to TRUE positions inside the container's
+    // paragraphs (the sidecar bridge in blockOffsetToPmPos).
     return block ? blockOffsetToPmPos(block, hit.offset) : null;
   }
 
@@ -1121,8 +1022,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       pending = null;
       const pos = pmPosAt(point);
       if (pos != null) {
-        // M-TABLES: a drag crossing a cell wall becomes a CELL
-        // selection (prosemirror-tables' drag rule, shell-side — the
+        // A drag crossing a cell wall becomes a CELL selection (the
         // painted surface owns the events; the hidden view never sees
         // the mouse). Same cell → the plain text selection.
         const anchorCell = editor ? cellPosAt(editor.state.doc, anchor) : null;
@@ -1159,10 +1059,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (e.button === 1) e.preventDefault();
   }
 
-  /** M-T4 — the image-at-click probe for the CONTEXTMENU arm: the
-   *  mousedown arm's image hit-test, spelled for the event that
-   *  survives menu dismissal. FRONT/in-flow images win; a behind float
-   *  only counts where no text line sits (the mousedown z-rules). */
+  /** The image-at-click probe for the CONTEXTMENU arm: the mousedown
+   *  arm's image hit-test, spelled for the event that survives menu
+   *  dismissal. FRONT/in-flow images win; a behind float only counts
+   *  where no text line sits. */
   function imageBlockAtClick(e: React.MouseEvent): number | null {
     const stack = stackRef.current;
     if (!stack || !layout) return null;
@@ -1216,18 +1116,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return null;
   }
 
-  /** M-T4 — the CONTEXTMENU arm of the right-click rule: the menu reads
-   *  the CLICK, never the stale selection. The mousedown arm
-   *  (handleMouseDown) resolves the click in the common case; this arm
-   *  covers the case its mousedown was CONSUMED — right-clicking
-   *  elsewhere while the menu is already open dismisses it and swallows
-   *  the mousedown, so the selection would stay wherever it was
-   *  ("selected an image, right-clicked in a table, still image
-   *  options"). The native contextmenu event still fires and reaches
-   *  the surface, BEFORE the menu trigger's own handler (DOM bubbling:
-   *  deeper first — base-ui's trigger then stopEvent's it), so the
+  /** The CONTEXTMENU arm of the right-click rule: the menu reads the
+   *  CLICK, never the stale selection — covers the case where the
+   *  mousedown was CONSUMED (menu already open, right-click
+   *  elsewhere); the native contextmenu event still fires, so the
    *  re-opened menu reads the click-resolved selection. Idempotent
-   *  with the mousedown arm (same rule, same coordinates). */
+   *  with the mousedown arm. */
   function handleContextMenu(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
     if (e.button !== 2) return;
@@ -1245,11 +1139,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
 
   /** #58 — the UNLINK flow (Word's edit-unlinks): double-clicking a
    *  LIVE band strip of an INHERITING section creates that section's
-   *  own header/footer — seeded with a copy of the inherited content —
-   *  instead of word-selecting into the doc default (whose edits would
-   *  restyle every section). An OVERRIDING section's strip dblclicks
-   *  normally (word-select in its own content). Uniform docs: normal
-   *  word-select everywhere (there is nothing to unlink). */
+   *  own header/footer seeded with the inherited content; an
+   *  OVERRIDING section's strip dblclicks normally (uniform docs have
+   *  nothing to unlink). */
   function handleBandDoubleClick(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
     const stack = stackRef.current;
@@ -1258,9 +1150,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const sr = stack.getBoundingClientRect();
     const localX = (e.clientX - sr.left) / z;
     const localY = (e.clientY - sr.top) / z;
-    // #101 — SPLIT VIEW: the POINT hit (the grid's row/column law) —
-    // a y spans two pages side by side; the band dblclick belongs to
-    // the page the user double-clicked, not the row's last member.
+    // #101 — the POINT hit (the grid's row/column law): the dblclick
+    // belongs to the page the user double-clicked, not the row's last
+    // member.
     const pageIndex = pageIndexAtPoint(
       layout.pageGrid,
       layout.result.pages,
@@ -1295,14 +1187,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
 
   function handleMouseDown(e: React.MouseEvent) {
     if (!editor || adapterError || !layout) return;
-    // Middle button: paste-on-middle-click (settings > General >
-    // Behavior). The webview's DEFAULT middle-click action on Linux
-    // pastes the X11 primary selection into the focused editable
-    // (WebKitGTK), so the press is preventDefaulted UNCONDITIONALLY —
-    // the toggle is the single source of truth. Off = nothing at all
-    // (native paste and autoscroll both die here); on = caret to the
-    // click point, then the system clipboard replays through PM's own
-    // paste handler.
+    // Middle button (settings > General > Behavior): the webview's
+    // DEFAULT middle-click pastes the X11 primary selection, so the
+    // press is preventDefaulted UNCONDITIONALLY. Off = nothing; on =
+    // caret to the click point, then the system clipboard replays
+    // through PM's paste handler.
     if (e.button === 1) {
       e.preventDefault();
       if (!useConfigStore.getState().config.editor.pasteOnMiddleClick) return;
@@ -1319,13 +1208,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     // native caret would scroll the App container to a nonsense spot.
     (editor.view.dom as HTMLElement).focus({ preventScroll: true });
 
-    // M-IMAGES-2: the Z-AWARE image hit-test. z is PAINT ORDER and the
-    // click rule mirrors it: 'front' floats (+ in-flow images — they
-    // never overlap text) WIN, checked first, topmost = last placed[];
-    // 'behind' floats LOSE to text — a click inside a line's rect goes
-    // to the text; a behind float is only selectable in text-empty
-    // space. Images are not in lines[], so the text hitTest below
-    // never sees them.
+    // The Z-AWARE image hit-test (z is PAINT ORDER): 'front' floats +
+    // in-flow images win, topmost = last placed[], checked first;
+    // 'behind' floats lose to text — only selectable in text-empty
+    // space. Images are not in lines[], so the text hitTest never
+    // sees them.
     const stack = stackRef.current;
     let behindCandidate: string | null = null;
     if (stack && layout.result.placed.length > 0) {
@@ -1344,11 +1231,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         inPageX <= p.rect.x + p.rect.width &&
         inPageY >= p.rect.y &&
         inPageY <= p.rect.y + p.rect.height;
-      // 1. FRONT + in-flow (topmost wins): IMAGES and EQUATIONS — the
-      //    tableCell rects are paint geometry; a click inside a cell
-      //    routes to the text hitTest (the caret/cell rules).
-      //    Equations are in-flow atomics (no z, never behind) — the
-      //    same group by construction.
+      // 1. FRONT + in-flow (topmost wins): images and equations
+      //    (equations are in-flow atomics, no z). tableCell rects are
+      //    paint geometry — their clicks route to the text hitTest.
       for (let i = layout.result.placed.length - 1; i >= 0; i--) {
         const p = layout.result.placed[i]!;
         if (
@@ -1388,14 +1273,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       }
     }
 
-    // M-REFS — THE CONTAINER-MODEL CLICK: entries are REAL text — a
-    // plain click/caret/drag flows PM's NATIVE path (the generic hit
-    // resolves to true positions INSIDE entry paragraphs through the
-    // sidecar bridge; nothing is intercepted). The ONE custom arm:
-    // Ctrl/Cmd+click ANYWHERE in a row navigates (M-REFS-11: the rows
-    // are ALWAYS hyperlinking invisibly — the semantic link mark is
-    // the model data the future exporters map; the editor's follow is
-    // the modifier click, Word's field convention).
+    // THE CONTAINER-MODEL CLICK: entries are REAL text — a plain
+    // click flows PM's NATIVE path. The ONE custom arm: Ctrl/Cmd+click
+    // ANYWHERE in a row navigates (the rows are always invisibly
+    // hyperlinking; the editor's follow is the modifier click).
     if (stack && (e.ctrlKey || e.metaKey)) {
       const rz = useConfigStore.getState().config.editor.zoomLevel / 100;
       const rs = stack.getBoundingClientRect();
@@ -1429,14 +1310,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         return;
       }
     }
-    // M-IMAGES-2.1 — the INLINE object's click: hitTest resolves the
-    // token to its PM position (blockOffsetToPmPos — the object token
-    // occupies exactly the position BEFORE the node); nodeAt(pos) IS
-    // the inline image when the click landed inside the object's
-    // painted rect. NodeSelection, the same treatment a block image
-    // gets: the toolbar swaps to the image group (Wrap/Alt/Radius
-    // reachable), Backspace deletes. Clicking the TEXT around it
-    // resolves inside a text node → nodeAt is undefined → text path.
+    // The INLINE object's click: hitTest resolves the token to its PM
+    // position; nodeAt(pos) IS the inline image when the click landed
+    // inside its painted rect → NodeSelection (the block image
+    // treatment). Clicking surrounding TEXT resolves inside a text
+    // node → the text path.
     if (pos != null) {
       const nodeAtPos = editor.state.doc.nodeAt(pos);
       if (nodeAtPos?.type.name === 'inlineImage') {
@@ -1446,13 +1324,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     }
     if (pos == null) return;
 
-    // M-T4 — THE RIGHT-CLICK RULE (Word), the ONE shared spelling
-    // (rightClickSelection.ts): the image hit-test above has already
-    // returned for image clicks, so this is the keep-inside /
-    // collapse-outside arm — the context menu reads the selection AT
-    // THE CLICK. The old path ran the click-count logic for every
-    // button, so a right-click after recent lefts landed on count 2/3
-    // and silently re-selected the whole WORD or PARAGRAPH.
+    // THE RIGHT-CLICK RULE (Word, the one shared spelling in
+    // rightClickSelection.ts): the image arm above already returned,
+    // so this is keep-inside / collapse-outside — the menu reads the
+    // selection AT THE CLICK.
     if (e.button === 2) {
       applyRightClickSelection(editor, pos);
       return;
@@ -1477,10 +1352,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       return;
     }
 
-    // Ctrl/Cmd+click on a painted link opens it via the OS
-    // (the committed legacy rule — plain click places the caret, the
-    // bubble's Open button stays). Opened through the same plugin-opener
-    // the bubble uses.
+    // Ctrl/Cmd+click on a painted link opens it via the OS (plain
+    // click places the caret; the bubble's Open button stays).
     if (e.ctrlKey || e.metaKey) {
       const linkMark = editor.state.doc.resolve(pos).marks().find((m) => m.type.name === 'link');
       const href = linkMark?.attrs.href;
@@ -1497,9 +1370,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     } else {
       editor.commands.setTextSelection(pos);
       // GDocs-style: a plain single click on a flagged word opens the
-      // suggestion bubble. The caret still places and drag-select
-      // still starts (a drag makes the selection non-empty, which
-      // dismisses the bubble again — only a real click keeps it).
+      // suggestion bubble; drag-select dismisses it again (only a real
+      // click keeps it).
       const error = spellErrorAt(editor.state, pos);
       if (error) setSpellBubble(error);
       startDrag(pos);
@@ -1507,19 +1379,14 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   }
 
   // PM-driven relayout (L3's only PM read: the MODEL, not the view's
-  // geometry). Also the font gate: the first layout must wait on
-  // document.fonts.ready — the engine's line cache never invalidates on
-  // metrics identity, so pre-font-load measurement would cache
-  // fallback-font widths for the whole session (see metrics.ts).
-  //
+  // geometry). Also the font gate: the first layout waits on
+  // document.fonts.ready — the engine's line cache never invalidates
+  // on metrics identity, so pre-font-load measurement would cache
+  // fallback-font widths for the session.
   // The caret-follow TRIGGER is PM's own intent flag —
-  // `transaction.scrolledIntoView` is set only by tr.scrollIntoView(),
-  // which PM's key/input handling sets on caret motion; layout churn
-  // alone dispatches no flagged transaction, so churn never scrolls.
-  // The FOLLOW runs synchronously with the dispatch, AFTER the layout
-  // it must read is fresh: a doc-changing transaction follows at the
-  // end of 'update' (relayout ran first), a selection-only one at the
-  // end of 'selectionUpdate'.
+  // transaction.scrolledIntoView is set only by tr.scrollIntoView();
+  // layout churn alone never scrolls. The FOLLOW runs synchronously
+  // with the dispatch, AFTER the layout it must read is fresh.
   useEffect(() => {
     if (!editor) return;
 
@@ -1568,10 +1435,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       // Typing invalidates the anchored word (the recheck that
       // follows will re-flag whatever survives the edit).
       setSpellBubble(null);
-      // Synchronous-first — adapter+engine+commit run in
-      // the input event's own task; text paints in the input's frame.
-      // Over SYNC_BUDGET_PER_FRAME per ~16ms window, the coalescer
-      // (rAF) takes over as the pressure valve.
+      // Synchronous-first — adapter+engine+commit run in the input
+      // event's own task; over SYNC_BUDGET_PER_FRAME per ~16ms window,
+      // the rAF coalescer takes over as the pressure valve.
       trySyncOrDeferRef.current();
       followPendingScroll();
     };
@@ -1586,12 +1452,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     editor.on('update', onDocUpdate);
     editor.on('selectionUpdate', onSelectionUpdate);
 
-    // Font gate: custom fonts must be LOADED before the first measure —
-    // the engine's line cache never invalidates on metrics identity, so
-    // pre-load measurement would cache fallback-font widths for the whole
-    // session. document.fonts.load forces the configured base font's
-    // load; mark-level families are covered by fonts.ready (the hidden
-    // view renders them, triggering their loads).
+    // Font gate: custom fonts must be LOADED before the first measure
+    // (pre-load measurement would cache fallback-font widths for the
+    // session — the line cache never invalidates on metrics identity).
+    // document.fonts.load forces the base font; mark-level families
+    // are covered by fonts.ready.
     let cancelled = false;
     void (async () => {
       if (typeof document !== 'undefined' && document.fonts) {
@@ -1627,25 +1492,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     };
   }, [editor]);
 
-  // Store-driven reflow (A4 -> Letter, default font changes, registry
-  // epoch bumps) relayouts WITHOUT remounting the view: the engine
-  // stays warm, its opts-invalidation path handles the geometry
-  // change, the adapter's epoch-tagged identity cache handles the
-  // registry change.
+  // Store-driven reflow (page size, default font, registry epoch)
+  // relayouts WITHOUT remounting: the engine stays warm; the adapter's
+  // epoch-tagged cache handles the registry change.
   useEffect(() => {
     relayoutRef.current();
-    // M-HEADER-FOOTER-2: showHeadersFooters rides the LAYOUT (the band
-    // strip above) — its flips relayout through this same warm path.
-    // #101 — SPLIT VIEW: pageColumns rides too — the frame adjustment
-    // (the column offsets folded into contentBox.x) lives at the
-    // commit, so a columns flip MUST re-commit or the overlays/caret
-    // keep the previous arrangement's frames.
+    // showHeadersFooters rides the LAYOUT — flips relayout through
+    // this warm path. #101 — pageColumns rides too: the frame
+    // adjustment lives at the commit, so a flip MUST re-commit.
   }, [pageSetup, defaultFontFamily, defaultFontSize, styleEpoch, showHeadersFooters, pageColumns]);
 
-  // M-HEADER-FOOTER-2: settings writes (differentFirstPage) relayout
-  // through the same warm path — the flag feeds the adapter's band
-  // options, read fresh per call (L4, inside relayout itself).
-  // Content edits ride the standard PM 'update' relayout.
+  // differentFirstPage writes relayout through the same warm path —
+  // the flag feeds the adapter's band options, read per call (L4).
   useEffect(() => {
     let lastHf: unknown = useDocumentStore.getState().headerFooter;
     const unsubDoc = useDocumentStore.subscribe((s) => {
@@ -1659,27 +1517,22 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     };
   }, []);
 
-  // #COMMENTS — the comment store is the projection's trigger for
-  // every NON-transaction change (active thread, anchored membership,
-  // thread edits): the transaction seams (relayout for geometry/doc,
-  // onTransaction for selection) can't see store-only writes like
-  // deleteThread's active reset. The projection's skip law keeps the
-  // redundant calls free (identity compare on ranges + active id).
+  // The comment store is the projection's trigger for every
+  // NON-transaction change (active thread, membership, edits) — the
+  // transaction seams can't see store-only writes like deleteThread's
+  // active reset. The skip law keeps redundant calls free.
   useEffect(() => {
     const unsub = useCommentStore.subscribe(() => commentProjectionRef.current());
     return unsub;
   }, []);
 
-  // M-FONTS: a font install/uninstall changes the RULER mid-session.
-  // The font registry's epoch bump means a FontFace was registered or
-  // removed — visible docs must re-measure NOW (live, not
-  // next-launch). Two things happen, in order:
+  // A font install/uninstall changes the RULER mid-session: visible
+  // docs must re-measure NOW. Two things happen, in order:
   const firstFontEpochRun = useRef(true);
   useEffect(() => {
-    // Mount run is a no-op: at cold-boot the engine is fresh anyway
-    // (a relaunch's loadFromDisk re-registrations land before the
-    // first measure — the gate covers them). Only LATER bumps (an
-    // install/uninstall during this session) take the recreate path.
+    // Mount run is a no-op: at cold-boot the engine is fresh anyway.
+    // Only LATER bumps (an install/uninstall during this session)
+    // take the recreate path.
     if (firstFontEpochRun.current) {
       firstFontEpochRun.current = false;
       return;
@@ -1687,26 +1540,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     let cancelled = false;
     void (async () => {
       // 1. RE-GATE: every registered face is loaded before any
-      //    measure — the M5.6 law, now also the re-gate (fonts
-      //    re-gate before first layout after any install).
+      //    measure.
       if (typeof document !== 'undefined' && document.fonts) {
         await document.fonts.ready;
       }
       if (cancelled) return;
-      // 2. ENGINE RECREATE — the stale-cache remedy. The engine
-      //    drops its line caches only when opts/baseStyle HASHES
-      //    change (engine layout.ts); a doc that referenced 'MyFont'
-      //    BEFORE the font existed measured fallback widths, and the
-      //    strings are identical pre/post install — so a plain
-      //    relayout would re-serve those fallback-width LineBoxes
-      //    forever. Recreating the engine starts the cache cold.
-      //    WHY ADAPTER REUSE IS SAFE: the pairing law (metrics.ts)
-      //    forbids a WARM metrics paired with a CACHED engine — the
-      //    reverse (a warm ruler with a COLD cache) is exactly the
-      //    legal direction. The adapter's Blocks/runs are unchanged
-      //    by a font install (only the ruler changed), so reusing
-      //    them is legal; the fresh engine re-measures them with the
-      //    now-real font.
+      // 2. ENGINE RECREATE — the stale-cache remedy. The engine drops
+      //    its line caches only when opts/baseStyle hashes change; a
+      //    doc that referenced 'MyFont' BEFORE the font existed
+      //    measured fallback widths, and the strings are identical
+      //    pre/post install — a plain relayout would re-serve those
+      //    LineBoxes forever. The pairing law forbids warm metrics +
+      //    cached engine; warm ruler + cold cache is the legal
+      //    direction, and the adapter's Blocks are unchanged by a
+      //    font install.
       engineRef.current = createLayoutEngine({
         metrics: metricsRef.current!,
         equationMetrics: equationMetricsRef.current!,
@@ -1718,11 +1565,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     };
   }, [fontEpoch]);
 
-  // M-EQ: KaTeX font arrival — an equation measured before the math
-  // fonts land caches fallback-font dims in the WALK cache (placed
-  // rects), the identical hazard the M-FONTS recreate cures for text.
-  // loadingdone already means the batch finished — no re-gate; the
-  // remedy is the same cold-cache recreate + relayout.
+  // KaTeX font arrival — an equation measured before the math fonts
+  // land caches fallback dims in the WALK cache; the remedy is the
+  // same cold-cache recreate + relayout (no re-gate: loadingdone
+  // means the batch finished).
   const katexEpochRef = useRef(katexFontEpochNow());
   useEffect(
     () =>
@@ -1739,10 +1585,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     [],
   );
 
-  // One IntersectionObserver over all sheets. Visible
-  // (±1 buffer) pages mount canvases; the sheet with the highest
-  // intersection ratio is the status bar's current page — viewport
-  // based, not caret based.
+  // One IntersectionObserver over all sheets. Visible (±1 buffer)
+  // pages mount canvases; the highest-ratio sheet is the status
+  // bar's current page — viewport based, not caret based.
   useEffect(() => {
     const IO = (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
     if (!IO) return;
@@ -1785,26 +1630,20 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     if (el && ioRef.current) ioRef.current.observe(el);
   }, []);
 
-  // Synchronous-first. The relayout (adapter+engine+commit,
-  // 1-3.5ms) runs INLINE with the input event — text paints in the
-  // input's own frame (the GDocs model). The rAF coalescer survives as
-  // a pressure valve: after SYNC_BUDGET_PER_FRAME sync relayouts in
-  // one ~16ms window (script/IME batch), further updates defer and
-  // coalesce. Measured: normal typing is 1
-  // keystroke per frame, well under budget.
-  // Budget = Infinity — process ALL keys in their input
-  // events, paint once per frame (React batches setLayout calls from
-  // N input events into one render). Stagger dies by construction.
-  const SYNC_BUDGET_PER_FRAME = Infinity;
+  // Synchronous-first: the relayout runs INLINE with the input event
+  // — text paints in the input's own frame (the GDocs model). The rAF
+  // coalescer survives as a pressure valve: over
+  // SYNC_BUDGET_PER_FRAME sync relayouts in one ~16ms window, further
+  // updates defer and coalesce. Budget = Infinity — process ALL keys
+  // in their input events, paint once per frame (React batches the
+  // setLayout calls into one render).
   const syncBudgetRef = useRef({ count: 0, frameStart: 0 });
   const rafRef = useRef<number | null>(null);
-  /** M-REFS-10 — THE ADOPTION NUDGE: when the measured leader counts
-   *  differ from the model's spans, dispatch the generator's FORCED
-   *  pass (debounced — pagination churn coalesces into one write).
-   *  The diff walk reads the PM doc's refLeader spans per row and
-   *  compares with the counts store; equal ⇒ no dispatch (the
-   *  fixpoint). Debounce 300ms: faster typing re-measures before the
-   *  write lands (one adoption per settle, the search-store rhythm). */
+  /** THE ADOPTION NUDGE: when the measured leader counts differ
+   *  from the model's spans, dispatch the generator's FORCED pass
+   *  (debounced — pagination churn coalesces into one write); equal ⇒
+   *  no dispatch (the fixpoint). Debounce 300ms — one adoption per
+   *  settle. */
   const adoptionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleLeaderAdoption = useCallback(() => {
     const ed = editor;
@@ -1889,19 +1728,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   trySyncOrDeferRef.current = trySyncOrDeferRelayout;
 
   // Group lines per page per block, document order — MEMOIZED on the
-  // LayoutResult reference: a stable result yields stable
-  // group objects, so memoized BlockCanvases skip re-render entirely on
-  // unrelated state changes; a relayout (new result) rebuilds groups and
-  // only blocks with new LineBox references repaint (the engine shares
-  // frozen LineBoxes zero-copy across results). Computed before the
-  // early returns — hooks must be unconditional.
+  // LayoutResult reference: a stable result yields stable group
+  // objects (memoized BlockCanvases skip re-render on unrelated state
+  // changes); a relayout rebuilds groups and only changed blocks
+  // repaint (the engine shares frozen LineBoxes zero-copy). Computed
+  // before the early returns — hooks must be unconditional.
   const groupsByPage = useMemo(() => {
-    // #74 COLUMNS — the group key is blockId + COLUMN: a block whose
-    // fragment flows from column 1 into column 2 gets ONE canvas PER
-    // COLUMN (a single canvas would be non-monotonic in y — the
-    // column-2 lines restart at the slot top — and duplicate the React
-    // key). Within a column the fragment stays y-monotonic; the
-    // column index rides the group (the canvas's columnFrame).
+    // #74 — the group key is blockId + COLUMN: a block flowing
+    // between columns gets ONE canvas PER COLUMN (a single canvas
+    // would be non-monotonic in y); within a column the fragment
+    // stays y-monotonic, and the column index rides the group.
     const map = new Map<number, { blockId: string; column?: number; lines: LineBox[] }[]>();
     if (!layout) return map;
     for (const line of layout.result.lines) {
@@ -1926,12 +1762,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return map;
   }, [layout]);
 
-  // M-T3 — the header-row pins: ONE per table, at the table's first
-  // band (the page where that band lands). Pinned state reads the PM
-  // doc (the table's first row's cells are all tableHeader); the y
-  // comes from the engine's placed rects (anchor row 0, col 0 — the
-  // band slice's top). The gutter is the user's spec'd home ("the
-  // gutter is where the lucide icon pin should be").
+  // The header-row pins: ONE per table, at the table's first band.
+  // Pinned state reads the PM doc (first row all tableHeader); the y
+  // comes from the engine's placed rects (anchor row 0, col 0).
   const headerPins = useMemo<TableHeaderPin[]>(() => {
     if (!layout || !editor) return [];
     const out: TableHeaderPin[] = [];
@@ -1955,10 +1788,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return out;
   }, [layout, editor]);
 
-  /** M-REFS — the gutter TYPE BADGES: one per reference table, at its
-   * first line overall (a fragmenting table badges only its true
-   * start). Kind read from the PM node (the model fact), geometry from
-   * the engine's LineBoxes. */
+  /** The gutter TYPE BADGES: one per reference table, at its first
+   *  line overall (a fragmenting table badges only its true start).
+   *  Kind from the PM node, geometry from the engine's LineBoxes. */
   const referenceBadges = useMemo<ReferenceTableBadge[]>(() => {
     if (!layout || !editor) return [];
     const out: ReferenceTableBadge[] = [];
@@ -1979,10 +1811,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return out;
   }, [layout, editor]);
 
-  /** M-REFS — the INDEX BOOKMARKS (GDocs): one bookmark per LINE that
-   * carries an indexEntry mark — the marked terms listed in the
-   * tooltip. Doc walk → block-offset → line lookup (the search
-   * projection's math, gutter-local). */
+  /** The INDEX BOOKMARKS (GDocs): one bookmark per LINE carrying an
+   *  indexEntry mark — the marked terms listed in the tooltip (the
+   *  search projection's math, gutter-local). */
   const indexBookmarks = useMemo<IndexLineMark[]>(() => {
     if (!layout || !editor) return [];
     const marks: Array<{ from: number; to: number; term: string }> = [];
@@ -2019,12 +1850,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     return out;
   }, [layout, editor]);
 
-  /** M-GUTTER — CONTEXTUAL REPLACEMENT: the per-page set of line y-
-   *  offsets whose NUMBER yields its slot to a contextual gutter
-   *  element (a header pin, a ref-table badge, an index bookmark).
-   *  The y is the shared key between the icon layers and the number
-   *  gutter (lines stack — y is unique per page except table lanes,
-   *  where a covered number pair is an acceptable v1 edge). */
+  /** CONTEXTUAL REPLACEMENT: the per-page set of line y-offsets
+   *  whose NUMBER yields its slot to a contextual gutter element (a
+   *  header pin, a ref badge, an index bookmark). The y is the shared
+   *  key between the icon layers and the number gutter. */
   const gutterReplaced = useMemo(() => {
     const byPage = new Map<number, Set<number>>();
     const add = (pageIndex: number, y: number) => {
@@ -2084,11 +1913,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     };
   }, [editor]);
 
-  // IME composition preview. The one sanctioned L3
-  // exception: composition text is INPUT STATE read from events on the
-  // hidden view, never geometry — PM keeps the in-progress string out
-  // of the doc model until compositionend, so the engine can't paint
-  // it. The preview is positioned purely from engine rects.
+  // IME composition preview — the one sanctioned L3 exception:
+  // composition text is INPUT STATE read from events on the hidden
+  // view, never geometry (PM keeps it out of the doc model until
+  // compositionend); the preview is positioned from engine rects.
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom as HTMLElement;
@@ -2130,11 +1958,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   const linkBubbleRef = useRef<HTMLDivElement>(null);
   const linkBubble = useLinkBubble(editor, linkBubbleRef, linkCoordsFor);
 
-  // M-EQ: the equation bubble's painted-rect anchor (L3 — the hidden
-  // view's geometry must never position it): the placed[] rect for the
-  // equation at `pos`, converted to viewport coords BELOW the rect,
-  // horizontally centered (the same half-bubble offset the pageless
-  // DOM anchor applies).
+  // The equation bubble's painted-rect anchor (L3): the placed[] rect
+  // for the equation at `pos`, converted to viewport coords BELOW the
+  // rect, horizontally centered (the pageless DOM anchor's offset).
   const equationCoordsFor = useCallback((pos: number) => {
     const current = layoutRef.current;
     const stack = stackRef.current;
@@ -2164,11 +1990,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
 
   if (!editor) return null;
 
-  // #58 — the SECTION→ID map (break order = section order): the band
-  // slots resolve a page's section tag to enable/focus the right
-  // container. A plain render-time walk over the immutable PM state
-  // (the rulerModel precedent — NO hook: this sits after the early
-  // returns; the derivation is cheap, breaks are top-level atoms).
+  // #58 — the SECTION→ID map (break order = section order) for the
+  // band slots. A plain render-time walk over immutable PM state (NO
+  // hook: this sits after the early returns; the derivation is cheap).
   const sectionIds: (string | null)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -2178,20 +2002,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   });
   const sectionIdOfPage = (sectionIndex: number): string | null => {
     // The FINAL section has no break node — its band-override identity
-    // is the reserved id (the store law's spelling). SECTIONED docs
-    // only: a uniform doc's pages stay untagged (they ARE the doc
-    // default).
+    // is the reserved id. SECTIONED docs only: a uniform doc's pages
+    // stay untagged (they ARE the doc default).
     if (sectionIds.length === 0) return null;
     return sectionIds[sectionIndex] ?? (sectionIndex === sectionIds.length ? FINAL_SECTION_ID : null);
   };
   // #58 — the per-section PAGE BACKGROUND: each break's setup carries
-  // its section's color; UNSET inherits the doc default (the store's
-  // pageColor — the two-level band model).
+  // its section's color; UNSET inherits the doc default.
   // #48 — the PER-PAGE LAYER rides on top: the positional pageStyles
-  // map (page number → background; the PageSetup comment block in
-  // pageSetup.ts is the ruling — an entry for a page that no longer
-  // exists is inert, the chain just falls through). Print/PDF honor
-  // the SAME chain (buildDocument resolves it per printed page).
+  // map (an entry for a page that no longer exists is inert).
+  // Print/PDF honor the SAME chain (buildDocument resolves it per
+  // printed page).
   const sectionColors: (string | undefined)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -2204,12 +2025,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     sectionColors[sectionIndex] ??
     (pageSetup.pageColor || undefined);
 
-  // #WATERMARK — the per-section → doc chain (the pageColor twin, no
-  // positional layer — watermarks are section/doc-level by the AC).
-  // Each break's setup carries its section's watermark wholesale
-  // (PageSetup-riding); UNSET inherits the doc default (the store's).
-  // Print/PDF honor the SAME chain (buildDocument resolves it per
-  // printed page).
+  // The per-section → doc watermark chain (the pageColor twin, no
+  // positional layer — watermarks are section/doc-level): each break's
+  // setup carries its section's watermark; UNSET inherits the doc
+  // default; print/PDF honor the SAME chain.
   const sectionWatermarks: (WatermarkSettings | undefined)[] = [];
   editor.state.doc.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -2261,20 +2080,16 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
 
   const { result, blocks } = layout;
   // #58 — pageW/pageH are gone (pages differ per section); every
-  // consumer reads its OWN page's geometry or the cumulative table.
-  // The rulers keep the desk's FIRST page (their section-aware
-  // follow-up rides Phase 2's band work).
+  // consumer reads its OWN page's geometry or the cumulative table
+  // (the rulers keep the desk's FIRST page).
   const firstGeometry = result.pages[0];
   const gap = pageSetup.pageGap;
   const z = zoomLevel / 100;
-  // M-RULER: the caret block's indent attrs — derived straight from the
-  // immutable PM state at render time (selection and doc changes always
-  // re-render through the projection setStates, so this never goes
-  // stale; the derivation itself is cheap — one node(1) read). null
-  // renders the margins-only ruler (headings/codeBlocks/lists).
-  // M-HEADER-FOOTER-2: ONE editor — band content rides the same PM
-  // state, so the ruler rules it identically (tab stops land in band
-  // paragraphs while the selection sits there).
+  // The caret block's indent attrs — derived from immutable PM state
+  // at render time (selection/doc changes re-render through the
+  // projections, so it never goes stale). null renders the
+  // margins-only ruler. Band content rides the same PM state, so the
+  // ruler rules it identically.
   const rulerModel = editor && layout ? deriveRulerModel(editor.state) : null;
   // #74 COLUMNS — the caret's COLUMN frame for the ruler: the caret
   // block's first line's slot on its own page (the engine's grid
@@ -2304,39 +2119,32 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const line = lineForOffset(blockLines, head - block.from) ?? blockLines[0];
     return (line?.pageIndex ?? 0) % 2;
   })();
-  // #101 — SPLIT VIEW: the rulers read the PAGE-LOCAL frame — the
-  // fold's exact inverse (the commit grid's left). The folded
-  // contentBox.x is the STACK frame's origin; a ruler strip mounted
-  // over its own column must anchor its margin handles, rails, two-tone
-  // band, and tab stops to the page's OWN margins (the strip is already
-  // positioned at the column's left). columns 1 = the identity.
+  // #101 — the rulers read the PAGE-LOCAL frame — the fold's exact
+  // inverse (the commit grid's left): a strip mounted over its own
+  // column anchors to the page's OWN margins. columns 1 = the
+  // identity.
   const localPageGeometry = (p: PageGeometry): PageGeometry => ({
     ...p,
     contentBox: { ...p.contentBox, x: p.contentBox.x - layout.pageGrid.lefts[p.index]! },
   });
-  // #101 — SPLIT VIEW: the per-column ruler sets. Row-major pairing:
-  // column c's pages are the indices ≡ c (mod columns); their scales
-  // read the grid's ROW tops (row-mates share a top), never the y-only
-  // walk. columns 1 ≡ the full set with the internal pageTops (legacy).
+  // #101 — the per-column ruler sets: column c's pages are the
+  // indices ≡ c (mod columns); their scales read the grid's ROW tops
+  // (row-mates share a top). columns 1 ≡ the full set (legacy).
   const splitRulers = pageColumns === 2 && result.pages.length > 1;
   const columnPages = (c: number) => result.pages.filter((_, i) => i % 2 === c);
   const columnTops = (c: number) => columnPages(c).map((p) => pageGrid.tops[p.index]!);
-  // #58 — the stack's cumulative arithmetic (mixed page sizes): the
-  // sheet tops, the max width, the total height — one helper, shared
-  // with the hit-testers and the overlays.
-  // #101 — SPLIT VIEW: the column-aware grid (the desk arrangement;
-  // 1 = the classic stack). The tops table keeps the name (every
-  // consumer below reads pageTopTable[page.index]).
+  // #58 — the stack's cumulative arithmetic (mixed sizes), shared
+  // with the hit-testers and overlays. #101 — the column-aware grid
+  // (1 = the classic stack); the tops table keeps the name.
   const pageGrid = pageGridLayout(result.pages, gap, pageColumns);
   const pageTopTable = pageGrid.tops;
   const pageLeftTable = pageGrid.lefts;
   const stackW = pageGrid.size.width;
   const stackH = pageGrid.size.height;
   const rootRect = rootRef.current?.getBoundingClientRect();
-  // The spell bubble's anchor: the flagged word's painted text extent
-  // (stack-local pre-zoom) → viewport (the transform's scale applied —
-  // the bubble is chrome rendered at 100%, the toolbar law). Recomputed
-  // every render, so scrolls/zooms re-anchor it for free.
+  // The spell bubble's anchor: the flagged word's painted extent →
+  // viewport (the bubble is chrome rendered at 100%). Recomputed every
+  // render, so scrolls/zooms re-anchor it for free.
   const spellBubbleAnchor = (() => {
     if (!spellBubble || !layout) return null;
     const exts = textRangeTextExtents(
@@ -2355,19 +2163,17 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
     const sr = stack.getBoundingClientRect();
     return { left: sr.left + bounds.left * z, top: sr.top + bounds.bottom * z + 4 };
   })();
-  // M-LINENUMS: numbers are a pure function of the CURRENT layout —
-  // recomputed every render, so a mid-document edit re-numbers in the
-  // same commit (the no-debounce law; never memoized).
+  // Numbers are a pure function of the CURRENT layout — recomputed
+  // every render, so a mid-document edit re-numbers in the same
+  // commit (never memoized).
   const lnNumbers = lineNumbers?.enabled
     ? countLineNumbers(result.lines, lineNumbers.mode, lineNumbers.countBy ?? 1)
     : null;
 
   return (
-    // M-T4: the CONTEXTMENU arm lives on the ROOT (not the zoom
-    // wrapper) — deeper than the menu trigger (so it runs before
-    // base-ui's stopEvent), above every painted surface (so every
-    // real right-click bubbles through), and level with where the
-    // menu tests dispatch.
+    // The CONTEXTMENU arm lives on the ROOT (not the zoom wrapper) —
+    // deeper than the menu trigger (runs before base-ui's stopEvent),
+    // above every painted surface.
     <div
       className="relative"
       data-testid="paginated-root"
@@ -2375,20 +2181,18 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
       onContextMenu={handleContextMenu}
     >
       <HiddenInputView editor={editor} />
-      {/* M-RULER Phase 5: the vertical ruler — a wrapper-FIXED viewport
-          column (the background spans the container at every scroll
-          position) whose SCALE translates with the desk's scroll:
-          page-attached ticks, Word's fixed-bar/moving-scale model. */}
+      {/* The vertical ruler — a wrapper-FIXED viewport column whose
+          SCALE translates with the desk's scroll: page-attached
+          ticks, Word's fixed-bar/moving-scale model. */}
       {showVerticalRuler &&
         deskWrapper &&
         editor &&
         createPortal(
           splitRulers ? (
             <>
-              {/* The LEFT edge rules the LEFT column; the RIGHT edge the
-                  right — each paints its own pages' scales off the grid's
-                  row tops (row-mates share a top; the y-only walk would
-                  double-paint the rows). */}
+              {/* The LEFT edge rules the LEFT column; the RIGHT edge
+                  the right — each paints its own pages' scales off the
+                  grid's row tops (the y-only walk would double-paint). */}
               <VerticalRuler
                 pages={columnPages(0)}
                 tops={columnTops(0)}
@@ -2409,13 +2213,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           ),
           deskWrapper,
         )}
-      {/* Explicit outer size = natural stack dimensions x zoom, so scroll
-          extents are correct BY CONSTRUCTION; the inner stack transform
-          scales; every painted child lives inside the transform; NOTHING
-          compensates per-element for zoom. Top-left origin: the wrapper
-          is exactly stack*z wide, so the scaled stack fills it exactly.
-          No overflow:hidden — sheet shadows bleed, and box-shadows
-          never create scrollable overflow. */}
+      {/* Explicit outer size = stack × zoom, so scroll extents are
+          correct BY CONSTRUCTION; the inner transform scales; nothing
+          compensates per-element. No overflow:hidden — sheet shadows
+          bleed, and box-shadows never create scrollable overflow. */}
       <div
         data-testid="paginated-zoom-wrapper"
         className="cursor-text"
@@ -2442,10 +2243,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
             transformOrigin: 'top left',
           }}
         >
-          {/* M-GUTTER: the shared tooltip provider for page-mounted
-              chrome (header pins, ref-table badges, index bookmarks)
-              — the popups portal to body, so zoom never scales them
-              and the stack's overflow never clips them. */}
+          {/* The shared tooltip provider for page-mounted chrome
+              (pins, badges, bookmarks) — the popups portal to body,
+              so zoom never scales them and overflow never clips. */}
           <TooltipProvider delay={200}>
           {result.pages.map((page) => {
             const pageGroups = groupsByPage.get(page.index) ?? [];
@@ -2492,10 +2292,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                       baseFontFamily={defaultFontFamily}
                     />
                   )}
-                {/* M-IMAGES-2 PAINT ORDER: 'behind' floats mount (and
-                    paint) BEFORE the text tracks; 'front' + in-flow
-                    mount AFTER (z is PAINT ORDER — the engine's
-                    field, split at the shell's two layer seams). */}
+                {/* PAINT ORDER: 'behind' floats mount (and paint)
+                    BEFORE the text tracks; 'front' + in-flow mount
+                    AFTER (z is paint order). */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <ImageLayer
                     geometry={localPage}
@@ -2505,8 +2304,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     radii={imageRadii}
                   />
                 )}
-                {/* M-TABLES: cell fills/borders paint UNDER the text
-                    tracks (above the sheet + behind-floats). */}
+                {/* Cell fills/borders paint UNDER the text tracks. */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <TableCellLayer
                     geometry={localPage}
@@ -2527,9 +2325,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                       group.column != null ? page.columns?.[group.column] : undefined;
                     const frameLeft = slot ? slot.x : 0;
                     const frameWidth = slot ? slot.width : localPage.contentBox.width;
-                    // M-HEADER-FOOTER-2: band groups — muted ink unless
-                    // the selection sits in a band container (the
-                    // active-band signal, selection-driven).
+                    // Band groups — muted ink unless the selection
+                    // sits in a band container.
                     const bandWhich = group.lines[0].band;
                     return (
                       <BlockCanvas
@@ -2573,8 +2370,8 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                       />
                     );
                   })}
-                {/* M-TABLES: the column drag handles (above the text
-                    canvases for pointer reach). */}
+                {/* The column drag handles (above the text canvases
+                    for pointer reach). */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <TableResizeHandles
                     geometry={localPage}
@@ -2603,19 +2400,19 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                       <LineNumberGutter
                         contentBox={localPage.contentBox}
                         entries={entries}
-                        // M-GUTTER: contextual icons own these lines'
-                        // slots; their numbers hide.
+                        // Contextual icons own these lines' slots;
+                        // their numbers hide.
                         suppressed={gutterReplaced.get(page.index)}
                         fontFamily={gutterBase.fontFamily}
                         fontSize={gutterBase.fontSize}
                       />
                     ) : null;
                   })()}
-                {/* M-T3: the header-row pins (gutter chrome, click-to-toggle). */}
+                {/* The header-row pins (gutter chrome, click-to-toggle). */}
                 <TableHeaderPins geometry={localPage} pins={headerPins} onToggle={toggleTableHeader} />
-                {/* M-REFS: the collection badges (one per table, at its
-                    first line — click selects the block) + the index
-                    bookmarks (one per marked line, GDocs-style). */}
+                {/* The collection badges (one per table, at its first
+                    line — click selects the block) + the index
+                    bookmarks (one per marked line). */}
                 <ReferenceTableBadges
                   geometry={localPage}
                   badges={referenceBadges}
@@ -2650,10 +2447,9 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                   )}
                   radii={imageRadii}
                 />
-                {/* M-EQ: the equations — in-flow atomics, DOM overlay
-                    (KaTeX HTML cannot drawImage), pointer-through.
-                    Colors ride the paint-only map (the imageRadii
-                    precedent) + the doc-default text color. */}
+                {/* The equations — in-flow atomics, DOM overlay (KaTeX
+                    HTML cannot drawImage), pointer-through. Colors ride
+                    the paint-only map + the doc-default text color. */}
                 {(visiblePages === null || visiblePages.has(page.index)) && (
                   <EquationLayer
                     geometry={localPage}
@@ -2664,11 +2460,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                     defaultColor={docDefaultTextColor}
                   />
                 )}
-                {/* M-HEADER-FOOTER-2: the band CLICK SLOTS — dblclick
-                    targets where a region has no container. Band
-                    CONTENT is canvas paint (engine band lines —
-                    see the BlockCanvas muted pass), interaction is
-                    the ONE hidden view via hitTest's band-strip rule. */}
+                {/* The band CLICK SLOTS — dblclick targets where a
+                    region has no container. Band content is canvas
+                    paint; interaction is the hidden view via
+                    hitTest's band-strip rule. */}
                 <HeaderFooterSlots
                   pageIndex={page.index}
                   geometry={localPage}
@@ -2785,11 +2580,10 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
         />
       )}
 
-      {/* M-EQ: the equation editor — portaled to body + fixed + max z
-          INSIDE the component (escapes the scroll container's overflow
-          clip: a dragged bubble must never go under the ribbon). The
-          painted-rect anchor resolver is passed in; the bubble
-          re-derives it at render (fresh through scrolls/zoom). */}
+      {/* The equation editor — portaled to body + fixed + max z
+          (escapes the scroll container's overflow clip). The anchor
+          resolver is passed in; the bubble re-derives it at render
+          (fresh through scrolls/zoom). */}
       {equationState && (
         <EquationEditorBubble
           ref={equationBubbleRef}
@@ -2825,14 +2619,12 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
           onClose={() => setSpellBubble(null)}
         />
       )}
-      {/* M-RULER: the ruler bar portals OUT of the scroll flow into the
-          desk wrapper — static overlay chrome pinned to its top edge
-          (flush under the ribbon; show/hide reflows nothing). Geometry
-          comes from the engine's PageGeometry — the same facts the
-          pages below paint. #101 — SPLIT VIEW: ONE STRIP PER COLUMN —
-          the desk-wide chrome bar belongs to the first strip; the
-          second rides beside it (transparent, strip-local), each
-          ruling its own page's geometry. The caret's strip wears the
+      {/* The ruler bar portals OUT of the scroll flow into the desk
+          wrapper — static overlay chrome, flush under the ribbon;
+          geometry from the engine's PageGeometry. #101 — ONE STRIP
+          PER COLUMN: the desk-wide bar belongs to the first strip;
+          the second rides beside it (transparent, strip-local), each
+          ruling its own page's geometry; the caret's strip wears the
           model (Word's active-ruler law). */}
       {showHorizontalRuler &&
         deskWrapper &&

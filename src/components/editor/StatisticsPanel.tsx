@@ -19,19 +19,11 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from 'cn';
 
 /**
- * STATISTICS — the Review tab's mini dashboard, docked beside its
- * siblings. THE SHAPE: stat CARDS for the headline numbers (words,
- * reading time, characters, sentences, readability), then the
- * heading-delimited region list below — the lightweight, display-only
- * section concept (every heading starts a region; the Preamble is
- * everything before the first one).
- *
- * LIVENESS (the StatusBar pattern, M1 #10): useEditorState recomputes
- * the report on every transaction; a 300ms debounce commits it to
- * render state so typing stays smooth on large documents while the
- * dashboard still updates live while open. On-demand surface — it
- * computes nothing while closed (the editor selector only runs while
- * mounted-and-open).
+ * The Review tab's statistics dashboard: stat cards for the headline
+ * numbers, then the heading-delimited region list (every heading
+ * starts a region; the Preamble is everything before the first).
+ * useEditorState recomputes per transaction; a 300ms debounce commits
+ * to render state so typing stays smooth; nothing runs while closed.
  */
 export function StatisticsPanel() {
   const editor = useDocumentStore((s) => s.editor);
@@ -64,9 +56,8 @@ export function StatisticsPanel() {
   };
 
   const navigate = (pos: number) => {
-    // Select INSIDE the region's first block: `pos` sits before the
-    // node (resolving to the doc), so step in — unless the block is a
-    // leaf, which has no inside.
+    // Select INSIDE the region's first block: `pos` sits before the node,
+    // so step in — unless the block is a leaf (no inside).
     const nodeAfter = editor.state.doc.resolve(pos).nodeAfter;
     const target = nodeAfter && !nodeAfter.isLeaf ? pos + 1 : pos;
     editor.chain().focus().setTextSelection(target).scrollIntoView().run();
@@ -85,8 +76,7 @@ export function StatisticsPanel() {
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto p-3">
-        {/* The dashboard cards — the headline numbers, each with its
-            mark. Characters and Sentences both carry a sub line so the
+        {/* Cards: Characters and Sentences both carry a sub line so the
             pair renders at the same height. */}
         <div className="grid grid-cols-2 gap-2">
           <StatCard label="Words" value={total ? formatNumber(total.words) : '—'} testId="stat-words" icon={<WholeWord className="h-3 w-3" />} />
@@ -107,10 +97,8 @@ export function StatisticsPanel() {
           />
         </div>
 
-        {/* Readability — the document-wide score + its plain band, the
-            band colored on the easy→difficult gradient (green shades to
-            red) so positivity reads at a glance; the band TEXT carries
-            the meaning, color only reinforces it. */}
+        {/* Readability: score + band on the easy→difficult gradient —
+            the band TEXT carries the meaning, color only reinforces it. */}
         <div className="mt-2 rounded-lg border border-border bg-card p-2.5" data-testid="stat-readability">
           <div className="text-[11px] text-muted-foreground">Readability</div>
           {ease === null || grade === null ? (
@@ -130,7 +118,6 @@ export function StatisticsPanel() {
           )}
         </div>
 
-        {/* The region breakdown. */}
         <div className="mt-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sections</div>
         <div className="mt-1.5 flex-1 overflow-y-auto rounded-md border border-border" data-testid="stat-regions">
           {regions.length === 0 ? (

@@ -4,26 +4,13 @@ import { pageTops } from '@/lib/paginated/pageStack';
 import { lineColumnFrame } from '@/lib/paginated/positionMap';
 
 /**
- * #58 — the BREAK MARKS (the NPC layer): formatting-mark badges for the
- * page/section breaks, painted in the paginated view when
- * config.editor.showNonPrintingChars is on (the same toggle the
- * BlockCanvas's pilcrows/tabs ride — ONE switch, Word's ¶).
- *
- * THE PLACEMENT LAW: a break paints just above the first line of the
- * block it FORCES (the adapter's breakFacts sidecar — the following
- * block's id). A nextPage break's following block opens a page → the
- * badge sits at the top of THAT page (the break's visual effect is the
- * page edge); a continuous break's block flows on the same page → the
- * badge sits mid-flow, exactly where the sections join. #74 — a
- * columnBreak's badge anchors at the anchor line's COLUMN (the bar
- * spans the column's frame, not the content box).
- *
- * COORDINATES: stack-local px (the SelectionHighlights frame — the
- * cumulative page tops + each mark's page's own contentBox origin).
- *
- * VIEW-ONLY INK: this layer never prints — the print/PDF walks read
- * the engine's layout, not this sidecar (the paint law's twin: what
- * prints is what the walk emits; the marks are chrome).
+ * #58 — break badges for page/section breaks (shown when
+ * showNonPrintingChars is on). Each paints just above the first line of
+ * the block it FORCES (breakFacts sidecar): nextPage → the top of the
+ * page it opens, continuous → the sections' join, #74 columnBreak → the
+ * anchor line's COLUMN frame. Stack-local px (cumulative page tops +
+ * contentBox origin). Never prints — print/PDF walks read the engine's
+ * layout, not this sidecar.
  */
 
 export interface BreakFact {
@@ -54,8 +41,8 @@ export function BreakMarks({
   facts: readonly BreakFact[];
   result: LayoutResult;
   pageGap: number;
-  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top);
-   *  absent ≡ the legacy y-only walk (columns 1 — bit-identical). */
+  /** #101: the grid's ROW tops (row-mates share a top); absent ≡ the
+   *  legacy y-only walk (columns 1 — bit-identical). */
   tops?: number[];
 }) {
   if (facts.length === 0) return null;
@@ -69,8 +56,7 @@ export function BreakMarks({
     const page = result.pages[line.pageIndex];
     if (!page) continue;
     // #74 — the badge's bar spans the anchor line's COLUMN frame
-    // (single-column ≡ the content box — identical to the pre-columns
-    // badges).
+    // (single-column ≡ the content box).
     const frame = lineColumnFrame(page, line);
     marks.push({
       key: `${fact.kind}:${fact.pos}`,

@@ -5,8 +5,8 @@ import Strike from '@tiptap/extension-strike';
 import { TextAlign } from '@tiptap/extension-text-align';
 
 /**
- * Removes all default keyboard shortcuts for TipTap/ProseMirror. Application
- * shortcuts are configured by the custom-built shortcuts extensions.
+ * Removes all default keyboard shortcuts — application shortcuts are
+ * configured by the custom shortcuts extensions.
  */
 export const BoldNoShortcut = Bold.extend({ addKeyboardShortcuts() { return {}; } });
 export const ItalicNoShortcut = Italic.extend({ addKeyboardShortcuts() { return {}; } });

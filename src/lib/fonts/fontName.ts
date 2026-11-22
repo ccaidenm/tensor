@@ -1,14 +1,7 @@
 /**
- * M-FONTS-A. Minimal sfnt 'name'-table reader — the family name for an
- * uploaded .ttf/.otf, without a parsing dependency (no fontkit/
- * opentype.js in the tree — the receipt that motivated this file).
- *
- * Scope is deliberately tiny: find the 'name' table in the sfnt
- * directory, read name records for nameID 1 (family) and 16
- * (typographic family — preferred: it groups styles under one family
- * where nameID 1 splits them, e.g. "Roboto" vs "Roboto Condensed").
- * Returns null for anything else (woff2's brotli stream is NOT free
- * to parse — those uploads fall back to the filename convention).
+ * Minimal sfnt 'name'-table reader (no fontkit/opentype.js): prefers
+ * nameID 16, which groups styles under one family where nameID 1
+ * splits them. woff2 (brotli) is not parsed — falls back to the filename.
  */
 
 const SFNT_MAGIC = new Set([0x00010000, 0x74727565, 0x4f54544f]); // 1.0, 'true', 'OTTO'

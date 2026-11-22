@@ -50,7 +50,7 @@ const lines = [
 ];
 
 const result: LayoutResult = {
-  placed: [], // M-IMAGES-1: no images in this fixture
+  placed: [], // no images in this fixture
   pages: [
     { index: 0, size: { x: 0, y: 0, width: 816, height: 1056 }, contentBox: { x: 96, y: 96, width: 624, height: 864 }, sectionIndex: 0 },
     { index: 1, size: { x: 0, y: 0, width: 816, height: 1056 }, contentBox: { x: 96, y: 96, width: 624, height: 864 }, sectionIndex: 0 },
@@ -155,20 +155,17 @@ describe('textRangeLineRects (selection/search projection)', () => {
   });
 });
 
-// ─── M-HEADER-FOOTER-3: the ECHO RULES ────────────────────────────────────
-// Band blocks echo on every page with IDENTICAL blockId AND
-// rangeStart/rangeEnd — the pre-fix projections resolved the FIRST
-// echo (caret landed on page 0 no matter the click) and full-widthed
-// middle echoes (the "one big spell bar under the whole header" bug).
-// These pin the three rules: active-page filtering (selection/caret),
-// per-echo partial-x (spell/search), and the cross-surface clamp.
+// The echo rules
+// The ECHO RULES: band blocks echo on every page with IDENTICAL
+// blockId AND rangeStart/rangeEnd. These pin active-page filtering
+// (selection/caret), per-echo partial-x, and the cross-surface clamp.
 
 import {
   textRangeUnderlineRects,
   textRangeTextExtents,
 } from '@/lib/paginated/positionMap';
 
-describe('band echo rules (M-HEADER-FOOTER-3)', () => {
+describe('band echo rules', () => {
   // A band block 'h' (echoed on pages 0 and 1 at y=-48 content-box-
   // relative — the 48px anchor above a 96px margin) + a body block 'z'.
   const hText = 'hello';

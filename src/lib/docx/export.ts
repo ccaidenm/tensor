@@ -44,24 +44,9 @@ import type { TextTransform } from '@/lib/styles/types';
 import { pxToEmu, pxToHalfPoints, pxToTwip, ptToTwip, toPx } from './units';
 
 /**
- * M-DOCX — THE EXPORT MAPPING (#37a). Tensor JSON → the `docx` builders.
- *
- * THE LAW: this file is one direction of the ONE mapping layer; the
- * import side (#38a) is its inverse through the same tables. Every
- * mapping decision is either 1:1 with the model, or a LOUD report
- * entry (never a silent drop — the markdown posture, scaled):
- *
- *  - Skipped + counted: referenceTable containers (their entries are
- *    derived content; the real TOC field lands in #37b), floated
- *    images (exported inline — offset mapping is #37b), equations the
- *    LaTeX→OMML converter can't read (exported as their literal
- *    latex), images in formats Word cannot embed (webp/svg), unknown
- *    node types, missing media.
- *  - Direct: everything else — the case comments carry the receipts.
- *
- * UNITS: content geometry is px → twips (×15) / half-points (×1.5);
- * page geometry is pt → twips (×20); images are px → EMU. All via
- * units.ts — the one seam.
+ * The export mapping (#37a) — half of the ONE mapping layer; the import
+ * side (#38a) is its inverse through the same tables. Every mapping is
+ * 1:1 with the model or a LOUD report entry, never a silent drop.
  */
 
 // ─── Word's named highlight palette (w:highlight w:val) — hexes beyond
@@ -123,7 +108,7 @@ export interface DocxExportInput {
   pageSetup: PageSetup;
   headerFooter: HeaderFooterSettings | null;
   coreProperties: DocxCoreProperties;
-  /** The RESOLVED registry (code+global+doc merged) — the styles the
+  /** The resolved registry (code+global+doc merged) — the styles the
    *  document's styleIds reference. */
   styleDefinitions: StyleDefinition[];
   /** The config-derived base (what 'normal' falls through to). */
@@ -163,18 +148,14 @@ export function docxReportLines(report: DocxExportReport): string[] {
 interface WalkState {
   report: DocxExportReport;
   media: Map<string, DocxExportMedia>;
-  /** #WATERMARK — the doc-default family (the text watermark's font). */
+  /** The doc-default font family (the text watermark's font). */
   baseFontFamily: string;
   defs: Map<string, StyleDefinition>;
   /** Per-reference instance counters — each top-level list restarts. */
   instances: { next: (reference: string) => number };
-  /** THE NUMBERING REDESIGN: one abstractNum per top-level list
-   *  instance, whose LEVELS carry the formats of the actual nesting
-   *  (level 0 = the list's own style, level 1 = a nested list's style,
-   *  …). Word derives list nesting from ilvl, so mixed nesting (a
-   *  roman list inside a bullet list) needs per-level formats — six
-   *  identical levels cannot express it, and a separate numId per
-   *  nested list would render flat. */
+  /** One abstractNum per top-level list instance; each LEVEL carries the
+   *  format of the nesting at that depth (Word derives nesting from ilvl,
+   *  so mixed nesting — roman inside bullet — needs per-level formats). */
   numberingLevels: Map<string, (string | undefined)[]>;
   /** Tensor's ordered-list `start` per reference (restart fidelity). */
   numberingStarts: Map<string, number>;
@@ -277,11 +258,9 @@ function applyMark(format: RunFormat, mark: JSONContent, state: WalkState): void
   }
 }
 
-/** THE TAB LAW (the Word-for-Web lesson): tabs split the text into
- *  SEPARATE RUNS with a w:tab run between — one run mixing t/tab/t
- *  would round-trip through any grouped XML reading with the pieces
- *  REORDERED (document order is content). The format carries to every
- *  piece. Returns a single-element array for tab-free text. */
+/** Tabs split the text into separate runs with a w:tab run between — a
+ *  single run mixing t/tab/t would round-trip reordered. The format
+ *  carries to every piece; tab-free text returns a single-element array. */
 function mapTextRuns(node: JSONContent, state: WalkState, opts: RunOpts = {}): TextRun[] {
   const format: RunFormat = {};
   let text = typeof node.text === 'string' ? node.text : '';
@@ -289,7 +268,7 @@ function mapTextRuns(node: JSONContent, state: WalkState, opts: RunOpts = {}): T
     if (opts.skipLinkMark && mark.type === 'link') continue;
     applyMark(format, mark, state);
   }
-  // TEXT TRANSFORMS ride the text (Word has no paragraph transform):
+  // Text transforms ride the text (Word has no paragraph transform):
   // the paragraph style's, then the charStyle's — the last one wins,
   // matching how the resolver layers them.
   const transforms: TextTransform[] = [];
@@ -299,10 +278,8 @@ function mapTextRuns(node: JSONContent, state: WalkState, opts: RunOpts = {}): T
   if (format.transform && format.transform !== 'none') transforms.push(format.transform);
   const effective = transforms[transforms.length - 1];
   if (effective) text = transformText(text, effective);
-  // NO paragraph-style cascade here: the Word STYLE carries the style
-  // properties (inlining them onto runs is redundant and pollutes the
-  // round-trip — the imported run would carry marks the source never
-  // had). Direct marks ride alone; the style does the rest.
+  // No paragraph-style cascade here — the Word STYLE carries the style
+  // properties; inlining them onto runs pollutes the round-trip.
   const pieces = text.split('\t');
   return pieces.map((piece, index) => {
     if (index === 0) return piece === '' ? new TextRun({}) : new TextRun({ text: piece, ...runFormatOpts(format) });
@@ -336,8 +313,8 @@ interface RunOpts {
 
 type InlineChild = TextRun | ImageRun | ExternalHyperlink | SimpleField;
 
-/** Consecutive link-marked texts group into ONE ExternalHyperlink —
- *  the OOXML hyperlink is a run CONTAINER, not a mark. */
+/** Consecutive link-marked texts group into one ExternalHyperlink —
+ *  the OOXML hyperlink is a run container, not a mark. */
 function mapInlineContent(nodes: JSONContent[], state: WalkState, paragraphStyle?: StyleProperties): InlineChild[] {
   const out: InlineChild[] = [];
   let i = 0;
@@ -368,9 +345,8 @@ function mapInlineContent(nodes: JSONContent[], state: WalkState, paragraphStyle
     } else if (node.type === 'inlineImage') {
       out.push(mapImageRun(node, state));
     } else if (node.type === 'pageField') {
-      // M-PAGEFIELD: the field exports as Word's OWN field — Word
-      // resolves it per page (the round-trip: import mapped the Word
-      // field to this node; export maps it back).
+      // Exports as Word's own field — Word resolves it per page (import
+      // maps it back to this node).
       const kind = (node.attrs as { kind?: string }).kind === 'pages' ? 'NUMPAGES' : 'PAGE';
       out.push(new SimpleField(kind));
     } else if (node.type === 'hardBreak') {
@@ -408,11 +384,9 @@ function mapImageRun(node: JSONContent, state: WalkState): TextRun | ImageRun {
     transformation: { width: Math.round(width), height: Math.round(height) },
     altText: { title: attrs.alt || 'image', description: attrs.alt || 'image', name: attrs.alt || 'image' },
   };
-  // THE FLOAT MAPPING: Tensor's overlay model ({dx, dy, z: front|behind})
-  // maps to Word's anchored drawing with wrapNone — offsets are
-  // anchor-relative px → EMU, and z rides behindDocument. Text-wrap
-  // floats (wrapSquare) are NOT in the model — Word wraps, Tensor
-  // overlays (the one honest approximation).
+  // Tensor's overlay model ({dx, dy, z}) maps to Word's anchored drawing
+  // with wrapNone (px → EMU offsets; z rides behindDocument). Text-wrap
+  // floats aren't in the model — Word wraps, Tensor overlays.
   const float = attrs.float;
   if (float) {
     return new ImageRun({
@@ -439,7 +413,7 @@ function imageType(ext: string): 'png' | 'jpg' | 'gif' | 'bmp' | null {
   }
 }
 
-// ─── Paragraph options (the ONE path both constructors share) ───────────
+// ─── Paragraph options (the path both constructors share) ───────────
 
 interface ParagraphOptionsBag {
   paragraphStyle?: StyleProperties;
@@ -450,20 +424,18 @@ interface ParagraphOptionsBag {
     spacing?: { before?: number; after?: number; line?: number; lineRule?: 'auto' | 'atLeast' };
     indent?: { left?: number; right?: number; firstLine?: number; hanging?: number };
     tabStops?: { type: (typeof TabStopType)[keyof typeof TabStopType]; position: number }[];
-    /** M-FLOW — w:keepNext / w:keepLines / w:pageBreakBefore: written
-     * ONLY when the effective (attr-over-style) value is ON; undefined
-     * = omitted (Word's default is off). */
+    /** w:keepNext/keepLines/pageBreakBefore: written only when the
+     * effective value is on; undefined = omitted (Word's default is off). */
     keepNext?: boolean;
     keepLines?: boolean;
     pageBreakBefore?: boolean;
-    /** M-FLOW — w:widowControl: written ONLY when effectively OFF
-     * (Word's default is ON — the deviation-only emission). */
+    /** w:widowControl: written only when effectively off (Word's
+     * default is on — deviation-only emission). */
     widowControl?: boolean;
   };
-  /** M-FLOW — breakAfter has no OOXML paragraph property; the export
-   * spelling is a TRAILING page-break run (mapParagraph appends it),
-   * which the import maps back to breakAfter — behavior- and
-   * round-trip-preserving. */
+  /** breakAfter has no OOXML paragraph property; the export spelling is
+   * a trailing page-break run (mapParagraph appends it), which the
+   * import maps back. */
   breakAfter?: boolean;
 }
 
@@ -525,14 +497,9 @@ function paragraphOptions(node: JSONContent, state: WalkState): ParagraphOptions
         }))
     : undefined;
 
-  // M-FLOW — the pagination flags: DIRECT-ATTR DEVIATIONS ONLY. The
-  // style tier emits its own pPr through styleParagraphProps; writing
-  // the style's value here TOO would double-write (and the round-trip
-  // gate would import it back as a direct attr). So: true → emit the
-  // on-flag; false → emit the EXPLICIT OFF (w:val="false" — an
-  // override that beats a style's on); unset → nothing at the
-  // paragraph level. widowControl: false is the only deviation (Word's
-  // default is ON). breakAfter is the trailing-run spelling below.
+  // Pagination flags: direct-attr deviations only — the style tier emits
+  // its own pPr, and a double-write would round-trip back as a direct
+  // attr. true → on-flag; false → explicit OFF; unset → nothing.
   const directBool = (name: 'keepNext' | 'keepLines' | 'widowControl'): boolean | null => {
     const v = attrs[name];
     return v === true || v === false ? v : null;
@@ -559,28 +526,15 @@ function paragraphOptions(node: JSONContent, state: WalkState): ParagraphOptions
 function mapParagraph(node: JSONContent, state: WalkState): Paragraph {
   const { paragraphStyle, options, breakAfter } = paragraphOptions(node, state);
   const children = mapInlineContent(node.content ?? [], state, paragraphStyle);
-  // M-FLOW — the breakAfter spelling is the trailing page-break RUN
-  // (Word's own break-after shape); the import maps it back.
+  // breakAfter's spelling is the trailing page-break run; import maps it back.
   return new Paragraph({ ...options, children: breakAfter ? [...children, new PageBreak()] : children });
 }
 
-/** THE HEADING paragraph option: the level rides the options bag (used
- *  by mapParagraph via paragraphOptions) — the heading's TEXT rides
- *  like any paragraph's (content never drops). */
-
 // ─── Lists ───────────────────────────────────────────────────────────────
 
-function listReference(styleType: string): string {
-  return `t-list-${styleType.replace(/[^a-z0-9]/gi, '-')}`;
-}
-void listReference;
-
-/** PM lists nest as list(listItem(paragraph, list…)). Every list — top
- *  or nested — maps its ITEMS onto the TOP-LEVEL list's numbering
- *  instance at its nesting depth (Word derives nesting from ilvl); a
- *  nested list registers its OWN format at that level. Numbering
- *  restarts where Tensor's does because each top-level list is a fresh
- *  reference+instance. */
+/** Nested lists map their items onto the top-level list's numbering
+ *  instance at their depth (Word derives nesting from ilvl) and
+ *  register their own format at that level; each top-level list restarts. */
 function mapList(node: JSONContent, level: number, reference: string, instance: number, state: WalkState): Paragraph[] {
   const out: Paragraph[] = [];
   for (const item of node.content ?? []) {
@@ -668,8 +622,8 @@ function mapTable(node: JSONContent, state: WalkState): Table {
   }
 
   // The vMerge grid: Tensor rows carry ORIGIN cells only (prosemirror-
-  // tables semantics) — the CONTINUATION cells Word requires are
-  // SYNTHESIZED here, interleaved in column order with the real cells.
+  // tables semantics); the CONTINUATION cells Word requires are
+  // synthesized here, interleaved in column order with the real cells.
   const openSpans = new Map<number, number>();
   const docxRows = rows.map((row) => {
     const cells = row.content ?? [];
@@ -697,7 +651,7 @@ function mapTable(node: JSONContent, state: WalkState): Table {
     // A leading all-header row repeats across page breaks (Word's own
     // table convention, and what Tensor's tableHeader cells mean).
     const allHeader = cells.length > 0 && cells.every((c) => c.type === 'tableHeader');
-    // M-FLOW — w:cantSplit: the row must not break across pages.
+    // w:cantSplit: the row must not break across pages.
     const cantSplit = (row.attrs as { cantSplit?: unknown } | null | undefined)?.cantSplit === true;
     return new TableRow({ children: built, tableHeader: allHeader, ...(cantSplit ? { cantSplit: true } : {}) });
   });
@@ -765,11 +719,9 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
         out.push(mapTable(node, state));
         break;
       case 'image': {
-        // A block image is its own paragraph; align rides jc; the
-        // keepNext bond (caption below) rides keepNext — EXCEPT on a
-        // floated image (the adapter's own law: floats carry no bond).
-        // A placeholder (missing/unsupported — already counted in the
-        // report) still EMITS, so the position stays visible in Word.
+        // A block image is its own paragraph: align rides jc; the keepNext
+        // bond (caption below) rides keepNext, except on a floated image.
+        // A placeholder still emits so the position stays visible in Word.
         const attrs = (node.attrs ?? {}) as { align?: string; keepNext?: boolean; float?: unknown };
         const floated = attrs.float != null;
         const run = mapImageRun(node, state);
@@ -794,9 +746,8 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
         out.push(new Paragraph({ children: [new PageBreak()] }));
         break;
       case 'columnBreak':
-        // #74 COLUMNS — Word's own spelling: a column-break run in the
-        // break's own (otherwise empty) paragraph — the pageBreak node's
-        // exact twin.
+        // #74 — Word's spelling: a column-break run in its own
+        // (otherwise empty) paragraph.
         out.push(new Paragraph({ children: [new ColumnBreak()] }));
         break;
       case 'horizontalRule':
@@ -811,12 +762,9 @@ function mapBlocks(nodes: JSONContent[], state: WalkState): (Paragraph | Table)[
       case 'footerBlock':
         break; // bands are collected by buildDocx, never body flow
       case 'referenceTable': {
-        // THE TOC FIELD (the round-trip closes): a Tensor referenceTable
-        // exports as Word's OWN TOC field — the entries are derived
-        // content (Tensor's generator owns them Tensor-side; Word owns
-        // them Word-side), so the field carries an instruction and
-        // Word refreshes it on open (updateFields). The in-place save
-        // loop then never loses a ToC.
+        // A referenceTable exports as Word's OWN TOC field — the entries
+        // are derived content, so the field carries an instruction and
+        // Word refreshes it on open (never lose a ToC on save).
         const refAttrs = (node.attrs ?? {}) as { kind?: string; depth?: number };
         const depth = Math.min(6, Math.max(1, Number(refAttrs.depth ?? 3)));
         state.needsUpdateFields = true;
@@ -859,24 +807,20 @@ interface Bands {
 // ─── #58 SECTIONS — the multi-section split ──────────────────────────────
 
 /**
- * #WATERMARK — the section's effective watermark setting, resolved at
- * split time: the break's setup (the section it ends), else the
- * store's doc default. The RESOLVED spec arrives later (exportPdf's
- * anchor math has no place here — Word's own watermark is native
- * VML; we only MAP the settings).
+ * A section's effective watermark is resolved at split time: the
+ * break's setup (the section it ends), else the store's doc default.
  */
 interface SectionChunk {
   /** The section's OWN page setup (break attrs; null = the final
    *  section — the store's pageSetup governs it). */
   setup: PageSetup | null;
-  /** #58 — how the FOLLOWING section starts (the break's `type` —
-   *  the boundary AT this break). Rides the FOLLOWING chunk's
-   *  sectPr in Word's spelling. */
+  /** #58 — how the following section starts; rides the following
+   *  chunk's sectPr in Word's spelling. */
   startType: 'nextPage' | 'continuous';
-  /** The section's TAGGED band containers (its overrides). */
+  /** The section's tagged band containers (its overrides). */
   bands: Bands;
-  /** #WATERMARK — the section's effective watermark (its break's,
-   *  else the doc default); null = none. */
+  /** The section's effective watermark (its break's, else the doc
+   *  default); null = none. */
   watermark: WatermarkSettings | null;
   /** The body content between this section's start and its break. */
   children: JSONContent[];
@@ -884,12 +828,9 @@ interface SectionChunk {
 
 const EMPTY_BANDS = (): Bands => ({ headerDefault: [], headerFirst: [], footerDefault: [], footerFirst: [] });
 
-/** Split the PM JSON at the sectionBreak atoms: each break ENDS a
- *  section (its attrs.setup = that section's page setup — Word's
- *  spelling); the content after the LAST break is the FINAL section
- *  (the store's). Band containers route OUT of the chunks: untagged →
- *  the doc default; tagged → their section's overrides — resolved in
- *  a SECOND pass (containers may precede their break in doc order). */
+/** Split the PM JSON at sectionBreak atoms — each break ends a section
+ *  (attrs.setup = its page setup; after the last break = the final section).
+ *  Tagged bands resolve in a second pass (they may precede their break). */
 function splitSections(
   nodes: JSONContent[],
   docWatermark: WatermarkSettings | null | undefined,
@@ -904,8 +845,8 @@ function splitSections(
   const bandIndex = new Map<string, Bands>(); // sectionId → tagged bands
   const breakTags: (string | null)[] = [];
   let anyBands = false;
-  // #WATERMARK — each break's watermark (the section it ENDS); the
-  // final chunk inherits the doc default below.
+  // Each break's watermark (the section it ends); the final chunk
+  // inherits the doc default below.
   const breakWatermarks: (WatermarkSettings | null | undefined)[] = [];
 
   for (const node of nodes) {
@@ -930,8 +871,8 @@ function splitSections(
       const breakSetup = (node.attrs as { setup?: PageSetup } | null)?.setup ?? null;
       chunks[chunks.length - 1]!.setup = breakSetup;
       breakWatermarks.push(breakSetup?.watermark ?? undefined);
-      // The break's `type` = how the FOLLOWING section starts — it
-      // rides the NEXT chunk's sectPr (Word's spelling).
+      // The break's `type` = how the following section starts — it rides
+      // the next chunk's sectPr (Word's spelling).
       chunks.push({
         setup: null,
         startType: (node.attrs as { type?: 'nextPage' | 'continuous' } | null)?.type === 'continuous'
@@ -946,15 +887,14 @@ function splitSections(
     }
     chunks[chunks.length - 1]!.children.push(node);
   }
-  // The tagged buckets resolve AFTER the full pass (the container →
-  // break order is arbitrary): break ordinal ↔ sectionId. The FINAL
-  // chunk's bands = the reserved final-section tag (it has no break).
+  // Tagged buckets resolve after the full pass (container → break order
+  // is arbitrary): break ordinal ↔ sectionId. The FINAL chunk's bands =
+  // the reserved final-section tag (it has no break).
   breakTags.forEach((tag, ordinal) => {
     chunks[ordinal]!.bands = (tag && bandIndex.get(tag)) || EMPTY_BANDS();
   });
   chunks[chunks.length - 1]!.bands = bandIndex.get(FINAL_SECTION_ID) ?? EMPTY_BANDS();
-  // #WATERMARK — each chunk's EFFECTIVE setting: its break's, else the
-  // doc default (the final chunk = the doc default by construction).
+  // Each chunk's effective watermark: its break's, else the doc default.
   const anyWatermark = breakWatermarks.some((wm) => wm != null) || docWatermark != null;
   chunks.forEach((chunk, i) => {
     chunk.watermark = i < breakWatermarks.length ? (breakWatermarks[i] ?? null) : null;
@@ -964,13 +904,9 @@ function splitSections(
 }
 
 /**
- * #WATERMARK — the section's watermark as Word spells it: a Run
- * inside a Paragraph inside the section's HEADER (the lib's
- * first-party watermarks emit Word's native VML WordArt — the
- * `PowerPlusWaterMarkObject` shape id Word's own remove/replace
- * command searches for). Word has no per-section watermark UI, but
- * its per-section headers ARE the mechanism — each section's header
- * carries that section's watermark, exactly our per-section model.
+ * The section's watermark as Word spells it: a Run in a Paragraph in the
+ * section's header (the lib emits Word's native VML WordArt). Word has
+ * no per-section watermark UI — per-section headers ARE the mechanism.
  */
 function watermarkParagraph(wm: WatermarkSettings | null, state: WalkState): Paragraph | null {
   if (!wm) return null;
@@ -982,8 +918,8 @@ function watermarkParagraph(wm: WatermarkSettings | null, state: WalkState): Par
         new TextWatermark({
           text,
           font: state.baseFontFamily,
-          // px → pt at the 96dpi boundary; ABSENT = AUTO (Word
-          // stretches to fill — our auto-size look's own spelling).
+          // px → pt at the 96dpi boundary; absent = auto (Word
+          // stretches to fill).
           ...(typeof wm.fontSize === 'number' && wm.fontSize > 0
             ? { fontSize: wm.fontSize * 0.75 }
             : {}),
@@ -1043,14 +979,9 @@ function styleParagraphProps(props: StyleProperties | undefined): object {
     ...(props.textAlign ? { alignment: toAlignment(props.textAlign) } : {}),
     ...(Object.keys(spacing).length ? { spacing } : {}),
     ...(Object.keys(indent).length ? { indent } : {}),
-    // M-FLOW — the pagination flags (Word's style pPr: w:keepNext,
-    // w:keepLines, w:pageBreakBefore, w:widowControl), emitted from the
-    // STYLE's own properties — the same registry every render path
-    // reads. The pre-M-FLOW heading hardcode (keepNext+keepLines on
-    // Heading1–6 unconditionally) is RETIRED: the heading-1..3 builtins
-    // now carry keepNext themselves, and style-defined flags flow
-    // through here for custom styles too. Deviation-only: widowControl
-    // is written only when the style explicitly DISABLES it.
+    // Pagination flags come from the STYLE's own properties (the same
+    // registry every render path reads); widowControl is written only
+    // when the style explicitly disables it.
     ...(props.keepNext === true ? { keepNext: true } : {}),
     ...(props.keepLines === true ? { keepLines: true } : {}),
     ...(props.breakBefore === 'page' ? { pageBreakBefore: true } : {}),
@@ -1058,8 +989,7 @@ function styleParagraphProps(props: StyleProperties | undefined): object {
   };
 }
 
-/** paragraphSpacing is defined below on the paragraph-options path —
- *  hoisted reference via function declaration (it is). */
+/** paragraphSpacing is defined below; the function declaration hoists it. */
 function buildStylesConfig(input: DocxExportInput, defs: Map<string, StyleDefinition>): object {
   const normal = defs.get('normal')?.properties;
   const baseRun = {
@@ -1073,9 +1003,8 @@ function buildStylesConfig(input: DocxExportInput, defs: Map<string, StyleDefini
       ?? { bold: true };
     return {
       run: { ...styleRunProps(props), bold: props.bold ?? true },
-      // M-FLOW: no hardcode — the style's own properties emit the
-      // pagination flags (heading-1..3 builtins carry keepNext; the
-      // 4..6 legacy fallbacks do too).
+      // No hardcode — the style's own properties emit the pagination
+      // flags (the heading builtins carry keepNext).
       paragraph: styleParagraphProps(props),
     };
   };
@@ -1135,8 +1064,8 @@ function pageDims(pageSetup: PageSetup): { width: number; height: number; orient
   }
   const landscape = pageSetup.orientation === 'landscape';
   // NO manual swap: the docx lib flips width/height itself when the
-  // orientation is landscape (verified in the test run — passing
-  // pre-swapped dims got flipped BACK to portrait geometry).
+  // orientation is landscape (pre-swapped dims get flipped back to
+  // portrait geometry).
   return {
     width: ptToTwip(widthPt),
     height: ptToTwip(heightPt),
@@ -1159,19 +1088,11 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     needsUpdateFields: false,
   };
 
-  // #58 — the multi-section split. Each section's EFFECTIVE bands =
-  // its tagged overrides ?? the doc default; exported EXPLICITLY per
-  // section (Word's headerReference per sectPr — exact visual
-  // fidelity; a resolved-EMPTY region under a doc that carries ANY
-  // band content exports an explicit EMPTY part, because omitting it
-  // would spell "link to previous" and inherit a neighbor's content).
-  // A doc with NO band content at all exports header-free (today's
-  // shape). The first-class parts ride SECTION 0 only (the doc's page
-  // 0 is its first page — the differentFirstPage model).
-  // #WATERMARK — the doc default (the FINAL section's) rides the
-  // split; per-section watermarks live on the breaks' setups. The
-  // per-chunk resolution happens in the split; the assembly reads
-  // chunk.watermark directly.
+  // #58 — the multi-section split: effective bands = tagged overrides ??
+  // the doc default, exported explicitly per section (omitting one spells
+  // "link to previous" and inherits a neighbor's content); the first-class
+  // parts ride section 0 only (page 0 = the doc's first page). Watermark
+  // resolution happens in the split (assembly reads chunk.watermark).
   const { chunks, docDefault, anyBands } = splitSections(
     input.json.content ?? [],
     input.pageSetup.watermark,
@@ -1190,7 +1111,7 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     const setup: PageSetup = chunk.setup ?? input.pageSetup;
     const { width, height, orientation } = sectionProps(setup);
     // The effective bands: the tagged overrides ?? the doc default
-    // (the two-level resolution — the export's mirror of the engine's).
+    // (two-level resolution).
     const resolve = (region: keyof Bands): JSONContent[] =>
       chunk.bands[region].length > 0 ? chunk.bands[region] : docDefault[region];
     const build = (region: 'header' | 'footer', cls: 'Default' | 'First') => {
@@ -1199,11 +1120,9 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     };
     const headers: Record<string, Header | Footer> = {};
     const footers: Record<string, Header | Footer> = {};
-    // #WATERMARK — the section's own watermark paragraph: Word's
-    // native spelling rides the section's header (the VML shape
-    // lives in a header part). Band content FIRST, the watermark
-    // LAST (the watermark is position-independent VML — order within
-    // the header is cosmetic).
+    // The section's watermark paragraph rides the section's header (the
+    // VML shape lives in a header part); band content first, watermark
+    // last (order within the header is cosmetic).
     const wmRun = watermarkParagraph(chunk.watermark, state);
     if (anyBands || wmRun) {
       if (anyBands) {
@@ -1217,14 +1136,12 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
         }
       } else {
         // A watermark-only doc still emits its header part (the
-        // watermark LIVES there; without a part Word shows nothing —
-        // the export used to go header-free when no band content).
+        // watermark lives there; without a part Word shows nothing).
         headers.default = new Header({ children: [] });
       }
       if (wmRun) {
         // Merge into the DEFAULT header, and the FIRST part when it
-        // exists (a differentFirstPage doc's page 0 covers the FIRST
-        // part — without the merge page 0 would go bare).
+        // exists (without the merge, page 0 would go bare).
         const merge = (existing: Header | Footer | undefined): Header =>
           existing instanceof Header
             ? new Header({ children: [...existing.options.children, wmRun] })
@@ -1244,11 +1161,9 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
             right: ptToTwip(setup.margins.right),
           },
         },
-        // #74 COLUMNS — the section's spec as Word spells it (w:cols):
-        // count + spacing (twips), equalWidth with per-col entries when
-        // the setup carries absolute widths (pt → twips — Word reads
-        // them literally; the engine consumes the same numbers as
-        // relative weights, so the round trip is consistent).
+        // #74 — the spec as Word spells it (w:cols): count + spacing in
+        // twips; absolute widths (pt → twips) become per-col entries. The
+        // engine reads the same numbers as relative weights — round-trip safe.
         ...(setup.columns && setup.columns.count > 1
           ? {
               column: {
@@ -1289,7 +1204,7 @@ export async function buildDocx(input: DocxExportInput): Promise<{ bytes: Uint8A
     sections: docxSections as never,
   });
 
-  // The webview path: toBlob (toBuffer is Node-only — the spike lesson).
+  // The webview path: toBlob (toBuffer is Node-only).
   const blob = await Packer.toBlob(doc);
   return { bytes: new Uint8Array(await blob.arrayBuffer()), report: state.report };
 }

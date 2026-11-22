@@ -34,12 +34,10 @@ export async function saveRecoveryCopy(
   options: SaveDocumentOptions
 ): Promise<void> {
   try {
-    // M-META: the SAME assembly as saves (snapshot parity — snapshots
-    // used to omit styles). The back-pointer rides the options.
+    // Same assembly as saves (snapshot parity); the back-pointer rides the options.
     const file = assembleDocumentFile(editor, { ...options, originalPath });
-    // M-IMAGES-0: snapshots are v2 containers now — the SAME
-    // package command as saves (media rides along, GC'd to the
-    // document's references). The path is unchanged.
+    // Snapshots are v2 containers — the same package command as saves
+    // (media rides along, GC'd to the document's references).
     const path = await getRecoveryPath(originalPath);
     await saveWpdoc(path, file);
   } catch (err) {
@@ -48,10 +46,9 @@ export async function saveRecoveryCopy(
 }
 
 /**
- * M-IMAGES-0: open a recovery snapshot — v2 container, or an OLD
- * (v1 JSON) snapshot via the same permanent converter as
- * openDocument. Restore flows read through this; the formats can
- * never fork.
+ * Open a recovery snapshot: a v2 container, or an old (v1 JSON)
+ * snapshot via the same permanent converter as openDocument — the
+ * formats can never fork.
  */
 export async function readRecoveryCopy(path: string): Promise<DocumentFile> {
   return openWpdoc(path);
@@ -62,13 +59,9 @@ export async function readRecoveryCopy(path: string): Promise<DocumentFile> {
 export { collectReferencedMediaIds };
 
 /**
- * #103 — THE START SCREEN'S RECOVERY LIST: every snapshot on disk
- * with just enough metadata for a card (the display name, the
- * back-pointer, the stamp). Reads each package fully (the recovery
- * dir holds at most one file per path hash + one per session — a
- * handful of small zips, never a scan cost). Corrupt entries drop
- * loudly-quietly (the normalizePageStyles posture — a bad snapshot
- * never crashes the listing).
+ * #103 — every snapshot on disk with just enough metadata for a card
+ * (display name, back-pointer, stamp). Corrupt entries drop from
+ * the list rather than crashing it.
  */
 export interface RecoveryEntry {
   /** The snapshot's own path (the restore action's input). */
@@ -113,7 +106,6 @@ export async function listRecoveryCopies(): Promise<RecoveryEntry[]> {
         // it stays on disk for manual inspection.
       }
     }
-    // The freshest work first.
     out.sort((a, b) => (b.modifiedAt ?? 0) - (a.modifiedAt ?? 0));
     return out;
   } catch (err) {

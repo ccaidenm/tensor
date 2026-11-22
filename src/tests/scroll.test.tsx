@@ -8,14 +8,11 @@ import { renderTensorInScrollContainer, mockRects, captureScroll, GEOMETRY } fro
 import { settleLayout } from './harness';
 
 /**
- * Scroll policy, exact deltas. jsdom lays out nothing, so
- * the two inputs the scroll math reads (stack rect, scroller rect) are
- * mocked per test with KNOWN numbers, and scrollTop is captured through a
- * defineProperty backing variable (jsdom's scrollTop has no layout to
- * move anyway). All caret geometry is real: FakeMetrics tiling (62
- * chars/line, 16px lines, 54 lines/page) through the production
- * PaginatedView, so the deltas below are computed by the code under test,
- * then asserted by hand arithmetic.
+ * Scroll policy, exact deltas. jsdom lays out nothing — the stack and
+ * scroller rects are mocked per test with KNOWN numbers, scrollTop via
+ * a defineProperty backing variable. All caret geometry is real
+ * (FakeMetrics through the production PaginatedView), asserted by hand
+ * arithmetic.
  */
 
 // Two 54-line paragraphs: block A fills page 1 exactly (54*16 = 864 =

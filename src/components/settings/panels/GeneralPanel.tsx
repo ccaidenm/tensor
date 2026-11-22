@@ -30,6 +30,7 @@ export const GENERAL_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'user', label: 'User' },
   { id: 'editor', label: 'Editor' },
   { id: 'behavior', label: 'Behavior' },
+  { id: 'downloads', label: 'Downloads' },
   { id: 'advanced', label: 'Advanced' },
 ];
 
@@ -48,9 +49,8 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
   );
 }
 
-/** M-META: the "Review > Document Properties" reference in the
- *  identity row is LIVE — it closes Settings and opens the dialog for
- *  the current document. */
+/** The identity row's "Review > Document Properties" reference is live —
+ *  it closes Settings and opens the dialog. */
 function openDocumentProperties() {
   useSettingsDialogStore.getState().close();
   useDocumentPropertiesStore.getState().open();
@@ -77,8 +77,7 @@ function SelectionColorRow() {
   );
 }
 
-/** M-META: the user identity — the default author for new documents'
- *  metadata (see the config schema note for the onboarding plan). */
+/** The user identity — the default author for new documents' metadata. */
 function IdentityRow() {
   const author = useConfigStore((s) => s.config.identity.author);
   const setIdentityAuthor = useConfigStore((s) => s.setIdentityAuthor);
@@ -114,8 +113,8 @@ function IdentityRow() {
 export function GeneralPanel() {
   const theme = useConfigStore((s) => s.config.theme);
   const setTheme = useConfigStore((s) => s.setTheme);
-  // #102 — the accent picker rides the engine (the store's writer
-  // retunes --primary + the window icon + the favicon).
+  // #102 — the accent picker rides the store's writer (retunes --primary,
+  // the window icon, the favicon).
   const accent = useConfigStore((s) => s.config.accent);
   const setAccent = useConfigStore((s) => s.setAccent);
   const useFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
@@ -123,10 +122,10 @@ export function GeneralPanel() {
   const pasteOnMiddleClick = useConfigStore((s) => s.config.editor.pasteOnMiddleClick);
   const setPasteOnMiddleClick = useConfigStore((s) => s.setPasteOnMiddleClick);
   const developerMode = useConfigStore((s) => s.config.developerMode);
-  // M-PRINT: the default export folder ('' = the OS dialog's default).
+  // The default export folder ('' = the OS dialog's default).
   const downloadsDir = useConfigStore((s) => s.config.downloadsDir);
   const setDownloadsDir = useConfigStore((s) => s.setDownloadsDir);
-  // M-PRINT: the always-ask trigger (Shift default / Ctrl+⌘).
+  // The always-ask trigger (Shift default / Ctrl+⌘).
   const trigger = useConfigStore((s) => s.config.pdfAlwaysAskTrigger);
   const setPdfAlwaysAskTrigger = useConfigStore((s) => s.setPdfAlwaysAskTrigger);
   const triggerLabel = trigger === 'ctrl' ? 'Ctrl/' : 'Shift+';
@@ -134,15 +133,13 @@ export function GeneralPanel() {
   // #100 — the window controls' side (inert on macOS — native lights).
   const windowControlsSide = useConfigStore((s) => s.config.windowControlsSide);
   const setWindowControlsSide = useConfigStore((s) => s.setWindowControlsSide);
-  // The enabling warning: turning Developer Mode ON must be ACCEPTED,
-  // never incidental (devtools can inspect and mutate anything).
+  // Enabling must be explicit — devtools can inspect and mutate anything.
   const [developerWarningOpen, setDeveloperWarningOpen] = useState(false);
 
   return (
     <div className="flex flex-col">
       <SettingsSection id="appearance" title="Appearance">
-        {/* #102 — the theme graduated from a lone dark switch: Light/
-            Dark/System (system follows the OS live). */}
+        {/* #102 — theme options; System follows the OS live. */}
         <Row icon={<Sun className="h-4 w-4" />} label="Theme" description="Light, dark, or following your system">
           <div className="flex gap-1" role="group" aria-label="Theme">
             {([
@@ -164,10 +161,8 @@ export function GeneralPanel() {
             ))}
           </div>
         </Row>
-        {/* #102 — THE ACCENT PICKER: twelve brand swatches riding the
-            engine (the store's writer retunes --primary, the window
-            icon, and the favicon; the in-app logo marks follow the
-            token). */}
+        {/* #102 — accent swatches; the store's writer retunes --primary,
+            the window icon, and the favicon. */}
         <Row
           icon={<Paintbrush className="h-4 w-4" />}
           label="Accent color"
@@ -321,10 +316,9 @@ export function GeneralPanel() {
 
       <Dialog open={developerWarningOpen} onOpenChange={setDeveloperWarningOpen}>
         <DialogContent
-          // The POPUP must clear its OWN raised overlay (z-[100]) and
-          // everything below it — including the already-open Settings
-          // dialog's z-50 popup — so the frosted layer dims/blurs the
-          // app, never the card itself.
+          // The popup's overlay must clear the already-open Settings
+          // dialog's z-50 popup — the frosted layer dims the app,
+          // never the card.
           className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
           overlayClassName={STACKED_DIALOG_OVERLAY}
         >

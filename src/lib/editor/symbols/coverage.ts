@@ -1,27 +1,7 @@
 /**
- * FONT COVERAGE — does the user's active font actually have a glyph for
- * this character, or would it render a tofu box?
- *
- * THE HEURISTIC (canvas-based, the issue's implementation note, hardened
- * against lying fonts): a char is "covered" only when the canvas renders
- * it DIFFERENTLY from a known-missing glyph IN THE SAME FONT STACK. Two
- * measurements per char:
- *
- *   1. width in "<font>, <generic fallback>"
- *   2. width of a known-never-glyph reference char (U+10FFF7, private
- *      use high plane — no font ships it) in the same stack
- *
- * If (1) equals (2), the font "rendered" our char the same way it
- * renders missing glyphs — i.e. tofu. If they differ, the font drew a
- * real glyph. This catches the classic failure where a font maps every
- * codepoint to an identical notdef box (then width 1 == width 2) AND
- * the classic false-negative where the fallback font happens to supply
- * the char (widths differ, but not via <font> — acceptable: the user
- * WOULD see a real glyph, which is what the check is for).
- *
- * SCALE LAW: checks are LAZY (only cells the picker shows), CACHED per
- * font+char forever, and batched through a rAF queue — a 150k pre-pass
- * never happens, a visible window of ~100 cells measures in ~1ms.
+ * FONT COVERAGE — a char is "covered" only when the canvas renders it
+ * DIFFERENTLY from a known-missing glyph (U+10FFF7) in the SAME stack:
+ * same width = tofu. LAZY, cached, batched — no 150k pre-pass.
  */
 
 const REFERENCE_MISSING_CHAR = '\u{10FFF7}'; // high private use — no real font ships a glyph
@@ -51,25 +31,9 @@ function measureWidth(fontStack: string, char: string): number {
 }
 
 /** Is `char` renderable by `fontStack` (a CSS font-family list)?
- *  Synchronous + cached — the picker calls this per visible cell.
- *
- *  THE SYSTEM-FALLBACK SEMANTICS (the user ruling): a character is
- *  available when ANY font that would actually render it — the active
- *  font OR anything in the system's fallback chain — has a real glyph.
- *  The canvas measures in the composite "<activeFont>, sans-serif"
- *  stack, which is precisely that chain: WebKit/fontconfig walks
- *  every font on disc behind it. ONE comparison decides:
- *
- *    covered  =  the char's width ≠ the KNOWN-MISSING reference glyph's
- *                width in the SAME stack (the reference is a plane-15
- *  private-use codepoint no font ships — its width IS the tofu box).
- *
- *  (The earlier fallback-agreement signal — comparing monospace vs
- *  serif fallback widths — was WRONG on real systems: when the active
- *  font lacks a glyph, fontconfig picks different real fonts for the
- *  two generic fallbacks, the widths diverge, and perfectly renderable
- *  characters got marked unavailable. The reference comparison alone
- *  asks the only question that matters: did the chain draw tofu?) */
+ *  Synchronous + cached; measures in "<font>, sans-serif" (the full
+ *  fallback chain) — covered = width ≠ the KNOWN-MISSING reference
+ *  glyph's width in the same stack (equal = tofu). */
 export function isGlyphCovered(fontStack: string, char: string): boolean {
   const key = `${fontStack}\u0000${char}`;
   const cached = coverageCache.get(key);

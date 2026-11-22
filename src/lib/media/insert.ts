@@ -4,16 +4,9 @@ import { readFile } from '@tauri-apps/plugin-fs';
 import { useMediaStore } from './store';
 
 /**
- * M-IMAGES-1 — THE insertion pipeline (all three insert paths land
- * here: file picker, drag-and-drop, clipboard paste). bytes → sha256
- * (WebCrypto subtle.digest — the content-address contract) →
- * MediaStore.register → natural dims → insert the node. The node
- * NEVER holds bytes or data URLs — refs only.
- *
- * EXTERNAL URLs (an http(s) image pasted in) are NOT fetched silently:
- * the deliberate-action dialog (the fonts privacy precedent) — the
- * user confirms "Download and embed", or the paste is refused with
- * ZERO network calls.
+ * The insertion pipeline — picker, drag-and-drop, and paste all
+ * land here: bytes → sha256 (the content-address contract) →
+ * MediaStore → natural dims → insert. The node holds refs, never bytes.
  */
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -24,12 +17,10 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 /**
- * Natural dims decode — the receipt: createImageBitmap PRIMARY (the
- * platform decoder, any format the webview supports), with a PURE
- * PNG-IHDR fallback (bytes 16..24, big-endian) for environments
- * without ImageBitmap (jsdom tests; also the most common container
- * format in practice). Whichever decodes first wins; neither ever
- * fabricates numbers.
+ * Natural-dims decode: createImageBitmap primary (the platform
+ * decoder), with a pure PNG-IHDR fallback (bytes 16..24, big-endian)
+ * for environments without ImageBitmap (jsdom); neither fabricates
+ * numbers.
  */
 export async function decodeImageSize(
   bytes: Uint8Array,
@@ -78,11 +69,9 @@ export async function insertImageBytes(
     .run();
 }
 
-/** #WATERMARK — the register-only variant: bytes → sha → MediaStore →
- * natural dims, NO node insert. The watermark settings carry the ref
- * + the dims (the image law: document data, never fetched at render
- * time). Returns null on a decode failure — no fabricated dims; the
- * panel toasts. */
+/** The register-only variant (watermark settings): bytes → sha →
+ *  MediaStore → dims, no node insert. Null on decode failure — no
+ *  fabricated dims. */
 export async function registerImageBytes(
   bytes: Uint8Array,
   ext: string,
@@ -97,8 +86,8 @@ export async function registerImageBytes(
   }
 }
 
-/** #WATERMARK — the Insert > Image path's twin for watermarks: OS
- * picker → binary read → registerImageBytes (no node insert). */
+/** The watermark panel's path: OS picker → binary read →
+ *  registerImageBytes (no node insert). */
 export async function registerImageFromPicker(): Promise<
   { src: string; width: number; height: number } | null
 > {
@@ -112,8 +101,7 @@ export async function registerImageFromPicker(): Promise<
   return registerImageBytes(bytes, ext === 'jpeg' ? 'jpeg' : ext);
 }
 
-/** The Insert > Image path: OS picker → binary read (the fs
- *  capability fonts-A opened) → the pipeline. */
+/** The Insert > Image path: OS picker → binary read → the pipeline. */
 export async function insertImageFromPicker(editor: Editor | null): Promise<boolean> {
   const path = await openDialog({
     filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
@@ -125,7 +113,7 @@ export async function insertImageFromPicker(editor: Editor | null): Promise<bool
   return insertImageBytes(editor, bytes, ext === 'jpeg' ? 'jpeg' : ext);
 }
 
-/** Drop + paste: the browser already HAS the bytes — a Blob, no fs
+/** Drop + paste: the browser already has the bytes — a Blob, no fs
  *  round-trip. */
 export async function insertImageBlob(editor: Editor | null, blob: Blob): Promise<boolean> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -133,12 +121,11 @@ export async function insertImageBlob(editor: Editor | null, blob: Blob): Promis
   return insertImageBytes(editor, bytes, ext === 'jpeg' ? 'jpeg' : ext);
 }
 
-// ─── The external-URL refusal (M-IMAGES-1.5) ────────────────────────────
+// ─── The external-URL refusal ────────────────────────────────────────
 //
-// An http(s) image pasted in is REFUSED — no download arm, no dialog:
-// the document holds internal media:// refs only, and no network call
-// ever fires from a paste (the fonts privacy precedent, hardened).
-// The refusal is a TOAST (useToast in the paste handler).
+// An http(s) image pasted in is refused — no download, no dialog:
+// the document holds internal media:// refs only, and no network
+// call ever fires from a paste. The refusal is a toast (paste handler).
 export function isExternalImageUrl(src: string): boolean {
   return /^https?:\/\//i.test(src);
 }

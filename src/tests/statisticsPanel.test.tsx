@@ -8,10 +8,9 @@ import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { renderTensor } from './harness';
 
 /**
- * THE STATISTICS UI — the dashboard cards + the region list, opened
- * through the real command, live-updating under the debounce, rows
- * navigating to their headings; the STATUS BAR's counts region opens
- * the dashboard (the bar is the entry affordance for its own numbers).
+ * The statistics UI: the dashboard cards + the region list (opened
+ * through the real command, live under the debounce, rows navigate to
+ * their headings); the status bar's counts region opens the dashboard.
  */
 
 beforeEach(() => {

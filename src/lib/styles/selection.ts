@@ -5,12 +5,9 @@ import { lookupStyle } from './registry';
 import { baselineRunStyle, captureFromResolved, resolveRun, type RunStyle } from './resolve';
 
 /**
- * UI-tier selection resolution — the SAME resolveRun the adapter and
- * the pageless stylesheet use, never parallel logic (addendum 1). The
- * Font/font-size dropdowns display these EFFECTIVE values (fixes the
- * blank-dropdown default: a caret in a heading shows the heading's
- * resolved size, not an empty box), and "create style from selection"
- * captures them (reverse resolution, addendum 2).
+ * UI-tier selection resolution — the same resolveRun the adapter
+ * and pageless stylesheet use, never parallel logic. The dropdowns
+ * display these effective values; capture-from-selection uses them.
  */
 
 function paragraphStyleIdAt(editor: Editor): string | null {
@@ -61,10 +58,9 @@ export function effectiveSelectionRunStyle(
 }
 
 /**
- * CAPTURE (addendum 2): the EFFECTIVE formatting at the selection as
- * a definition's properties — everything that differs from the
- * config-derived baseline. Receipt test: capture from a
- * directly-bolded Normal span → { bold: true }.
+ * The effective formatting at the selection as a definition's
+ * properties — everything that differs from the config-derived
+ * baseline.
  */
 export function captureStyleFromSelection(
   editor: Editor,

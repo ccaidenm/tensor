@@ -9,11 +9,10 @@ import type { A11yScanContext } from '@/lib/a11yCheck/types';
 import { renderTensor, settleLayout } from './harness';
 
 /**
- * M-A11Y — the scan suite: the three content checks over real PM docs
- * (the harness editor; the scan itself is pure). The band ruling is
- * pinned both ways — band alt/contrast INCLUDED, band headings
- * EXCLUDED from the hierarchy walk. (The panel/trigger suite lives in
- * a11yCheck.test.tsx; the pure WCAG vectors in a11yContrast.test.ts.)
+ * The scan suite: the three content checks over real PM docs (the
+ * harness editor; the scan itself is pure). Band alt/contrast INCLUDED,
+ * band headings EXCLUDED from the hierarchy walk. (The panel/trigger
+ * suite: a11yCheck.test.tsx; the pure WCAG vectors: a11yContrast.test.ts.)
  */
 
 const baseCtx = (over: Partial<A11yScanContext> = {}): A11yScanContext => ({
@@ -53,7 +52,7 @@ function textPos(editor: Editor, text: string): number {
   return found;
 }
 
-describe('M-A11Y: the alt check', () => {
+describe('the alt check', () => {
   it('a block image with empty or whitespace alt is flagged; a described one is not', async () => {
     const { editor } = renderTensor('<p>one</p>');
     await settleLayout();
@@ -110,7 +109,7 @@ describe('M-A11Y: the alt check', () => {
   });
 });
 
-describe('M-A11Y: the heading hierarchy check', () => {
+describe('the heading hierarchy check', () => {
   it('H3 directly under H1 is flagged as a skipped level', async () => {
     const { editor } = renderTensor('<h1>Title</h1><h3>Deep</h3>');
     await settleLayout();
@@ -164,7 +163,7 @@ describe('M-A11Y: the heading hierarchy check', () => {
   });
 });
 
-describe('M-A11Y: the contrast check', () => {
+describe('the contrast check', () => {
   it('the baseline (black on white) never flags — zero noise on plain docs', async () => {
     const { editor } = renderTensor('<p>plain text</p><h1>heading</h1>');
     await settleLayout();
@@ -306,7 +305,7 @@ describe('M-A11Y: the contrast check', () => {
   });
 });
 
-describe('M-A11Y: result shape and memoization', () => {
+describe('result shape and memoization', () => {
   it('kinds keep their fixed order (alt, headings, contrast) regardless of doc order', async () => {
     const { editor } = renderTensor('<p>gray</p><h1>a</h1><h3>b</h3>');
     await settleLayout();
@@ -330,7 +329,7 @@ describe('M-A11Y: result shape and memoization', () => {
   });
 });
 
-describe('M-A11Y: decorative marking (the alt exemption)', () => {
+describe('decorative marking (the alt exemption)', () => {
   it('DECORATIVE images are exempt from the alt rule — block and inline; untoggling flags again', async () => {
     const { editor } = renderTensor('<p>one</p>');
     await settleLayout();

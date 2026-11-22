@@ -9,10 +9,8 @@ import {
 } from '@/lib/editor/headerFooterCommands';
 
 /**
- * M-HEADER-FOOTER-2 — Insert ▸ Pages: the Header and Footer entry
- * points. Each button INSERTS its doc-level container (presence IS
- * enablement) and focuses its END — Word's flow: enable → type →
- * click body / Close to leave. Active state = container presence.
+ * Insert ▸ Pages. Each button inserts its doc-level container (presence
+ * IS enablement) and focuses its end. Active state = container presence.
  */
 export function PagesGroup() {
   const editor = useDocumentStore((s) => s.editor);

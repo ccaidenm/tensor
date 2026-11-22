@@ -1,9 +1,7 @@
-/** Highest `$N` backreference number referenced in a replacement template
- *  (ignores `$$` and `$&`, which are always valid). Used to warn when a
- *  replacement references a capture group the pattern doesn't have — the
- *  "$1 with no parentheses in the pattern" trap, which otherwise silently
- *  replaces matches with an empty string. */
-export function getMaxReferencedGroup(template: string): number {
+/** Highest `$N` backreference referenced in a replacement template
+ *  (ignores `$$` and `$&`) — used to warn when a replacement references
+ *  a capture group the pattern doesn't have (silently inserts ""). */
+function getMaxReferencedGroup(template: string): number {
   let max = 0;
   const re = /\$(\$|&|\d{1,2})/g;
   let m: RegExpExecArray | null;

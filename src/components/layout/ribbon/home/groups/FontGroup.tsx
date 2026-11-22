@@ -39,20 +39,9 @@ import {
 import { ColorPickerButton } from "../../ColorPickerButton";
 
 /**
- * M-FONTS-A/B — the family picker, styled like the Styles dropdown
- * (not the thin base-ui Select): a wide popover with preview-rendered
- * rows, alphabetical, a "recently used" section (top 5, session
- * scope), per-family weight flyouts, and the Browse Fonts action as a
- * real row. Names are DISPLAY names — "System UI", never a raw
- * 'system-ui' or a "Variable" suffix (Geist is just "Geist").
- *
- * WEIGHT FLYOUTS: the axis/face weights a family actually offers.
- * 400 Regular and 700 Bold are selectable TODAY (they map onto the
- *  existing bold mark / its absence — fontString's two worlds). The
- * other axis stops (Light, ExtraLight, Black…) list with their names
- * but are disabled until the ENGINE's TextStyle grows a weight axis
- * (measured + painted through fontString — a shell-only lie would
- * break the one-ruler rule).
+ * The family picker: preview rows, alphabetical, a recently-used section,
+ * Browse Fonts. Names are DISPLAY names, never raw ids. Weight flyouts:
+ * only 400/700 apply (the engine's two worlds); other stops are disabled.
  */
 
 const RECENT_LIMIT = 5;
@@ -82,8 +71,7 @@ function availableWeights(entry: FontEntry): number[] {
 }
 
 export function FontGroup() {
-  // M-HEADER-FOOTER-2: ONE editor again — header/footer content rides
-  // the same PM doc (formatting works there via the same groups).
+  // Header/footer content rides the same PM doc — the formatting groups work there too.
   const editor = useDocumentStore((s) => s.editor);
 
   const defaultFontSize = useConfigStore((s) => s.config.editor.defaultFontSize);
@@ -168,13 +156,9 @@ export function FontGroup() {
       >
         {entry.displayName}
       </button>
-      {/* #101 — GDOCS LAW: the weights affordance exists ONLY when the
-          font carries stops beyond Normal/Bold (a 400/700-only font
-          needs no menu — the Bold button covers it). The menu is a
-          small anchored context menu listing the font's REAL stops:
-          Regular/Bold applicable, the other axis stops visible-but-
-          disabled (the engine renders two weights today — picking
-          Light would render Regular, the accepted-input lie). */}
+      {/* #101 — the weights affordance exists only when the font carries
+          stops beyond 400/700 (the Bold button covers those). Regular/Bold
+          are applicable; other axis stops list visible-but-disabled. */}
       {availableWeights(entry).some((w) => w !== 400 && w !== 700) && (
         <DropdownMenu>
           <Tooltip>
@@ -269,9 +253,6 @@ export function FontGroup() {
             </div>
             {sorted.map((entry) => row(entry, 'all'))}
           </div>
-          {/* #101 — the old in-place overlay panel is gone too: the
-              weights affordance is now a small anchored context menu on
-              the row's chevron (the GDocs law above). */}
           <div className="border-t">
             <button
               data-testid="font-picker-browse"

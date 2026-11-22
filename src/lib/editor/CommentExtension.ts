@@ -7,66 +7,28 @@ import { AddMarkStep, RemoveMarkStep } from '@tiptap/pm/transform';
 import { useCommentStore } from '@/lib/comments/store';
 
 /**
- * #COMMENTS — the comment MARK: the ANCHORING half of the two-half
- * model (see comments/store.ts for the ruling). One mark, one attr
- * (`threadId`), all anchoring semantics ride ProseMirror's mark
- * machinery for free:
- *
- *  - inclusive (the mark default): typing at EITHER edge of an anchored
- *    range extends the anchor — the issue's edge-editing rule.
- *  - marks ride getJSON()/setContent verbatim → the .wpdoc round-trip
- *    needs no extra machinery (the ids join to metadata.commentThreads).
- *  - a thread spanning paragraphs/columns/section boundaries is simply
- *    the same threadId on several text runs — PM moves each piece with
- *    its block.
- *  - deleting the full anchored range deletes the marks → the thread
- *    becomes ORPHANED (store record without a live anchor) — the
- *    defined state, never silently gone.
- *
- * RECOGNIZED-QUIET (the indexEntry precedent, adapter.ts's dropped-attr
- * enumeration): the layout adapter never reads this mark — comments
- * cannot change pagination or line layout, structurally. The pageless
- * surface styles the rendered spans via CSS; paginated paints its own
- * overlay from PM positions (the SearchHighlights pattern).
- *
- * THE TRACKING PLUGIN (this mark's own ProseMirror plugins) owns the
- * store-side projections:
- *  - ANCHORED SCAN: on any transaction whose changed ranges touch a
- *    comment mark (a cheap gate — ordinary typing never trips it), a
- *    full-doc scan writes the set of live threadIds to the store. This
- *    is VIEW-state derivation, NOT document data — never markDirty.
- *  - THE JANITOR: marks whose threadId has no store record are stripped
- *    (only reachable via undo-of-delete or a hand-edited file — the
- *    store write order and hydrate-before-load keep it dormant in the
- *    normal flows). Silent strip, undo-asymmetric: documented.
- *  - ACTIVE THREAD: the thread under the caret (selection tracking) —
- *    the gutter's highlight/jump partner.
+ * The comment MARK — one attr (`threadId`): inclusive edges grow the
+ * anchor; the adapter never reads it (comments cannot move layout).
+ * The plugin below tracks live/active threads and strips unknown ones.
  */
 
 export const COMMENT_MARK_NAME = 'comment';
 
-/** One anchored span of a thread — PM positions (the spell plugin's
- *  position spelling: ranges survive edits by mapping/rebuilding, so
- *  both view modes project from ONE state). Adjacent same-thread runs
- *  merge; a thread spanning blocks/columns/sections is several ranges. */
+/** One anchored span of a thread — PM positions; adjacent same-thread
+ *  runs merge, and a thread spanning blocks/sections is several ranges. */
 export interface CommentRange {
   threadId: string;
   from: number;
   to: number;
 }
 
-/** A word character for the caret fallback (letters, digits, and
- *  in-word apostrophes — both spellings). Not the spell layer's
- *  segmentation (that's LanguageTool's); this is "what a user means
- *  by the word the cursor is in". */
+/** A word character for the caret fallback — "what the user means by
+ *  the word the cursor is in", not the spell layer's segmentation. */
 const WORD_CHAR = /[\p{L}\p{N}'’]/u;
 
 /**
- * #COMMENTS — the caret fallback: the word around a position, or null
- * when the caret sits in no word (whitespace / an empty block — the
- * caller toasts). A caret at a word/space boundary reads the word on
- * its text side (the space belongs to no word) — before, inside, and
- * after a word all mean that word, the selection intuition.
+ * The word around a position, or null when the caret sits in no word.
+ * A caret at a word/space boundary reads the word on its text side.
  */
 export function wordAround(doc: PMNode, pos: number): { from: number; to: number } | null {
   const $pos = doc.resolve(pos);
@@ -93,15 +55,11 @@ export interface CommentTrackingState {
   ranges: CommentRange[];
 }
 
-/** The tracking plugin's key — PaginatedView's projection reads the
- *  same state the pageless decorations render (the spellPluginKey
- *  pattern: one state, two projections). */
+/** The tracking plugin's key — both view modes project from this one state. */
 export const commentTrackingKey = new PluginKey<CommentTrackingState>('commentTracking');
 
 /** All comment-marked spans of the doc, merged into per-thread ranges.
- *  Full-doc walk — called on doc/mark-affecting transactions only (the
- *  same gating family as the appendTransaction scan; relayout already
- *  does heavier work per keystroke). */
+ *  Full-doc walk — run on mark-affecting transactions only. */
 export function collectCommentRanges(doc: PMNode): CommentRange[] {
   const out: CommentRange[] = [];
   doc.descendants((node, pos) => {
@@ -110,8 +68,7 @@ export function collectCommentRanges(doc: PMNode): CommentRange[] {
     if (!m?.attrs.threadId) return true;
     const threadId = m.attrs.threadId as string;
     const last = out[out.length - 1];
-    // Adjacent same-thread runs merge (one logical anchor, N text
-    // nodes); runs in different blocks never merge (position jump).
+    // Adjacent same-thread runs merge (one anchor, N text nodes); different blocks never merge.
     if (last && last.threadId === threadId && last.to === pos) {
       last.to = pos + node.nodeSize;
     } else {
@@ -150,13 +107,9 @@ function threadAtPos(state: EditorState, pos: number): string | null {
   return null;
 }
 
-/** The ACTIVE-thread decorations (the pageless visual tier): the
- *  caret's thread's ranges get `.tensor-comment-active` on top of the
- *  mark spans' base tint. Live-composed from the cached ranges + the
- *  LIVE activeThreadId (the caret's thread changes on selection moves,
- *  which carry no doc change and must not dispatch) — the spell
- *  decorations are cached state, this tier is a read. Exported for the
- *  tests (the plugin's props wire it directly). */
+/** The ACTIVE-thread decorations (the pageless tier): the caret's
+ *  thread's ranges get `.tensor-comment-active`, composed LIVE from
+ *  cached ranges + current activeThreadId (selection moves don't dispatch). */
 export function activeCommentDecorations(state: EditorState): DecorationSet {
   const activeId = useCommentStore.getState().activeThreadId;
   if (!activeId) return DecorationSet.empty;
@@ -171,10 +124,8 @@ export function activeCommentDecorations(state: EditorState): DecorationSet {
 
 export const CommentMark = Mark.create({
   name: COMMENT_MARK_NAME,
-  // Typing at either edge grows the anchor (the issue's edge rule);
-  // keepOnSplit mirrors IndexMark (an Enter inside a comment keeps the
-  // mark on both pieces — one thread, two ranges; the documented paste/
-  // split posture).
+  // Typing at either edge grows the anchor; Enter inside a comment keeps
+  // the mark on both pieces (mirrors IndexMark).
   keepOnSplit: true,
 
   addAttributes() {
@@ -190,10 +141,8 @@ export const CommentMark = Mark.create({
     };
   },
 
-  // CLIPBOARD (the IndexMark law): parseHTML matches ONLY Tensor's own
-  // marker — external <span>s never parse in; internal copy/paste
-  // round-trips the mark (a pasted copy re-anchors the SAME thread —
-  // the documented multi-range posture, single-source-of-truth store).
+  // parseHTML matches ONLY Tensor's own marker — external <span>s never
+  // parse in; a pasted copy re-anchors the SAME thread (multi-range posture).
   parseHTML() {
     return [{ tag: 'span[data-comment-thread-id]' }];
   },
@@ -212,10 +161,8 @@ export const CommentMark = Mark.create({
         (threadId: string) =>
         ({ state, tr, dispatch }) => {
           // tr.selection (NOT state.selection): a chained
-          // setTextSelection() (the caret→word fallback path) updates
-          // the TRANSACTION's selection — reading the state's would
-          // anchor the pre-selection range. Unchained calls are
-          // identical (no prior steps).
+          // setTextSelection updates the TRANSACTION's selection;
+          // state's would anchor the pre-selection range.
           const { selection } = tr;
           if (selection.empty) return false;
           if (dispatch) {
@@ -244,13 +191,10 @@ export const CommentMark = Mark.create({
     return [
       new Plugin({
         key: commentTrackingKey,
-        // THE SPELL LIFECYCLE (SpellExtension's law): ranges live in PM
-        // positions so edits map them for free; membership changes
-        // (mark steps) rebuild. The ACTIVE-TINT decorations are NOT
-        // cached state — they compose the cached ranges with the LIVE
-        // activeThreadId read at decoration time (the caret's thread
-        // changes on selection moves, which carry no doc change and
-        // must not dispatch).
+        // Ranges live in PM positions (edits map them free; membership
+        // changes rebuild). The active-tint decorations are composed
+        // live at decoration time with the current activeThreadId
+        // (selection moves carry no doc change and must not dispatch).
         state: {
           init: (_, state) => ({ ranges: collectCommentRanges(state.doc) }),
           apply: (tr, prev) => {
@@ -258,9 +202,8 @@ export const CommentMark = Mark.create({
               (s) => s instanceof AddMarkStep || s instanceof RemoveMarkStep,
             );
             if (!tr.docChanged && !membershipChanged) return prev;
-            // Rebuild on ANY doc change (not a remap): typing at an
-            // edge CARRIES the mark to the inserted text (inclusive) —
-            // a remap of the old range would miss the grown extent.
+            // Rebuild on ANY doc change, not a remap: typing at an edge
+            // carries the mark to inserted text, which a remap would miss.
             return { ranges: collectCommentRanges(tr.doc) };
           },
         },
@@ -268,18 +211,10 @@ export const CommentMark = Mark.create({
           decorations: activeCommentDecorations,
         },
         appendTransaction(transactions, oldState, newState) {
-          // ── THE GATE: did any changed range (old OR new coords) touch
-          // a comment mark? Old ranges catch deletions (the marks are
-          // gone from the new doc); new ranges catch setMark/paste. An
-          // ordinary keystroke touches no comment marks → null return,
-          // zero work. Mark steps count too — Add/RemoveMarkStep leave
-          // docChanged FALSE (content untouched) but ARE anchor changes
-          // (setComment, the strip, undo of either). Multi-step
-          // transactions are the conservative exception: per-step
-          // coords live in intermediate docs, so they trip
-          // unconditionally (they are rare — composites,
-          // multi-removeMark strips, undo batches — and a false trip
-          // costs one scan, while a miss would stale the orphan state).
+          // The gate: old ranges catch deletions, new ranges catch
+          // setMark/paste; mark steps count (docChanged stays false).
+          // Multi-step transactions trip unconditionally — per-step
+          // coords live in intermediate docs.
           const relevant = transactions.filter(
             (tr) =>
               tr.docChanged ||
@@ -293,11 +228,8 @@ export const CommentMark = Mark.create({
           if (!touched) {
             for (const tr of relevant) {
               const step = tr.steps[0]!;
-              // Mark steps DON'T move positions — their map is identity
-              // (map.forEach yields nothing), so the range check below
-              // never fires for them. Their own from/to IS the touched
-              // range; only COMMENT-mark steps trip (bold/highlight
-              // steps never change anchored membership).
+              // Mark steps' map is identity, so the range check never
+              // fires for them — only COMMENT-mark steps trip.
               if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
                 if (step.mark.type === oldMarkType || step.mark.type === newMarkType) touched = true;
                 continue;
@@ -335,8 +267,8 @@ export const CommentMark = Mark.create({
           }
           if (!touched) return null;
 
-          // ── FULL-DOC SCAN (only on touched transactions): live thread
-          // ids + marks whose thread is missing from the store.
+          // Full-doc scan (touched transactions only): live thread ids
+          // + marks whose thread is missing from the store.
           const store = useCommentStore.getState();
           const known = new Set(Object.keys(store.threads));
           const anchored = new Set<string>();
@@ -354,10 +286,8 @@ export const CommentMark = Mark.create({
 
           if (unknown.length === 0) return null;
 
-          // ── THE JANITOR: strip marks with no thread record (never
-          // render-highlighted, never persisted as orphans — the PM doc
-          // stays honest). Silent: the undo-asymmetry is documented in
-          // docs/features/comments.md.
+          // The janitor: strip marks with no thread record — silently
+          // (the undo-asymmetry is documented in docs/features/comments.md).
           const tr = newState.tr;
           for (const r of unknown) tr.removeMark(r.from, r.to, newMarkType);
           tr.setMeta('commentJanitor', true);
@@ -367,9 +297,8 @@ export const CommentMark = Mark.create({
           update: (view) => {
             const { state } = view;
             const { selection } = state;
-            // The caret's thread: the from-edge's thread (collapsed
-            // inside a range → its thread; a range → the thread at its
-            // start — the click-to-jump case). Null when in none.
+            // The caret's thread: collapsed inside a range → its thread;
+            // a range → the thread at its start (click-to-jump case).
             const tid = threadAtPos(state, selection.from);
             useCommentStore.getState().setActiveThread(tid);
           },

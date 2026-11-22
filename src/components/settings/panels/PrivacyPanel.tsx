@@ -31,9 +31,8 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
   );
 }
 
-/** TRANSLATE — the posture row (the spell-check row's twin): where the
- *  text goes, stated plainly. The provider/key are MANAGED in
- *  Proofing; this row documents and opens the consent setup. */
+/** The translate posture row: where text goes, stated plainly. The
+ *  provider/key are managed in Proofing; this row opens the setup. */
 function TranslateRow() {
   const configured = useConfigStore((s) => s.config.translation.configured);
   const provider = useConfigStore((s) => s.config.translation.provider);
@@ -86,7 +85,7 @@ export function PrivacyPanel() {
         <Row
           icon={<Type className="h-4 w-4" />}
           label="Allow browsing online font catalogs"
-          description="Enables network requests to Google Fonts / Font Share when you search. No browsing ships yet — this only saves your preference for when it does (milestone B)."
+          description="Adds Google Fonts, Font Share, and Fontsource to the font browser's search. While off, the font browser shows only your installed, bundled, and uploaded fonts — nothing requests the network."
         >
           <Switch
             checked={allowFontCatalogs}

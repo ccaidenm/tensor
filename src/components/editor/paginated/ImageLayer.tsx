@@ -13,18 +13,12 @@ import {
 } from '@/lib/media/bitmapCache';
 
 /**
- * M-IMAGES-1 — the paginated image paint: consumes placed[] (the
- * engine's placement facts — the shell never computes image geometry;
- * fit-down/align math already happened engine-side) and draws each
- * image at its placed rect via ctx.drawImage, on a DPR-scaled canvas
- * inside the zoom transform — exactly like BlockCanvas, a sibling
- * surface merged by (pageIndex, rect.y).
- *
- * ASYNC BITMAP: geometry is KNOWN immediately (placed[]) — the tinted
- * placeholder paints first, and the real bitmap paints ONE canvas pass
- * when its decode lands (no relayout — display-only arrival). Media
- * still loading at startup (the store fills asynchronously from the
- * container) shows the same tint.
+ * The paginated image paint: consumes placed[] (engine facts —
+ * fit-down/align happened engine-side), drawing each image at its
+ * placed rect via ctx.drawImage on a DPR-scaled canvas inside the zoom
+ * transform (BlockCanvas's sibling). Async bitmap: the tinted
+ * placeholder paints first; the bitmap repaints when its decode lands
+ * — no relayout.
  */
 
 /** Pre-roundRect path builder (the feature-detect fallback). */
@@ -52,9 +46,9 @@ interface ImageLayerProps {
   geometry: PageGeometry;
   /** This page's placed images (document order). */
   placed: readonly PlacedRect[];
-  /** M-IMAGES-1.5: corner radius per blockId (paint-only, from the
-   *  node attrs — NEVER engine geometry; identity changes per attr
-   *  write so flips repaint without any epoch). */
+  /** Corner radius per blockId (paint-only, from the node attrs —
+   *  NEVER engine geometry; identity changes per attr write so flips
+   *  repaint without any epoch). */
   radii: ReadonlyMap<string, number>;
 }
 
@@ -77,9 +71,8 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
     []
   );
 
-  // Kick loads for any unresolved-but-stored media (startup pending).
-  // M-TABLES: only kind 'image' carries src — other placed kinds are
-  // filtered upstream; guarded here too.
+  // Kick loads for any unresolved-but-stored media (startup pending);
+  // only kind 'image' carries src (upstream filters, guarded here too).
   useEffect(() => {
     for (const p of placed) {
       if (p.kind !== 'image') continue;
@@ -90,8 +83,8 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
     }
   }, [placed]);
 
-  // LAYOUT effect — BlockCanvas paints in one too; the flush order is
-  // then the MOUNT order (the paint-order receipt's basis).
+  // LAYOUT effect — BlockCanvas paints in one too, so the flush order
+  // is the MOUNT order (the paint order).
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || placed.length === 0) return;
@@ -103,13 +96,12 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     void radii;
     for (const p of placed) {
-      if (p.kind !== 'image') continue; // M-TABLES: cell rects paint in TableCellLayer
+      if (p.kind !== 'image') continue; // cell rects paint in TableCellLayer
       const { x, y, width, height } = p.rect;
       const px = geometry.contentBox.x + x;
       const py = geometry.contentBox.y + y;
-      // M-IMAGES-1.5: corner radius — PAINT-ONLY clip. Clamped to half
-      // the min placed dim (the registry's law mirrored at paint); 0 =
-      // no clip at all (the common case stays a plain drawImage).
+      // Corner radius — PAINT-ONLY clip, clamped to half the min placed
+      // dim (mirroring the registry); 0 = no clip (plain drawImage).
       const rawRadius = radii.get(p.blockId) ?? 0;
       const radius = Math.max(0, Math.min(rawRadius, Math.floor(Math.min(width, height) / 2)));
       if (radius > 0) {
@@ -130,9 +122,8 @@ export function ImageLayer({ geometry, placed, radii }: ImageLayerProps) {
       if (bitmap) {
         ctx.drawImage(bitmap, px, py, width, height);
       } else if (sha && getBitmapFailed(sha)) {
-        // M-IMAGES-2.2 — TERMINAL failure: darker tint + cross-hatch,
-        // never mistaken for "still loading". save/restore keeps the
-        // hatch's stroke state off the next paint.
+        // TERMINAL failure: darker tint + cross-hatch — never mistaken
+        // for "still loading". save/restore keeps stroke state contained.
         ctx.save();
         ctx.fillStyle = FAILED_TINT;
         ctx.fillRect(px, py, width, height);

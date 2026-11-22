@@ -17,11 +17,9 @@ import type { StyleDefinition } from '@/lib/styles/types';
 import type { JSONContent } from '@tiptap/core';
 
 /**
- * M-DOCX — the DOCX import flow: read → unzip → parse → the FONT
- * choice (ruling 4: the dialog fires only when the file references
- * families outside the bundled catalog) → media ingest (bytes →
- * sha256 → the MediaStore contract) → the inverse mapping → the
- * result with its loud notices.
+ * The DOCX import flow: read → unzip → parse → the font choice (the
+ * dialog fires only for out-of-catalog families) → media ingest → the
+ * inverse mapping → the result with its notices.
  */
 
 export interface DocxImportResult {
@@ -33,7 +31,7 @@ export interface DocxImportResult {
   lineNumbers: LineNumbersSetting | null;
   /** The title from core properties, or the filename. */
   title: string;
-  /** The loud postures — surfaced by the open path as one notice. */
+  /** Import notices — surfaced by the open path as one notice. */
   notices: string[];
 }
 

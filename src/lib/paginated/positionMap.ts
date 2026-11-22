@@ -3,38 +3,27 @@ import { fitDownImage, type LayoutResult, type LineBox, type PageGeometry, type 
 import { pageTops } from './pageStack';
 import type { AdapterBlock } from './adapter';
 
-// THE PRINCIPLE: all selection state changes go through PM
-// transactions — the shell never tracks its own selection. The painted
-// selection, search highlights, caret, and toolbar are projections of
-// PM state, exactly as tracks are a projection of the doc.
-//
-// This module is the bridge between PM's coordinate space and the
-// engine's: PM pos <-> (block, offset-in-block) <-> LineBox ranges, and
-// from there to stack-local painted rects shared by every overlay.
+// All selection state lives in PM — the painted selection, caret, and
+// highlights are projections. This module bridges PM's coordinate
+// space and the engine's: PM pos <-> (block, offset) <-> LineBox
+// ranges -> stack-local painted rects.
 
 export type TextAlign = 'left' | 'center' | 'right';
 
-/** THE one alignment-offset function (left/center/right; justify is
- * engine work, out of the shell). Consumed by paint, caret, selection
- * rects, and hitTest — a second derivation anywhere is the asymmetry
- * bug class this kills. */
+/** THE one alignment-offset function (justify is engine work) —
+ * paint, caret, selection rects, and hitTest all consume it. */
 export function alignOffset(align: TextAlign, lineWidth: number, contentWidth: number): number {
   if (align === 'center') return (contentWidth - lineWidth) / 2;
   if (align === 'right') return contentWidth - lineWidth;
   return 0;
 }
 
-/** #74 COLUMNS — the COLUMN frame a line flows in, from the engine's
- * resolved grid facts (PageGeometry.columns + LineBox.column): the
- * column's left edge and width, CONTENT-BOX-relative. Single-column
- * pages (no facts, no slot index) return the content box itself, so
- * every existing caller's behavior is bit-identical — the additive
- * law. THE ONE derivation: the align containers (a centered block
- * centers on its column, not the content box), the wrap-width inputs
- * (the engine broke the line at the column's width), and the
- * selection-stripe clamps (middle lines end at the column's right
- * edge, not the content box's) all consume this — a second derivation
- * anywhere is the asymmetry bug class alignOffset kills. */
+/**
+ * #74 — the COLUMN frame a line flows in, content-box-relative.
+ * Single-column pages return the content box itself (bit-identical).
+ * Align containers, wrap-width inputs, and selection clamps all
+ * consume this — the one derivation.
+ */
 export function lineColumnFrame(page: PageGeometry, line: LineBox): { left: number; width: number } {
   if (page.columns && line.column != null) {
     const slot = page.columns[line.column];
@@ -58,15 +47,10 @@ export interface BlockOffset {
 }
 
 /**
- * M-TABLES — the table block's text is the CANONICAL cell-paragraph
- * concatenation; a PM pos inside a cell maps through the block's
- * cell-paragraph map (each entry: relStart = the paragraph's first
- * text position relative to the TABLE node — pmStart = from +
- * relStart — and its text slice). Structural positions (row/cell
- * boundaries — a CellSelection's anchor points live here) clamp to
- * the nearest preceding slice's end: text selections can never sit
- * there (cells are isolating), and the cell-selection overlay has its
- * own path. The slices tile the block text exactly.
+ * A table's text is the canonical cell-paragraph concatenation; a PM
+ * pos inside a cell maps through the cell-paragraph map. Structural
+ * positions clamp to the nearest preceding slice's end — text
+ * selections never sit there (cells are isolating).
  */
 function tablePosToOffset(block: AdapterBlock, pos: number): number {
   const paras = block.table!.paragraphs;
@@ -92,12 +76,8 @@ function tableOffsetToPmPos(block: AdapterBlock, offset: number): number {
   return block.from + found.relStart + delta;
 }
 
-// M-REFS: the ENTRY map bridge — the table cell map's shape, ONE lane
-// per entry (the container's children are real paragraphs; a plain
-// click/caret/selection inside an entry line resolves to the TRUE PM
-// position inside it). The synthetic tab/number suffix past an
-// entry's textLen clamps to that entry's end (the number is a LAYOUT
-// fact with no PM position).
+// The ENTRY map bridge, one lane per entry; the synthetic tab/number
+// suffix clamps to the entry's end (a layout fact with no PM position).
 function refPosToOffset(block: AdapterBlock, pos: number): number {
   const entries = block.reference!.entries;
   let found = null as (typeof entries)[number] | null;
@@ -122,19 +102,14 @@ function refOffsetToPmPos(block: AdapterBlock, offset: number): number {
   return block.from + found.relStart + delta;
 }
 
-/** PM pos -> (block, text offset). Boundaries: pos at a block's start
- * maps to offset 0; pos at/after a block's end clamps to its text end
- * (a selection ending at the next block's start projects onto this
- * block's last position). pos before the first block maps into it. */
 /**
- * M-PAGEFIELD — THE PROSE RUN MAP: PM positions and block-text offsets
- * diverge at FIELD runs. A field is ONE PM position (an inline atom)
- * but its measured placeholder is N block-text characters (the warm
- * total's digits — the slot the engine breaks lines at). A linear
- * pos<->offset mapping shifts everything after a field by (N-1),
- * which clamps selections at the field and lands carets one char into
- * the next run — the reported "not selectable" bug. Both mapping
- * directions for prose blocks route through this table.
+ * PM pos -> (block, text offset). pos at a block's start maps to
+ * offset 0; pos at/after a block's end clamps to its text end.
+ *
+ * PM positions and block-text offsets diverge at FIELD
+ * runs: a field is one PM position but its measured placeholder is N
+ * block-text characters; a linear mapping shifts everything after it
+ * by (N-1). Both prose mapping directions route through this table.
  */
 interface ProseRunSpan {
   /** PM position of the run's first char, relative to from+1. */
@@ -219,14 +194,12 @@ export function pmPosToBlockOffset(
     const mid = (lo + hi) >> 1;
     const b = blocks[mid];
     if (pos > b.from && pos <= b.to) {
-      // M-TABLES: a table's pos resolves through the cell-paragraph map.
+      // Tables resolve through the cell-paragraph map.
       if (b.table) return { block: b, offset: tablePosToOffset(b, pos) };
-      // M-REFS: a reference table's pos resolves through the ENTRY
-      // map (the container's children are real paragraphs — the
-      // caret lives INSIDE entry text, same bridge as cells).
+      // A reference table resolves through the ENTRY map (the same
+      // bridge as cells).
       if (b.reference) return { block: b, offset: refPosToOffset(b, pos) };
-      // M-PAGEFIELD: prose maps through the RUN TABLE (field-aware —
-      // the linear spelling shifted everything after a field).
+      // Prose maps through the RUN TABLE (field-aware).
       return { block: b, offset: prosePmRelToOffset(b, pos - (b.from + 1)) };
     }
     if (pos <= b.from) hi = mid - 1;
@@ -236,44 +209,34 @@ export function pmPosToBlockOffset(
 }
 
 export function blockOffsetToPmPos(block: AdapterBlock, offset: number): number {
-  // M-TABLES: through the cell-paragraph map.
   if (block.table) return tableOffsetToPmPos(block, offset);
-  // M-REFS: through the ENTRY map (real entry text — a plain click in
-  // an entry line places the caret at the true position).
   if (block.reference) return refOffsetToPmPos(block, offset);
-  // M-PAGEFIELD: prose maps through the RUN TABLE (field-aware).
+  // Prose maps through the RUN TABLE (field-aware).
   return block.from + 1 + proseOffsetToPmRel(block, offset);
 }
 
 /**
- * The LineBox containing a text offset. Boundary offsets (== a line's
- * rangeStart) belong to the later line; end-of-text belongs to the last.
- * M-TABLES: a TABLE cell's lines can be EMPTY-ranged (an empty cell's
- * slice [k, k) — the separator law gives each a distinct k); those
- * match on rangeStart EXACTLY (inclusive end), so the caret routes to
- * the clicked empty cell instead of falling to the last line.
+ * The LineBox containing a text offset. Boundary offsets belong to
+ * the later line; end-of-text belongs to the last. A table cell's
+ * EMPTY-ranged lines (slice [k, k)) match on rangeStart exactly, so
+ * the caret routes to the clicked empty cell.
  */
 export function lineForOffset(lines: readonly LineBox[], offset: number): LineBox | null {
   const first = lines[0];
   const last = lines[lines.length - 1];
   if (!first || !last) return null;
   if (offset < first.rangeStart) return first;
-  // M-TABLES rule 1 — an EMPTY-ranged cell line (an empty cell's slice
-  // [k, k); the separator law gives each a distinct k) matches on
-  // rangeStart exactly, so the caret routes to the clicked cell.
+  // Rule 1 — an EMPTY-ranged cell line matches on rangeStart exactly.
   for (const l of lines) {
     if (l.rangeStart === l.rangeEnd && offset === l.rangeStart) return l;
   }
   if (offset >= last.rangeEnd) return last;
-  // Rule 2 — the half-open walk (the pinned prose boundary rule: an
-  // offset shared by a line's end and the next line's start belongs to
-  // the LATER line).
+  // Rule 2 — a shared end/start boundary belongs to the LATER line.
   for (const l of lines) {
     if (offset >= l.rangeStart && offset < l.rangeEnd) return l;
   }
-  // Rule 3 — the caret at a line's END that is NOT any line's start
-  // (the SEPARATOR position between cell paragraphs): it belongs to
-  // the line it ends — the caret paints after that line's last glyph.
+  // Rule 3 — a caret at a line's end that is no line's start belongs
+  // to the line it ends.
   for (const l of lines) {
     if (l.rangeEnd === offset) return l;
   }
@@ -281,21 +244,13 @@ export function lineForOffset(lines: readonly LineBox[], offset: number): LineBo
 }
 
 /**
- * M-PAGEFIELD — THE PER-PAGE INK SHIFT. A band line's geometry is
- * SHARED across pages (the engine echoes the same LineBoxes), so a
- * field's slot is measured at the WARM TOTAL's digits — the widest
- * page number, stable for every page. The DRAWN number on THIS page
- * (line.pageIndex) is narrower slack; Word re-lays footers per page,
- * our shared geometry cannot, so the PAINT closes the slack as ink:
- * the number draws LEFT-anchored in its slot and every segment after
- * it shifts left by the accumulated slack — page 3 renders "Page 3
- * of 10" exactly as Word does, page 10 shift 0. Derives wholly from
- * (line, block): the placeholder digits sit in the block text, the
- * resolved number is line.pageIndex+1 ('pages' fields have no slack
- * — the resolved total IS the slot). Consumers: lineOffsetX (hence
- * caret, selection rects, search extents — automatically), paint,
- * hitTest. Tabs after a field shift too (documented approximation:
- * a right-stop would misalign by the slack; rare in bands).
+ * The per-page ink shift. Band geometry is shared
+ * across pages, so a field's slot is measured at the warm total's
+ * digits; the number actually drawn on this page is narrower slack.
+ * The paint closes the slack as ink: the number draws left-anchored
+ * and every segment after it shifts left by the accumulated slack.
+ * Consumers: lineOffsetX (hence caret/selection/search), paint,
+ * hitTest.
  */
 export function fieldShiftBefore(
   line: LineBox,
@@ -318,14 +273,12 @@ export function fieldShiftBefore(
   return shift;
 }
 
-/** x (content-box px) of a text offset within its line, measured with
- * the same metrics instance that measured the layout. `objectMaxWidth`
- * (the block's BASE wrap width — contentBox − indents, the engine's
- * clamp input) makes the walk OBJECT-AWARE: an offset past an inline
- * object's token pays the object's PLACED advance (the same fit-down
- * the engine/painter used — data, never measured). Without it the
- * walk is text-only (legacy callers; a caret past an object would sit
- * at the object's LEFT edge — the zero-width selection rect bug). */
+/**
+ * x (content-box px) of a text offset within its line, measured with
+ * the layout's own metrics. `objectMaxWidth` makes the walk
+ * object-aware (an offset past an inline object pays the object's
+ * placed advance); without it the walk is text-only (legacy callers).
+ */
 export function lineOffsetX(
   line: LineBox,
   block: AdapterBlock,
@@ -333,18 +286,14 @@ export function lineOffsetX(
   metrics: TextMetrics,
   _objectMaxWidth?: number
 ): number {
-  // M-RULER Phase 4: the breaker EMITS each segment's placed x (the
-  // pen walk) — the walk seeds from it instead of accumulating measured
-  // prefix sums, which cannot model tab advances (a \t's jump is
-  // pen-dependent; center/right stops reposition their text). The
-  // objectMaxWidth parameter is legacy: the engine's placement already
-  // includes an inline object's placed advance.
+  // The breaker EMITS each segment's placed x — the walk seeds from
+  // it instead of accumulating measured prefix sums (which cannot
+  // model tab advances). objectMaxWidth is legacy: the engine's
+  // placement already includes an inline object's advance.
   for (let si = 0; si < line.segments.length; si++) {
     const seg = line.segments[si]!;
-    // M-PAGEFIELD: ink after a field shifts by the accumulated slack
-    // (the shared-geometry/per-page-ink ruling — see fieldShiftBefore).
-    // The CARET and every rect derivation route through here, so they
-    // agree with the paint by construction.
+    // Ink after a field shifts by the accumulated slack (see
+    // fieldShiftBefore); caret and rects agree with the paint.
     const shift = fieldShiftBefore(line, block, metrics, si);
     // Boundary offsets belong to the LATER segment (the lineForOffset
     // rule) — its seeded x is the boundary's x.
@@ -378,13 +327,10 @@ export function blockWrapWidth(contentWidth: number, block: AdapterBlock): numbe
 }
 
 /**
- * M-IMAGES-2.1 — the INLINE object's painted rect (the selection
- * overlay's geometry): the token's line, baseline-seated, the object's
- * placed dims — the SAME numbers paint.ts's drawImage uses. `pos` is
- * the PM position of the inlineImage NODE (a NodeSelection's from) —
- * it maps to the token offset (one position per object). Rect is
- * content-box-relative (the PlacedRect frame — the overlay consumer
- * adds the contentBox, identical to block images).
+ * The inline object's painted rect (the selection overlay's
+ * geometry): the token's line, baseline-seated, the object's placed
+ * dims — the SAME numbers paint.ts's drawImage uses. Rect is
+ * content-box-relative.
  */
 export function inlineObjectRect(
   blocks: readonly AdapterBlock[],
@@ -428,21 +374,15 @@ export function inlineObjectRect(
   };
 }
 
-/** The span walk shared by every range-rect derivation: PM range ->
+/**
+ * The span walk shared by every range-rect derivation: PM range ->
  * per-line {line, [s,e), block} spans. ONE derivation, no forks.
  *
- * M-HEADER-FOOTER-3 — THE ECHO RULES (the band-ambiguity fix):
- *  - `bandPage` (selection/caret callers): a band block's lines resolve
- *    ONLY on the ACTIVE page's echo — echoes share blockId AND
- *    rangeStart/rangeEnd (the engine re-emits per page), so an
- *    unfiltered walk paints selection on EVERY page and mis-orders
- *    partial-x. Absent (spell/search callers): all echoes pass, and
- *    the rect builders treat each echo as its own first/last.
- *  - `surface` (the cross-surface clamp): a selection whose ends sit
- *    on different surfaces (band container vs body — reachable via
- *    shift+click) paints ONLY the anchor's surface. PM state is
- *    untouched — the clamp is on what we PAINT (the tablePosToOffset
- *    precedent: honest projection of an awkward selection).
+ * `bandPage`: a band block's lines resolve only on the ACTIVE page's
+ * echo (echoes share blockId and range; unfiltered, selection would
+ * paint on every page). Absent: all echoes pass (spell/search).
+ * `surface`: a selection spanning band and body paints only the
+ * anchor's surface — a paint-time clamp, PM state untouched.
  */
 function matchSpans(
   blocks: readonly AdapterBlock[],
@@ -482,14 +422,13 @@ function matchSpans(
   return spans;
 }
 
-/** PM range -> per-line painted rects: partial x-range on the selection's
- * first/last line, full content width on middle lines. Stack-local,
- * pre-zoom — the caller renders inside the transform (zoom law: no
- * compensation).
- *
- * M-HEADER-FOOTER-3: `bandPage` restricts band echoes to the active
- * page (selection callers); the `surface`/`bandBlockIds` pair clamps
- * cross-surface selections to the anchor's side. */
+/**
+ * PM range -> per-line painted rects: partial x-range on the
+ * first/last line, full width on middle lines. Stack-local, pre-zoom
+ * (the caller renders inside the transform). `bandPage` restricts
+ * band echoes to the active page; `surface`/`bandBlockIds` clamp
+ * cross-surface selections to the anchor's side.
+ */
 export function textRangeLineRects(
   blocks: readonly AdapterBlock[],
   result: LayoutResult,
@@ -500,17 +439,15 @@ export function textRangeLineRects(
   bandPage?: number,
   surface?: 'band' | 'body',
   bandBlockIds?: ReadonlySet<string>,
-  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top) —
-   *  the y-only pageTops walk is WRONG for columns ≥ 2 (page 1's true
-   *  top is its row's, not the stack stride). Absent ≡ the legacy walk
-   *  (columns 1 — bit-identical). */
+  /** #101 — the grid's ROW tops (row-mates share a top; the y-only
+   *  pageTops walk is wrong for columns ≥ 2). Absent ≡ the legacy
+   *  walk (columns 1 — bit-identical). */
   tops?: number[]
 ): PaintedRect[] {
   const spans = matchSpans(blocks, result, from, to, bandPage, surface, bandBlockIds);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  // #58 — per-page geometry: the cumulative tops table replaces the
-  // uniform stride; each span's rect reads ITS page's contentBox.
+  // #58 — cumulative tops table; each span reads ITS page's contentBox.
   const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
@@ -518,16 +455,11 @@ export function textRangeLineRects(
     const first = idx === 0;
     const last = idx === spans.length - 1;
     // Partial first/last lines ride the same alignOffset the caret and
-    // hitTest use; middle lines span their COLUMN's width (#74 — the
-    // column frame below owns the container). The offset's width input
-    // is the INDENT-NARROWED box (rect.x IS the engine's indentLeft):
-    // centered/right-aligned indented blocks align inside their own
-    // column. Selection rects start at indentLeft automatically
-    // (lineOffsetX begins at line.rect.x).
-    // #74 — the line's COLUMN frame: the align container, the wrap
-    // input, and the middle-line right edge are the COLUMN's (the
-    // engine broke the line at the column's width and folded colLeft
-    // into rect.x). Single-column ≡ the content box.
+    // hitTest use; middle lines span their COLUMN's width. The offset
+    // input is the indent-narrowed box (rect.x IS indentLeft), so
+    // centered/right-aligned indented blocks align inside their column.
+    // #74 — the align container, wrap input, and middle-line right
+    // edge are the line's COLUMN's; single-column ≡ the content box.
     const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
@@ -536,8 +468,8 @@ export function textRangeLineRects(
     const wrap = blockWrapWidth(frame.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
     const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : frame.left + frame.width;
-    // M-TABLES: a cell line's rects clamp to the LANE — a selection's
-    // middle lines must never stripe across the neighboring cells.
+    // A cell line's rects clamp to the LANE (never stripe across
+    // neighbors).
     const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
     const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
     const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
@@ -552,13 +484,10 @@ export function textRangeLineRects(
 }
 
 /**
- * FIND-HIGHLIGHT GEOMETRY (P1): the matched TEXT EXTENT —
- * baseline − ascent to baseline + descent of the matched runs — NOT
- * the leading box. Different feature, different geometry than
- * selection (which keeps the full line box by standing ruling): a
- * find match hugs the glyphs so adjacent non-matching lines show no
- * highlight bleed. x/width ride the same span walk and offsets as
- * selection rects (one derivation, no forks).
+ * Find-highlight geometry: the matched TEXT EXTENT (baseline −
+ * ascent to baseline + descent of the matched runs), NOT the leading
+ * box — a find match hugs the glyphs so adjacent lines show no
+ * highlight bleed. x/width ride the same span walk as selection.
  */
 export function textRangeTextExtents(
   blocks: readonly AdapterBlock[],
@@ -567,33 +496,28 @@ export function textRangeTextExtents(
   to: number,
   metrics: TextMetrics,
   pageGap: number,
-  /** M-HEADER-FOOTER-3: the active band page (bubble anchors); absent
-   *  paints every echo (search highlights — the text is on every page). */
+  /** The active band page (bubble anchors); absent paints every echo
+   *  (search highlights — the text is on every page). */
   bandPage?: number,
-  /** #101 — SPLIT VIEW: the grid's ROW tops (row-mates share a top) —
-   *  the y-only pageTops walk below is WRONG for column ≥ 2 (page 1's
-   *  true top is its row's, not the stack stride). Absent ≡ the legacy
+  /** #101 — the grid's ROW tops (row-mates share a top; the y-only
+   *  pageTops walk is wrong for columns ≥ 2). Absent ≡ the legacy
    *  walk (columns 1 — bit-identical). */
   tops?: number[]
 ): PaintedRect[] {
   const spans = matchSpans(blocks, result, from, to, bandPage);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  // #58 — per-page geometry: the cumulative tops table replaces the
-  // uniform stride; each span's rect reads ITS page's contentBox.
+  // #58 — cumulative tops table; each span reads ITS page's contentBox.
   const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
     const cb = result.pages[line.pageIndex]!.contentBox;
-    // M-HEADER-FOOTER-3 — the ECHO rule (search highlights): a band
-    // line is ALWAYS a first/last (partial x); see the underline
-    // builder for the full rationale.
+    // The ECHO rule: a band line is ALWAYS a first/last (partial x) —
+    // see the underline builder for the rationale.
     const first = idx === 0 || line.band != null;
     const last = idx === spans.length - 1 || line.band != null;
-    // #74 — the line's COLUMN frame: the align container, the wrap
-    // input, and the middle-line right edge are the COLUMN's (the
-    // engine broke the line at the column's width and folded colLeft
-    // into rect.x). Single-column ≡ the content box.
+    // #74 — the align container, wrap input, and middle-line right
+    // edge are the line's COLUMN's; single-column ≡ the content box.
     const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
@@ -602,7 +526,7 @@ export function textRangeTextExtents(
     const wrap = blockWrapWidth(frame.width, block);
     const x1 = first || last ? off + lineOffsetX(line, block, s, metrics, wrap) : line.rect.x;
     const x2 = first || last ? off + lineOffsetX(line, block, e, metrics, wrap) : frame.left + frame.width;
-    // M-TABLES: the cell lane clamp (the selection rects' rule).
+    // The cell lane clamp (the selection rects' rule).
     const laneRight = line.tableCell ? line.rect.x + line.tableCell.width : null;
     const cx1 = laneRight != null ? Math.min(Math.max(x1, line.rect.x), laneRight) : x1;
     const cx2 = laneRight != null ? Math.min(Math.max(x2, line.rect.x), laneRight) : x2;
@@ -641,18 +565,12 @@ export function textRangeTextExtents(
 }
 
 /**
- * SPELL-CHECK LINE GEOMETRY: per-line FLAT underline bars for a PM
- * range — the same span walk as the find-highlight extents, but SIGNAL
- * geometry (the user's tuned ruling), deliberately a touch diverged
- * from paint.ts's typographic underline so a flag never reads as real
- * underlined text:
- *
- *  - LOWER: baseline + 0.12·fontSize (vs. 0.08 for real underlines);
- *  - BOLDER: max(2px, fontSize/12) (vs. max(1, fontSize/16));
- *  - SOFTER: the rendering surfaces add ~15% transparency
- *    (SpellHighlights' opacity / the pageless color-mix).
- *
- * "Flat, not squiggly" is the explicit user ruling on the shape.
+ * Spell-check line geometry: per-line FLAT underline bars for a PM
+ * range — signal geometry, deliberately diverged from paint.ts's
+ * typographic underline so a flag never reads as real underlined
+ * text: lower (0.12·fontSize vs 0.08), bolder (max(2px, fontSize/12)),
+ * softer (~15% transparency at the rendering surfaces). "Flat, not
+ * squiggly" is the user's ruling.
  */
 const SPELL_LINE_OFFSET = 0.12;
 const SPELL_LINE_MIN_THICKNESS = 2;
@@ -671,23 +589,18 @@ export function textRangeUnderlineRects(
   const spans = matchSpans(blocks, result, from, to);
   const page0 = result.pages[0];
   if (!page0 || spans.length === 0) return [];
-  // #58 — per-page geometry: the cumulative tops table replaces the
-  // uniform stride; each span's rect reads ITS page's contentBox.
+  // #58 — cumulative tops table; each span reads ITS page's contentBox.
   const topsTable = tops ?? pageTops(result.pages, pageGap);
 
   return spans.map(({ line, s, e, block }, idx) => {
     const cb = result.pages[line.pageIndex]!.contentBox;
-    // M-HEADER-FOOTER-3 — the ECHO rule: a band line is ALWAYS a
-    // first/last (partial x). Spell/search paint on EVERY echo (the
-    // text renders on every page), and the plain first/middle/last
-    // walk would full-width the middle echoes — the "one big bar under
-    // the whole header" bug. Each echo is its own line sequence.
+    // The ECHO rule: a band line is ALWAYS a first/last (partial x);
+    // each echo is its own line sequence, or the plain walk would
+    // full-width the middle echoes.
     const first = idx === 0 || line.band != null;
     const last = idx === spans.length - 1 || line.band != null;
-    // #74 — the line's COLUMN frame: the align container, the wrap
-    // input, and the middle-line right edge are the COLUMN's (the
-    // engine broke the line at the column's width and folded colLeft
-    // into rect.x). Single-column ≡ the content box.
+    // #74 — the align container, wrap input, and middle-line right
+    // edge are the line's COLUMN's; single-column ≡ the content box.
     const frame = lineColumnFrame(result.pages[line.pageIndex]!, line);
     const off =
       first || last
@@ -735,13 +648,9 @@ export interface CaretGeometry {
 
 /**
  * The line's TEXT-BAND height (ink extent, leading excluded): the
- * baseline plus the max descent over the line's runs. Under the M6
- * bottom-only ruling the box top IS the text top (baseline = ascent
- * from the box top), so the text band is exactly
- * [rect.y, rect.y + baseline + descent). An EMPTY line (no segments)
- * measures under the block's own zero-length run — the P1
- * empty-textblock projection guarantees one — so an empty paragraph's
- * caret matches its neighbors even at lineHeight ≠ 1.
+ * baseline plus the max descent over the runs. An EMPTY line measures
+ * under the block's own zero-length run (the P1 projection guarantees
+ * one), so an empty paragraph's caret matches its neighbors.
  */
 function textBandHeight(line: LineBox, block: AdapterBlock, metrics: TextMetrics): number | null {
   let descent = 0;
@@ -767,11 +676,9 @@ export function caretGeometry(
   result: LayoutResult,
   head: number,
   metrics: TextMetrics,
-  /** M-HEADER-FOOTER-3: the active band page — a band block's echoes
-   *  share rangeStart/rangeEnd, so lineForOffset would resolve the
-   *  FIRST echo (page 0) no matter where the caret was placed. Passing
-   *  the active page filters to that page's echo; absent = page-0 echo
-   *  (the pre-fix fallback, unchanged for body blocks). */
+  /** The active band page — a band block's echoes share
+   *  rangeStart/rangeEnd, so lineForOffset would resolve the first
+   *  echo; this filters to the active page's echo. */
   bandPage?: number
 ): CaretGeometry | null {
   const bo = pmPosToBlockOffset(blocks, head);
@@ -795,11 +702,10 @@ export function caretGeometry(
       // Indent-narrowed box (rect.x IS indentLeft): the caret x of a
       // centered/right-aligned indented block stays in its column.
       alignOffset(bo.block.align, line.rect.width, caretFrame.left + caretFrame.width - line.rect.x),
-    // THE CARET IS THE TEXT BAND, NOT THE LINE BOX (GDocs): top stays
-    // at the box top (text, under the M6 ruling) but the bottom stops
-    // at the text's descent — a 2.0-spaced line never stretches the
-    // caret across its leading. Selection rects keep the full box.
-    // At lineHeight 1.0 this is bit-identical to the box height.
+    // THE CARET IS THE TEXT BAND, not the line box (GDocs): the
+    // bottom stops at the text's descent — a 2.0-spaced line never
+    // stretches the caret across its leading. Selection rects keep
+    // the full box.
     y: line.rect.y,
     height: textBandHeight(line, bo.block, metrics) ?? line.rect.height,
   };
@@ -811,13 +717,13 @@ export interface CaretStackRect {
   height: number;
 }
 
-/** Caret/caret-like rect in stack-local px: page stack offset +
- * content box + the caret's text-band geometry (top at the LineBox
- * top, height = text band). Shared by the caret painter and the
- * caret-follow scroll — one source of this arithmetic. #58: pages may
- * differ in size, so the caller passes the CUMULATIVE page top
- * (pageStack.pageTops) and the caret page's own contentBox origin —
- * the uniform-stride formula is gone. */
+/**
+ * Caret rect in stack-local px: page stack offset + content box +
+ * the caret's text-band geometry. Shared by the caret painter and the
+ * caret-follow scroll. #58: pages may differ in size, so the caller
+ * passes the cumulative page top (pageStack.pageTops) and the caret
+ * page's own contentBox origin.
+ */
 export function caretStackRect(
   caret: CaretGeometry,
   contentX: number,
@@ -850,9 +756,9 @@ export function paintedBounds(rects: readonly PaintedRect[]): PaintedBounds | nu
   return b;
 }
 
-/** Word range around pos, from the doc model (PM ships no word utilities;
- * the legacy lesson was fighting PM's native path — here events land on
- * the painted surface, so owning the range derivation is required). */
+/** Word range around pos, from the doc model (PM ships no word
+ * utilities; events land on the painted surface, so the range
+ * derivation is owned here). */
 export function wordRangeAround(doc: PMNode, pos: number): { from: number; to: number } {
   const $pos = doc.resolve(pos);
   const parentStart = $pos.start();
@@ -875,11 +781,7 @@ export function blockRangeAround(doc: PMNode, pos: number): { from: number; to: 
   return null;
 }
 
-/**
- * M-TABLES — the CELL node's position containing `pos` (or null): the
- * drag-select's cell-crossing probe and the cell-toolbar anchor's
- * lookup.
- */
+/** The CELL node's position containing `pos` (or null). */
 export function cellPosAt(doc: PMNode, pos: number): number | null {
   try {
     const $pos = doc.resolve(pos);

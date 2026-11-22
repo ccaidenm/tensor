@@ -8,19 +8,10 @@ import { useConfigStore } from '@/lib/config/store';
 import { getCommand } from '@/lib/commands/registry';
 
 /**
- * View > Display Mode: the Paginated/Pageless toggle — the ONE switch
- * for the editor's rendering mode. PER-DOCUMENT (the pageless law):
- * the toggle writes pageSetup.viewMode (marking the document dirty —
- * the setting rides .wpdoc like the rest of pageSetup); the resolved
- * mode (document choice ?? config default) drives both the button's
- * active state and the Editor's routing seam. Paginated is Tensor's
- * default and identity: the button shows ACTIVE when paginated, like
- * GDocs' Print Layout toggle.
- *
- * #101 — SPLIT VIEW rides beside it: the "Two Pages" toggle is a VIEW
- * preference (config.editor.pageColumns — the desk arrangement), inert
- * in the pageless view where pages don't exist. The config remembers
- * it across mode flips. */
+ * View ▸ Display Mode: writes pageSetup.viewMode per document (rides
+ * .wpdoc); resolved mode = document choice ?? config default. #101 —
+ * "Two Pages" is a config view preference, remembered across flips.
+ */
 export function DisplayModeGroup() {
   const mode = useViewMode();
   const isPaginated = mode === 'Pages';
@@ -51,10 +42,7 @@ export function DisplayModeGroup() {
         disabled={!isPaginated}
         onClick={() => setPageColumns(twoPages ? 1 : 2)}
       />
-      {/* FOCUS MODE — born a disabled stub with the View tab; now wired
-          to the ONE command body (the registry's law: the ribbon, F11,
-          and the palette share it). The command re-focuses the editor
-          on exit — the caret survives the toggle. */}
+      {/* The command re-focuses the editor on exit — the caret survives the toggle. */}
       <IconButton
         label="Focus Mode"
         icon={<Maximize size={16} />}

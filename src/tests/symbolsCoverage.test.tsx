@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { isGlyphCovered, activeFontStack, __resetCoverage } from '@/lib/editor/symbols/coverage';
 
 /**
- * FONT COVERAGE — the canvas glyph heuristic, verified against MOCKED
- * canvas measurements that simulate real fonts: a Latin-only font, an
+ * Font coverage — the canvas glyph heuristic, verified against MOCKED
+ * canvas measurements simulating real fonts: Latin-only, an
  * everything-is-tofu font, and a full font. The reference-glyph
  * comparison is what makes this "genuinely accurate, not assumed".
  */
@@ -19,9 +19,9 @@ let measureCalls = 0;
  *     lying font the reference signal exists to catch).
  *   - FullFont: chars render 40px, the reference 20px (a real font's
  *     notdef has its own width).
- *   - SystemFallback (the user-ruling semantics): EVERY renderable
- *     char gets 40px and the reference 20px — a fontconfig-style
- *     chain that finds SOME font on disc for almost everything. */
+ *   - SystemFallback: EVERY renderable char gets 40px and the
+ *     reference 20px — a fontconfig-style chain that finds SOME font
+ *     on disc for almost everything. */
 function mockCanvas(): void {
   measureCalls = 0;
   const realGet = HTMLCanvasElement.prototype.getContext;
@@ -70,9 +70,9 @@ describe('the coverage heuristic', () => {
   });
 
   it('THE SYSTEM-FALLBACK SEMANTICS — a fontconfig-style chain covers what ANY disc font renders', () => {
-    // The user ruling: availability = any font on the system has the
-    // glyph, not just the cursor's font. The composite stack's
-    // fallback chain finds glyphs for Greek, math, emoji alike.
+    // Availability = any font on the system has the glyph, not just
+    // the cursor's font. The composite stack's fallback chain finds
+    // glyphs for Greek, math, emoji alike.
     expect(isGlyphCovered('SystemFallback', 'Ω')).toBe(true);
     expect(isGlyphCovered('SystemFallback', '∑')).toBe(true);
     expect(isGlyphCovered('SystemFallback', '😀')).toBe(true);

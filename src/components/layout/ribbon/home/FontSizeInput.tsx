@@ -11,10 +11,9 @@ interface FontSizeInputProps {
   currentSize: string;
 }
 
-/** The Font Size box speaks POINTS (chrome law); commits px (core
- * law). Bounds are pt: 1–300pt ≙ the old 1–400px core range. The
- * tickers (and ↑/↓ keys) step by 2pt — the same increment the
- * Ctrl+Shift+> / Ctrl+Shift+< shortcuts use. */
+/** The Font Size box displays points, commits px. Bounds 1–300pt map the
+ *  old 1–400px core range. Steppers (and ↑/↓ keys) step by 2pt, matching
+ *  the Ctrl+Shift+> / Ctrl+Shift+< shortcuts. */
 export function FontSizeInput({ editor, currentSize }: FontSizeInputProps) {
   const px = Number(currentSize) || 16;
   return (

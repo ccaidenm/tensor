@@ -6,9 +6,8 @@ import { APP_VERSION } from '@/generated/version';
  * #97 — version single-sourcing: src-tauri/tauri.conf.json is the ONE
  * source of truth. The generated stamp (src/generated/version.ts, fed
  * by the prebuild's generate-version script) and the two sister
- * version sites (the app package, the Cargo crate) must never drift —
- * a 1.0.0 bump that misses one of them is exactly the desync this
- * pins (the recon found six copies, one hand-typed in a UI panel).
+ * version sites (app package, Cargo crate) must never drift — a bump
+ * that misses one is the desync this pins.
  */
 
 const read = (rel: string): string =>

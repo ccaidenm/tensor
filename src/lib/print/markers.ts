@@ -1,7 +1,6 @@
 /**
- * M-PRINT/M6.1 — the list-marker TEXT spellings, shared by the canvas
- * paint and the print renderer (ONE derivation — painted and printed
- * markers can never diverge). Pure string functions, no state.
+ * The list-marker spellings, shared by the canvas paint and the print
+ * renderer — one derivation, so painted and printed markers never diverge.
  */
 
 /** Ordered-number spelling per CSS list-style-type. */

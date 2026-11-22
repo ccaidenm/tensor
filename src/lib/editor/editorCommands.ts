@@ -12,10 +12,8 @@ import { useCommentStore } from '@/lib/comments/store';
 import { toast } from '@/components/ui/toast';
 
 /**
- * The single editor-command path. Consumed by BOTH keydown surfaces —
- * ShortcutsExtension's ProseMirror plugin (typing the binding) and the
- * command palette (run by id) — so neither re-implements an editor
- * command. A command missing from this map simply doesn't fire.
+ * The single editor-command path, shared by the keybinding plugin and
+ * the command palette (run by id) so neither re-implements a command.
  */
 export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   bold: (editor) => editor.commands.toggleBold(),
@@ -23,14 +21,11 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   underline: (editor) => editor.commands.toggleUnderline(),
   strike: (editor) => editor.commands.toggleStrike(),
   insertPageBreak: (editor) => editor.commands.insertPageBreak(),
-  // #58 SECTIONS: the split-dance insert (the break seeds the store's
-  // pageSetup — nothing changes visually until the dialog edits props).
+  // #58 — the break seeds the store's pageSetup; nothing changes until the dialog edits props.
   insertSectionBreak: (editor) => editor.commands.insertSectionBreak(),
-  // #74 COLUMNS: the manual column break (the page break's twin — the
-  // split-dance insert; the adapter stamps the following block).
+  // #74 — the manual column break; the adapter stamps the following block.
   insertColumnBreak: (editor) => editor.commands.insertColumnBreak(),
-  // M-EQ: inserts an empty display equation and NodeSelections it —
-  // the selection opens the editor bubble (useEquationEditor).
+  // NodeSelection on the inserted equation opens the editor bubble.
   insertEquation: (editor) => editor.commands.insertEquation(),
   alignLeft: (editor) => editor.commands.setTextAlign('left'),
   alignCenter: (editor) => editor.commands.setTextAlign('center'),
@@ -41,7 +36,7 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
   increaseIndent: (editor) => editor.commands.increaseIndent(),
   decreaseIndent: (editor) => editor.commands.decreaseIndent(),
   clearFormatting: (editor) => editor.commands.clearFormatting(),
-  // ±2pt in chrome space, committed as px (fontSize.ts law).
+  // ±2pt in chrome space, committed as px (see fontSize.ts).
   fontSizeUp: (editor) => stepFontSize(editor, 1),
   fontSizeDown: (editor) => stepFontSize(editor, -1),
   find: () => {
@@ -57,26 +52,10 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
     useLinkEditorStore.getState().requestInsert();
     return true;
   },
-  // #COMMENTS — THE ONE COMMENT BODY: the floating toolbar, the Insert
-  // tab, Ctrl+Alt+M, and the palette all land here (the
-  // ShortcutsExtension + registry dispatch through this map; nothing
-  // re-implements a piece of it).
-  // Guards: an image/node selection is refused (non-text anchors are
-  // out of scope — the image strip keeps its own stub disabled);
-  // headers/footers are refused with a TOAST (the referenceTable band
-  // precedent — bands are separate editor instances, and a loud no
-  // beats a silent half-anchored comment).
-  // ALWAYS ENABLED (the user's ruling): a BARE CARET anchors the word
-  // it sits in (wordAround — before/inside/after a word all mean that
-  // word); a caret in NO word (whitespace, an empty block) toasts the
-  // guidance instead. The word path SELECTS the word (the user sees
-  // what got anchored — GDocs behavior) and anchors it in ONE chained
-  // transaction → ONE undo step.
-  // THE WRITE-ORDER LAW: startDraft (store record) BEFORE setMark —
-  // the tracking plugin's janitor must never observe a mark whose
-  // thread is not yet in the store. The mark is inclusive, so the
-  // anchor rides PM from here (edges extend it; deleting the range
-  // orphans the thread — the defined states).
+  // All comment surfaces dispatch here. Node selections are refused;
+  // bands are refused with a toast (separate editor instances). A bare
+  // caret anchors the word it sits in — selected and anchored in ONE
+  // chained transaction; a caret in no word toasts the guidance.
   addComment: (editor) => {
     const { selection } = editor.state;
     if (selection instanceof NodeSelection) return false;
@@ -88,9 +67,8 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
       });
       return true;
     }
-    // THE CARET FALLBACK FIRST (the always-enabled ruling): resolve the
-    // word BEFORE creating anything — a caret in no word toasts the
-    // guidance and writes nothing at all.
+    // Resolve the word BEFORE creating anything — a caret in no word
+    // toasts the guidance and writes nothing at all.
     if (selection.empty) {
       const word = wordAround(editor.state.doc, selection.from);
       if (!word) {
@@ -102,12 +80,10 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
         return true;
       }
       const threadId = nanoid();
-      // THE WRITE-ORDER LAW: the store record exists before any mark
-      // can land (the janitor must never observe an unknown mark).
+      // startDraft BEFORE setMark: the store record must exist before
+      // any mark lands (the janitor strips unknown threadIds).
       useCommentStore.getState().startDraft(threadId);
-      // Select the word (the user sees what got anchored — GDocs
-      // behavior) + anchor it in ONE chained transaction → ONE undo
-      // step. setComment reads tr.selection (the chained range).
+      // setComment reads tr.selection, so the chained range is anchored.
       return editor.chain().setTextSelection(word).setComment(threadId).run();
     }
     const threadId = nanoid();
@@ -115,11 +91,9 @@ export const EDITOR_COMMAND_MAP: Record<string, (editor: Editor) => boolean> = {
     return editor.commands.setComment(threadId);
   },
 
-  // Style application (built-in paragraph styles) — no keybinding, but
-  // palette-invoked, so they live on the SAME dispatch path rather than
-  // a second mechanism. Ids are the styles registry's builtin ids
-  // (builtins.ts); applying is the styleCommands law: sets styleId or
-  // converts the node for heading entries / back for the rest.
+  // Style application — palette-invoked (no keybinding), same dispatch
+  // path. Applying sets styleId, or converts the node for heading
+  // entries and back for the rest.
   applyStyleNormal: (editor) => editor.chain().focus().applyParagraphStyle('normal').run(),
   applyStyleHeading1: (editor) => editor.chain().focus().applyParagraphStyle('heading-1').run(),
   applyStyleHeading2: (editor) => editor.chain().focus().applyParagraphStyle('heading-2').run(),

@@ -38,15 +38,9 @@ export async function saveConfigToDisk(config: Config): Promise<void> {
   }
 }
 
-/**
- * Opens the OS file manager with config.json highlighted, for the
- * Settings > About "Configuration Files" button. In the extremely narrow
- * window where a user opens Settings before the very first debounced
- * save has landed (in practice, the load effect in useConfigPersistence
- * itself triggers an initial re-save almost immediately, so this is
- * mostly a defensive fallback), writes DEFAULT_CONFIG once first so
- * there's actually a real file to reveal rather than failing silently.
- */
+/** Settings > About "Configuration Files": reveals config.json in the
+ * OS file manager, writing DEFAULT_CONFIG first if no save has landed
+ * yet. */
 export async function revealConfigFile(): Promise<void> {
   const path = await getConfigPath();
 

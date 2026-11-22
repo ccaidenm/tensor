@@ -11,21 +11,9 @@ import { BROWSER_UA, catalogFetchBytes, catalogFetchText } from './http';
 import { normalizeFamilyKey } from './normalize';
 
 /**
- * Google Fonts adapter (STEP 0a ruling).
- *
- * SEARCH: one fetch of https://fonts.google.com/metadata/fonts — the
- * official machine-readable family list (verified receipt:
- * familyMetadataList[] with family/category/fonts{"400","400i",...}).
- * The ~2.6MB JSON is fetched ONCE per session and cached in-module;
- * search is client-side over the cached list. Prefetch at bootstrap
- * rides the ON-toggle consent ruling.
- *
- * DOWNLOAD: the CSS API v2 — one request for the whole axis spec:
- *   css2?family=Name:ital,wght@0,400;0,700;1,400;1,700
- * (verified receipt: @font-face blocks per unicode subset; we parse
- * the LATIN block's gstatic woff2 URL per face — the app-relevant
- * subset). BROWSER_UA is required: the API serves woff2 (vs ttf) only
- * to modern-browser user agents.
+ * Google Fonts: search = the fonts.google.com/metadata/fonts list
+ * (fetched once per session, cached in-module); download = the css2
+ * API's latin woff2 — BROWSER_UA required (css2 serves ttf otherwise).
  */
 
 const METADATA_URL = 'https://fonts.google.com/metadata/fonts';
@@ -78,10 +66,8 @@ function weightStyleKeys(f: GoogleMetadataFont): { weight: number; style: 'norma
   return out;
 }
 
-/** The A-slot faces the family DECLARES (M-FONTS-B.1): regular is
- *  400 when offered, else the lowest declared normal weight — never a
- *  fixed template. Display variants are slot-derived, sorted
- *  deterministically (weight, then style). */
+/** Slot-derived display variants, sorted deterministically (weight,
+ *  then style). */
 function slotList(slots: VariantSlots): { weight: number; style: 'normal' | 'italic' }[] {
   const out: { weight: number; style: 'normal' | 'italic' }[] = [];
   if (slots.regular != null) out.push({ weight: slots.regular, style: 'normal' });
@@ -92,7 +78,7 @@ function slotList(slots: VariantSlots): { weight: number; style: 'normal' | 'ita
 }
 
 /** Parse the css2 response: url(...) of the LATIN subset block per
- *  weight/style. Fixture-tested against the Roboto receipt. */
+ *  weight/style. */
 export function parseCss2LatinUrls(css: string): { weight: number; style: 'normal' | 'italic'; url: string }[] {
   const out: { weight: number; style: 'normal' | 'italic'; url: string }[] = [];
   // Blocks look like: /* latin */ @font-face { font-family: 'X';
@@ -112,16 +98,9 @@ export function parseCss2LatinUrls(css: string): { weight: number; style: 'norma
 }
 
 /**
- * THE AXIS SPEC (M-FONTS-B.1 — the failing-families fix, receipts
- * quoted in this file's header). Google's css2 syntax has TWO forms
- * and the old code used the tuple form unconditionally:
- *   - TWO axes (italics offered):  ital,wght@0,400;0,700;1,400;1,700
- *     — tuples are valid here (HTTP 200, the Lora receipt).
- *   - ONE axis (no italics):       wght@400;700 — PLAIN values. The
- *     tuple form here (wght@0,400) is HTTP 400 — the Rubik 80s Fade
- *     receipt: "family=Rubik%2080s%20Fade:wght@0,400" → 400 Bad
- *     Request, while "family=Rubik%2080s%20Fade:wght@400" → 200 with
- *     the real @font-face. Built strictly from the DECLARED slots.
+ * css2 has two forms: with italics, tuples (ital,wght@0,400;0,700;…);
+ * without italics, plain values (wght@400;700) — the tuple form is an
+ * HTTP 400 there. Built strictly from the declared slots.
  */
 export function css2FamilyQuery(slots: VariantSlots): string {
   const normals = [...new Set([slots.regular, slots.bold].filter((w): w is number => w != null))].sort((a, b) => a - b);
@@ -182,9 +161,8 @@ export function createGoogleSource(): CatalogSource {
       const slots = entry.slots ?? pickSlots(entry.variants ?? []);
       const urls = await faceUrls(entry);
       const files: CatalogDownload['files'] = { regular: new Uint8Array() };
-      // The regular slot is the DECLARED regular weight (400 when
-      // offered, else the family's lowest — a 500-only family installs
-      // its real 500 as regular).
+      // The regular slot is the declared regular weight — a
+      // 500-only family installs its real 500 as regular.
       const regularUrl =
         urls.find((u) => u.style === 'normal' && u.weight === slots.regular)?.url ??
         urls.find((u) => u.style === 'normal')?.url;
@@ -206,10 +184,8 @@ export function createGoogleSource(): CatalogSource {
 }
 
 async function faceUrls(entry: CatalogFont) {
-  // M-FONTS-B.1: the request is built ONLY from the catalog metadata's
-  // declared slots — never the deleted fixed template (a 400-only
-  // family like Rubik 80s Fade must never be asked for italics or
-  // 700).
+  // The request is built only from the declared slots — a 400-only
+  // family must never be asked for italics or 700.
   const slots = entry.slots ?? pickSlots(entry.variants ?? []);
   const query = css2FamilyQuery(slots);
   const css = await catalogFetchText(`${CSS2_URL}?family=${encodeURIComponent(entry.family)}:${query}`, BROWSER_UA);
@@ -227,8 +203,7 @@ async function faceUrls(entry: CatalogFont) {
   return urls.filter((u) => wanted.has(`${u.weight}|${u.style}`));
 }
 
-/** TEST SEAM: drop the session metadata cache (isolation between
- *  tests; never called by app code). */
+/** Test seam: drop the session metadata cache (never called by app code). */
 export function resetForTests(): void {
   metadataCache = null;
   metadataPromise = null;

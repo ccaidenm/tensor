@@ -3,26 +3,9 @@ import type { JSONContent } from '@tiptap/core';
 import { tensorExtensions } from '@/lib/editor/tensorExtensions';
 
 /**
- * M-MD — the standalone Markdown engine.
- *
- * NO Markdown extension on the production editor: the official
- * extension overrides the content commands and installs `editor.markdown`
- * editor-wide. Tensor's editor speaks HTML/JSON everywhere (.wpdoc,
- * clipboard, header/footer bands) and none of that may change shape, so
- * the manager is built standalone from the SAME extension list
- * (tensorExtensions — the one source the app shell and the test harness
- * already share) and only ever used call-scoped by the import/export
- * flows. registerExtension reads just the markdown fields
- * (parseMarkdown/renderMarkdown/markdownTokenizer) — plugins, commands
- * and node views stay inert.
- *
- * markedOptions: GFM for tables (and task-list tokenization — the
- * schema has no task lists, those degrade to plain list items, a
- * documented loss); breaks stays FALSE so a soft-wrapped source line
- * stays soft (the CommonMark default).
- *
- * The manager is stateless across calls (parse/serialize are pure
- * functions of their input) — one cached instance serves every flow.
+ * The standalone Markdown engine — no markdown extension on the production
+ * editor (it overrides content commands editor-wide); built from the same
+ * extension list, call-scoped, cached. GFM on; breaks off (CommonMark).
  */
 
 let cached: MarkdownManager | null = null;
@@ -48,15 +31,9 @@ export function jsonToMarkdown(json: JSONContent): string {
 }
 
 /**
- * THE PROMOTION PASS. Marked tokenizes images as INLINE tokens, and the
- * image spec (specs.ts) therefore always parses to an inlineImage — the
- * schema's inline group. TWO top-level shapes are the standalone-figure
- * spelling (`![pic](x)` alone on a line) and promote to the BLOCK image
- * node: the bare inlineImage (the paragraph special-case hands it up
- * naked) and the paragraph whose only child is one. Images among text —
- * or nested in list items, blockquotes, cells — stay inline, which is
- * what they are. Top level only — a promotion walk into containers
- * would mutate structure the source never implied.
+ * Marked tokenizes images inline, so the spec parses to inlineImage; a
+ * top-level bare inlineImage (or single-child paragraph) promotes to the
+ * block image node. Top level only — deeper walking would mutate structure.
  */
 function promoteStandaloneImages(doc: JSONContent): JSONContent {
   if (!Array.isArray(doc.content)) return doc;

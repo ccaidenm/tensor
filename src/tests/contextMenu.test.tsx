@@ -10,11 +10,11 @@ import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { applyRightClickSelection } from '@/lib/editor/rightClickSelection';
 
 /**
- * M-T4 — the document context menu: the app-wide replacement for the
- * WebView's native right-click menu (App suppresses `contextmenu`
- * globally; DocumentContextMenu wraps BOTH view modes at the Editor
- * routing seam). The variant reads the LIVE selection at open time —
- * these tests pin the variant routing and the actions per variant.
+ * The document context menu: the app-wide replacement for the WebView's
+ * native right-click menu (App suppresses `contextmenu` globally;
+ * DocumentContextMenu wraps both view modes at the Editor routing
+ * seam). The variant reads the LIVE selection at open time — these
+ * tests pin the variant routing and the actions per variant.
  *
  * Submenu items mount on hover (base-ui's submenu open-on-rest); the
  * helper drives both the pointer and mouse event pairs.
@@ -82,7 +82,7 @@ function editor_setDeveloper(value: boolean) {
   });
 }
 
-describe('M-T4: the document context menu', () => {
+describe('the document context menu', () => {
   it('table variant: a caret in a table opens the structural menu; actions run', async () => {
     const { editor } = renderTensor('<p>lead</p><table><tr><td>a</td></tr></table>');
     await settleLayout();
@@ -161,7 +161,7 @@ describe('M-T4: the document context menu', () => {
     expect(document.querySelector('[data-testid="ctx-cut"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="ctx-copy"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="ctx-paste"]')).not.toBeNull();
-    // The focused-menu ruling: no formatting, no other variants' items.
+    // Focused menu: no formatting, no other variants' items.
     expect(document.querySelector('[data-testid="ctx-bold"]')).toBeNull();
     expect(document.querySelector('[data-testid="ctx-link"]')).toBeNull();
     expect(document.querySelector('[data-testid="ctx-insert-row-below"]')).toBeNull();
@@ -181,7 +181,7 @@ describe('M-T4: the document context menu', () => {
     act(() => {
       fireEvent.mouseDown(stack, { button: 2, clientX: 120, clientY: 100 });
     });
-    // The M-T4 rule: the right-click landed INSIDE [1,6) — kept.
+    // The right-click landed INSIDE [1,6) — kept.
     expect(editor.state.selection.from).toBe(1);
     expect(editor.state.selection.to).toBe(6);
     rightClick();

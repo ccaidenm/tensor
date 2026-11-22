@@ -12,22 +12,9 @@ import { useConfigStore } from '@/lib/config/store';
 import { useSpellStore } from '@/lib/editor/spell/store';
 import { InstallProgressBar, useSpellLocalInstall } from '@/lib/editor/spell/localInstall';
 
-/**
- * SPELL CHECK SETUP — the consent surface (the fonts-catalog precedent,
- * with a storage dimension): spell check is OFF until the user picks a
- * provider, with the trade-offs stated up front:
- *
- *  - ONLINE: no download; text is sent to LanguageTool's servers for
- *    checking. The privacy note is the point — this contradicts the
- *    app's default posture, so it must be chosen, never defaulted.
- *  - LOCAL: a one-time ≈290 MB download (LanguageTool 6.6 + a Temurin
- *    21 JRE, pruned to English on extraction), ≈270 MB on disk, and
- *    zero network afterwards (loopback-only sidecar).
- *
- * The install itself (progress events, config writes, the success
- * toast) is the SHARED useSpellLocalInstall spelling — Settings →
- * Proofing renders the same flow inline.
- */
+// Spell-check consent surface: OFF until a provider is chosen. Online sends
+// text to LanguageTool's servers — chosen, never defaulted. The install
+// flow is shared with Settings → Proofing (useSpellLocalInstall).
 export function SpellSetupDialog() {
   const open = useSpellStore((s) => s.setupOpen);
   const closeSetup = useSpellStore((s) => s.closeSetup);

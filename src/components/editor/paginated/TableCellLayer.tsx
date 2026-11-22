@@ -2,22 +2,13 @@ import { useLayoutEffect, useRef } from 'react';
 import type { PageGeometry, PlacedRect } from '@tensor-editor/engine';
 
 /**
- * M-TABLES — the paginated cell paint: fills + grid strokes from the
- * engine's placed[] (kind 'tableCell' — the bands' paint geometry; the
- * shell draws, never computes). Sibling of ImageLayer INSIDE the sheet,
- * mounted BETWEEN the behind-floats and the block canvases: fills and
- * strokes sit UNDER the cell text (the paint-order receipt).
- *
- * BORDER PRESETS: 'all' strokes every cell's four edges (shared edges
- * double-draw at the same 1px — a collapse illusion, deliberate);
- * 'outer' strokes the union frame of THIS page's table rects (a page
- * fragment's frame — the aggregation of engine-issued geometry, the
- * paintedBounds precedent — never a re-derivation of layout);
- * 'none' draws fills only.
- *
- * The canvas has no theme — the hairline is the block-decor family's
- * gray (paint.ts's QUOTE_BORDER_COLOR neighbor), matching the pageless
- * var(--border) in light mode on the white paper canvas.
+ * The paginated cell paint: fills + grid strokes from the engine's
+ * placed[] (kind 'tableCell'; the shell draws, never computes), mounted
+ * between the behind-floats and the block canvases so fills/strokes sit
+ * UNDER the cell text. 'all' strokes every cell edge (shared edges
+ * double-draw at the same 1px — deliberate); 'outer' strokes this page's
+ * union frame (aggregated engine geometry, never re-derived); 'none' =
+ * fills only. The hairline gray matches pageless var(--border).
  */
 
 const TABLE_BORDER_COLOR = '#d4d4d8';
@@ -51,24 +42,13 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
       ctx.fillRect(cbx + p.rect.x, cby + p.rect.y, p.rect.width, p.rect.height);
     }
 
-    // 2. STROKES — MERGED boundary segments (1px, uniform): every cell
-    //    edge is a boundary SEGMENT; same-x (vertical) / same-y
-    //    (horizontal) segments that touch or overlap merge into ONE
-    //    stroke — shared inner edges paint ONCE (the per-cell double-
-    //    draw made them a px thicker than the outer frame). A boundary
-    //    interrupted by a merged cell keeps its gap: the merged cell's
-    //    edges don't reach the interrupted x/y, so the segments stay
-    //    disjoint and the gap survives (the "truly merged" look).
-    //
-    //    ROWSPAN INTERNALS (M-T3): a rowspan>1 cell emits one rect PER
-    //    BAND SLICE — vertically adjacent slices of the SAME cell.
-    //    Their touching top/bottom edges are NOT table boundaries (the
-    //    merged cell is one region), so slices are grouped by anchor
-    //    identity (blockId + row + col) and only the group's first
-    //    slice contributes a top edge and its last a bottom edge. The
-    //    NEIGHBORING cells' edges at the same y are unaffected (they
-    //    are real boundaries between those cells) — the border survives
-    //    beside the merge and vanishes through it.
+    // 2. STROKES — merged boundary segments (1px uniform): touching
+    //    same-x/same-y segments merge into ONE stroke — shared inner
+    //    edges paint once (per-cell double-draw made them a px thicker
+    //    than the outer frame); a merged cell's gap survives. A
+    //    rowspan>1 cell emits one rect per band slice — grouped by
+    //    anchor identity, only the group's first emits a top edge and
+    //    its last a bottom edge (neighbors' real boundaries unaffected).
     const border = cells[0]?.cell?.border ?? 'all';
     if (border === 'none') return;
     interface Seg {
@@ -76,10 +56,8 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
       a: number;
       b: number;
     }
-    // Group the slices by cell anchor identity, y-ordered within each.
-    // isTop/isBottom default TRUE (a single-slice cell shows both
-    // edges); a multi-slice group demotes every slice that isn't the
-    // group's first/last — its shared edges are internal to the merge.
+    // Group slices by anchor identity, y-ordered; isTop/isBottom default
+    // TRUE — a multi-slice group demotes non-first/last slices.
     const cellGroups = new Map<string, { rects: { p: (typeof cells)[number]; isTop: boolean; isBottom: boolean }[] }>();
     for (const p of cells) {
       if (!p.cell) continue;
@@ -102,9 +80,8 @@ export function TableCellLayer({ geometry, cells }: TableCellLayerProps) {
       const { x, y, width, height } = p.rect;
       vSegs.push({ at: x, a: y, b: y + height });
       vSegs.push({ at: x + width, a: y, b: y + height });
-      // Horizontal edges: a rowspan cell's INTERNAL slice boundaries
-      // (top of a non-first slice, bottom of a non-last slice) are
-      // skipped — the merged cell reads as one region.
+      // Horizontal edges: internal slice boundaries are skipped — the
+      // merged cell reads as one region.
       const group = cellGroups.get(`${p.blockId}:${p.cell?.row}:${p.cell?.col}`);
       const slice = group?.rects.find((r) => r.p === p);
       if (!slice || slice.isTop) hSegs.push({ at: y, a: x, b: x + width });

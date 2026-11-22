@@ -8,8 +8,7 @@ import type { LineNumbersSetting } from '@/lib/document/schema';
 
 type LineNumberMode = LineNumbersSetting['mode'];
 
-/** The list-style dropdown's menu shape — sample glyphs ride the
- *  right side in muted ink (ListStyleButton precedent). */
+/** The dropdown's menu shape — sample glyphs ride the right side, muted. */
 const MODES: { value: LineNumberMode; label: string; sample: string }[] = [
   { value: 'per-page', label: 'Per Page', sample: '1/p' },
   { value: 'continuous', label: 'Continuous', sample: '1 2 3' },
@@ -17,11 +16,8 @@ const MODES: { value: LineNumberMode; label: string; sample: string }[] = [
 ];
 
 /**
- * M-LINENUMS — the Layout tab's Line Numbers split button. Main icon
- * toggles the gutter; the chevron opens the mode menu (ListStyleButton
- * pattern: icon + slim right-side chevron). Reflects + writes the
- * CURRENT DOCUMENT's metadata — enabling defaults to Per Page;
- * choosing a mode enables with that mode.
+ * The Layout tab's Line Numbers split button: writes the document's
+ * metadata — enabling defaults to Per Page; choosing a mode enables it.
  */
 export function LineNumbersButton() {
   const lineNumbers = useDocumentStore((s) => s.lineNumbers);

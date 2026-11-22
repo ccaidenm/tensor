@@ -317,7 +317,7 @@ describe('Ruler (integration, FakeMetrics geometry)', () => {
   });
 });
 
-// ─── Phase 2: margin dragging (two write modes on Reduce Motion) ─────
+// Margin dragging (two write modes on Reduce Motion)
 
 describe('margin dragging', () => {
   // This suite pins the PREVIEW mode (Reduce Motion on); the live-mode
@@ -489,7 +489,7 @@ describe('margin dragging', () => {
   });
 });
 
-// ─── Phase 3: tab stops (attr + ruler UI) ─────────────────────────────
+// Tab stops (attr + ruler UI)
 
 describe('tab stops', () => {
   function tabStopsOf(editor: { state: { doc: import('@tiptap/pm/model').Node } }): number[] | null {
@@ -506,11 +506,8 @@ describe('tab stops', () => {
   const leftStop = (position: number) => ({ position, alignment: 'left' as const });
 
   /** prosemirror-history merges adjacent transactions within its 500ms
-   *  newGroupDelay — a test's rapid-fire chain (setContent included)
-   *  would collapse into ONE undo step. A quiet gap splits the loaded
-   *  document from the gesture, so one undo restores the loaded state
-   *  (real sessions never hit the merge — minutes between load and
-   *  drag). */
+   *  newGroupDelay; a quiet gap splits the loaded doc from the
+   *  gesture, so one undo restores the loaded state. */
   async function undoBarrier() {
     await new Promise((resolve) => setTimeout(resolve, 550));
   }
@@ -665,11 +662,10 @@ describe('tab stops', () => {
       leftStop(96),
       { position: 240, alignment: 'center' },
     ]);
-    // The menu closes after acting.
     expect(document.querySelector('[data-testid="ruler-tab-menu"]')).toBeNull();
   });
 
-  it('M-T4: the band context menu does NOT also open the app context menu (portal-bubble isolation)', async () => {
+  it('the band context menu does NOT also open the app context menu (portal-bubble isolation)', async () => {
     renderTensor('<p data-tab-stops="96">A</p>');
     await settleLayout();
     const inner = document.querySelector('[data-testid="ruler-inner"]') as HTMLElement;
@@ -679,9 +675,9 @@ describe('tab stops', () => {
     // The ruler's own menu opened…
     expect(document.querySelector('[data-testid="ruler-tab-menu"]')).not.toBeNull();
     // …and the DOCUMENT context menu did NOT co-open (the ruler portals
-    // out of PaginatedView, so its synthetic contextmenu bubbles through
-    // the React tree into the app menu's trigger — the band handler's
-    // stopPropagation is the seam).
+    // out of PaginatedView; its synthetic contextmenu would bubble into
+    // the app menu's trigger — the band handler's stopPropagation is
+    // the seam).
     expect(document.querySelector('[data-testid="ctx-select-all"]')).toBeNull();
     expect(document.querySelector('[data-testid="ctx-paste"]')).toBeNull();
   });
@@ -757,11 +753,11 @@ describe('tab stops', () => {
     expect(editor.state.doc.child(1).attrs.tabStops).toEqual([leftStop(96)]);
   });
 });
-// ─── Phase 5: the vertical ruler ──────────────────────────────────────
+// The vertical ruler
 
 describe('vertical ruler', () => {
   beforeEach(() => {
-    // The drag pins PREVIEW mode (the Reduce Motion ruling).
+    // The drag pins PREVIEW mode.
     useConfigStore.getState().setReduceMotion('on');
   });
 
@@ -770,9 +766,9 @@ describe('vertical ruler', () => {
     await settleLayout();
     const bar = document.querySelector('[data-testid="ruler-vertical"]') as HTMLElement;
     expect(bar).not.toBeNull();
-    // Wrapper-FIXED law: the bar is viewport chrome in the desk wrapper
-    // (the same overlay the horizontal portals into) — inset-y-0, so
-    // the background spans the container at every scroll position.
+    // The bar is viewport chrome in the desk wrapper (the same overlay
+    // the horizontal portals into) — inset-y-0, so the background
+    // spans the container at every scroll position.
     expect(bar.closest('[data-desk-wrapper]')).not.toBeNull();
     expect(bar.className).toContain('inset-y-0');
     expect(bar.style.width).toBe(`${RULER_WIDTH}px`);
@@ -890,11 +886,11 @@ describe('vertical ruler', () => {
   });
 });
 
-// ─── indent dragging (the markers' handles) ───────────────────────────
+// Indent dragging (the markers' handles)
 
 describe('indent dragging', () => {
   beforeEach(() => {
-    // PM attrs: ALWAYS preview + commit (the tab-stop ruling).
+    // PM attrs: always preview + commit.
   });
 
   function indentMarker(which: 'first' | 'left' | 'right'): HTMLElement {

@@ -38,9 +38,8 @@ const FLOW_LABELS: Record<FlowFlagKey, string> = {
 
 const slug = (label: string) => label.toLowerCase().replace(/[^a-z]+/g, '-');
 
-/** The popover's section header — the FontGroup picker's exact
- * rhythm (px-2 pt-1 pb-0.5, 12px, muted), so the two dropdowns read
- * as one kit. Title case, rendered as typed (no CSS uppercase). */
+/** The popover's section header — matches the FontGroup picker's exact
+ * rhythm so the two dropdowns read as one kit. No CSS uppercase. */
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">{children}</div>
@@ -62,12 +61,9 @@ function MenuRow({ testId, control, label }: { testId?: string; control: React.R
 }
 
 /**
- * One pagination checkbox: uniform `checked` renders the plain box,
- * 'mixed' renders the INDETERMINATE box (clicking either way applies
- * the explicit next state to every selected paragraph — Word's dialog
- * semantics). Stays-open: the line-spacing radio closes the popover on
- * pick (menu semantics), the break toggles apply live so a user can
- * watch the pages reflow.
+ * One pagination checkbox: 'mixed' renders the indeterminate box; either
+ * way, clicking applies the explicit next state to every selected
+ * paragraph (Word's dialog semantics). Stays open — toggles apply live.
  */
 function FlowToggle({
   label,
@@ -95,18 +91,9 @@ function FlowToggle({
 }
 
 /**
- * The paragraph popover (M5 rework of the line-spacing dropdown): LINE
- * SPACING above (a radio group reflecting the selection's EFFECTIVE
- * multiplier — every paragraph always has one — plus the custom escape
- * hatch), LINE & PAGE BREAKS below (the six M-FLOW pagination
- * checkboxes — live, stay-open, mixed-state aware). One popover is
- * Word's Paragraph dialog in ribbon clothing; both readers resolve
- * through the style registry — the same cascade the adapter runs.
- *
- * CHROME: aligns its START edge with the trigger (the FontGroup
- * picker's law); the section headers/rows/dividers share the font
- * picker's exact rhythm; the trigger is ONE fluid button whose icon
- * and chevron sit in equal 16px boxes — the hover reads symmetric.
+ * The paragraph popover: line-spacing presets (the selection's effective
+ * multiplier, resolved through the style registry — the same cascade the
+ * adapter runs) plus the live, stay-open pagination checkboxes.
  */
 export function LineSpacingButton({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
@@ -147,11 +134,9 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
     setOpen(false);
   }
 
-  /** The checkbox write rule (attr-over-style, explicit both ways):
-   * checking writes the affirmative spelling (true / 'page'); uncheck-
-   * ing writes the explicit OFF that beats every tier (false for the
-   * booleans — a style-inherited flag needs the override; null for the
-   * breaks, whose off-spelling IS null). */
+  /** Attr-over-style, explicit both ways: unchecking writes the explicit
+   *  OFF that beats every tier (false for the booleans — a style-inherited
+   *  flag needs the override; null for the breaks, whose off-spelling IS null). */
   function toggleFlag(flag: FlowFlagKey, nextChecked: boolean) {
     const value: ParagraphFlowAttrs[FlowFlagKey] =
       flag === 'breakBefore' || flag === 'breakAfter'
@@ -190,8 +175,6 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
       </Tooltip>
 
       <PopoverContent className="w-60 p-1" align="start">
-        {/* ── Line Spacing (the radio reflects the always-present
-              attribute; a pick applies and closes — menu semantics) ── */}
         <SectionHeader>Line Spacing</SectionHeader>
         <RadioGroup
           value={radioValue}
@@ -210,10 +193,8 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
           ))}
         </RadioGroup>
 
-        {/* Custom — the preset family's escape hatch (multipliers; a px
-            spelling rides the attr via the command path). Part of the
-            Line Spacing section: no divider above it — a border here
-            read as an unlabeled section break. */}
+        {/* The custom escape hatch (multipliers). No divider above — a
+            border here would read as an unlabeled section break. */}
         <div className="flex items-center gap-1 px-1 pt-1">
           <Input
             type="number"
@@ -235,10 +216,7 @@ export function LineSpacingButton({ editor }: { editor: Editor }) {
           </Button>
         </div>
 
-        {/* The section divider — the font picker's idiom. */}
         <div className="mx-1 my-1 border-t" />
-
-        {/* ── Line & Page Breaks (M-FLOW; Word's tab name) ── */}
         <SectionHeader>Line &amp; Page Breaks</SectionHeader>
         <div className="flex flex-col gap-0">
           {FLOW_FLAG_KEYS.map((flag) => (

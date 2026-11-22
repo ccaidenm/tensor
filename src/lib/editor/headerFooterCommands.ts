@@ -8,14 +8,9 @@ import {
 } from '@/lib/document/headerFooter';
 
 /**
- * M-HEADER-FOOTER-2 — the header/footer COMMANDS. The old editing
- * store (region Editor instances, hidden hosts, measured band
- * heights, the settings echo loop) is DELETED: content rides the ONE
- * PM document via doc-level `headerBlock`/`footerBlock` nodes, the
- * ONE hidden input view owns focus, and the ONE engine pipeline
- * paints/hit-tests/caret-projects the bands. What remains here is
- * command sugar over the one editor plus the metadata settings
- * (differentFirstPage — a document-wide setting, not node content).
+ * Header/footer command sugar: content rides the one PM document via
+ * doc-level headerBlock/footerBlock nodes; only the metadata settings
+ * (differentFirstPage) live outside it.
  */
 
 export type BandWhich = 'header' | 'footer';
@@ -26,10 +21,9 @@ interface BandContainer {
   pos: number;
 }
 
-/** The doc-level band container node for (which, variant), or null.
- *  #58 — `sectionId` narrows the search: given → the section's tagged
- *  OVERRIDE container only; undefined → the UNTAGGED doc default
- *  (which every non-overriding section inherits). */
+/** The doc-level band container for (which, variant), or null.
+ *  #58 — given a sectionId: that section's tagged override only;
+ *  undefined: the UNTAGGED doc default all non-overriders inherit. */
 export function findBandContainer(
   editor: Editor | null,
   which: BandWhich,
@@ -44,8 +38,7 @@ export function findBandContainer(
     if (node.type.name !== name) return;
     if (variant === 'first' ? node.attrs.variant !== 'first' : node.attrs.variant === 'first')
       return;
-    // The section dimension: a tagged search matches only its tag; the
-    // doc-default search matches only untagged containers.
+    // A tagged search matches only its tag; untagged-only for the default.
     const tag = typeof node.attrs.sectionId === 'string' ? node.attrs.sectionId : null;
     if (sectionId ? tag !== sectionId : tag !== null) return;
     found = { node, pos: offset };
@@ -65,9 +58,8 @@ export function hasBandContainer(editor: Editor | null, which: BandWhich): boole
 }
 
 /**
- * True while the selection sits inside a band container — the
- * "active band" signal (muted ink, the contextual tab, the ruler's
- * active-region highlight). Selection-driven, like every projection.
+ * True while the selection sits inside a band container — the "active
+ * band" signal (muted ink, the contextual tab, ruler highlight).
  */
 export function selectionInBand(editor: Editor | null): boolean {
   if (!editor) return false;
@@ -80,15 +72,9 @@ export function selectionInBand(editor: Editor | null): boolean {
 }
 
 /**
- * Enable a region: INSERT the container (an empty paragraph child)
- * when absent, then focus its END. Word's Insert ▸ Header flow —
- * presence IS enablement (no separate flag to desync).
- *
- * M-HEADER-FOOTER-3: VARIANT-AWARE. The caller names the variant the
- * PAGE paints (the slot under differentFirstPage wants 'first' on
- * page 1, 'default' elsewhere) — the v2 always-default spelling made a
- * page-0 dblclick focus a variant page 0 never paints (the "double-
- * click does nothing" bug).
+ * Enable a region: INSERT the container (empty paragraph) when absent,
+ * then focus its end — presence IS enablement. The caller names the
+ * variant the PAGE paints ('first' on page 1 under differentFirstPage).
  */
 export function enableRegion(
   editor: Editor | null,
@@ -100,11 +86,9 @@ export function enableRegion(
   const existing = findBandContainer(editor, which, variant, sectionId);
   if (!existing) {
     const name = which === 'header' ? 'headerBlock' : 'footerBlock';
-    // #58 — a SECTION-tagged enable seeds the container with the doc
-    // default's content COPY (Word's "same as previous" made concrete:
-    // the new header reads identically until the user edits it — the
-    // override then diverges by content). No default → an empty
-    // paragraph (the pre-sections behavior).
+    // #58 — a section-tagged enable seeds the container with the doc
+    // default's content COPY (Word's "same as previous"); no default
+    // → an empty paragraph.
     const seed = sectionId
       ? (() => {
           const def = findBandContainer(editor, which, variant);
@@ -134,10 +118,8 @@ export function enableRegion(
 }
 
 /**
- * Focus a band container's END (the last position inside it —
- * setTextSelection clamps). A plain selection + view.focus, NO
- * scrollIntoView (the hidden view's geometry is meaningless, L3 —
- * PaginatedView's own follow logic owns scroll).
+ * Focus a band container's END (last position inside it). NO
+ * scrollIntoView — the hidden view's geometry is meaningless.
  */
 export function focusBand(
   editor: Editor | null,
@@ -149,27 +131,17 @@ export function focusBand(
   const container = findBandContainer(editor, which, variant, sectionId);
   if (!container) return;
   // INSIDE the last child's text end: the container's close token sits
-  // at pos + nodeSize − 1 (a selection there = INSIDE the container's
-  // content, AFTER the last child — insertContent would add a sibling).
-  // One inward lands on the last child's own close = its text end.
+  // at pos + nodeSize − 1 (a selection there = AFTER the last child);
+  // one inward lands on the last child's own close = its text end.
   const end = container.pos + container.node.nodeSize - 2;
   editor.view.focus();
   editor.commands.setTextSelection(end);
 }
 
 /**
- * #58 — MERGE-ON-DELETE (Word's law): deleting a section break merges
- * the dead section into the FOLLOWING one — the following section's
- * properties win (the store pageSetup already IS the final section's;
- * the dead break's attrs simply vanish with the node), and the dead
- * section's band overrides (containers tagged with its sectionId) drop.
- * ONE transaction = one undo step.
- *
- * Finds the break from the selection: a NodeSelection ON it, a caret
- * at a block whose start sits right after it (Backspace at the block
- * start), or a caret at a block whose end sits right before it
- * (Delete at the block end). Returns false when no break is adjacent
- * (the shortcut chain falls through to the default deletion).
+ * #58 — merge-on-delete: the following section's properties win and
+ * the dead section's tagged bands drop, in one transaction. False
+ * when no break is adjacent (deletion falls through).
  */
 export function deleteSectionBreakNear(editor: Editor | null, dir: 'back' | 'fwd'): boolean {
   if (!editor) return false;
@@ -182,10 +154,8 @@ export function deleteSectionBreakNear(editor: Editor | null, dir: 'back' | 'fwd
   if (selection.empty) {
     const { $from } = selection;
     if (dir === 'back') {
-      // Backspace: the caret's BLOCK start — the position between the
-      // caret's block and its previous SIBLING (a caret inside the
-      // block's open token can't see the break directly; the parent
-      // level can).
+      // Backspace: the caret's BLOCK start — the parent level sees the
+      // previous sibling; the caret inside the open token cannot.
       const blockStart = $from.before($from.depth);
       const before = state.doc.resolve(blockStart);
       if (before.nodeBefore?.type === breakType) {
@@ -235,11 +205,9 @@ export function deleteSectionBreakNear(editor: Editor | null, dir: 'back' | 'fwd
 }
 
 /**
- * #58 — RE-LINK (Word's "Link to Previous" re-engaged): delete a
- * section's band override (the tagged container); the section inherits
- * the doc default again. The section's custom content is lost — Word's
- * own behavior on relink. One transaction = one undo step (Ctrl+Z
- * restores the override).
+ * #58 — relink ("Link to Previous"): delete the section's band
+ * override; it inherits the doc default again (custom content is
+ * lost — Word's own behavior). One transaction = one undo step.
  */
 export function relinkBand(
   editor: Editor | null,
@@ -250,9 +218,8 @@ export function relinkBand(
   if (!editor) return false;
   const container = findBandContainer(editor, which, variant, sectionId);
   if (!container) return false;
-  // ONE transaction: the delete + the landing selection (a split would
-  // make the first undo swallow a selection-only item — the same
-  // one-action-one-item law as the page-setup co-undo).
+  // ONE transaction: the delete + landing selection (a split would
+  // make the first undo swallow a selection-only item).
   const tr = editor.state.tr;
   tr.delete(container.pos, container.pos + container.node.nodeSize);
   // The section inherits again — land the user in the doc default's
@@ -312,11 +279,9 @@ export function setDifferentFirstPage(value: boolean): void {
 }
 
 /**
- * The migration (v1 → v2): translate a legacy metadata shape's
- * per-region TipTap JSON docs into doc-level band container nodes.
- * Called by openDocument BEFORE the settings land in the store.
- * Regions with no content (null docs) are skipped — enabling without
- * content has no v2 spelling (presence IS enablement).
+ * The v1 → v2 migration: legacy per-region docs become doc-level band
+ * containers; called by openDocument BEFORE settings land. Null docs
+ * are skipped (presence IS enablement).
  */
 export function migrateLegacyHeaderFooter(
   editor: Editor,

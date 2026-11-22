@@ -5,8 +5,7 @@ interface PageSheetProps {
   geometry: PageGeometry;
   /** Stack-local top offset, logical (pre-zoom) px. */
   top: number;
-  /** #101 — SPLIT VIEW: the stack-local left (the column's offset;
-   *  0 single-column). */
+  /** #101: stack-local left (column offset; 0 single-column). */
   left?: number;
   /** IntersectionObserver registration for virtualization. */
   observeRef?: (el: HTMLDivElement | null) => void;
@@ -16,11 +15,8 @@ interface PageSheetProps {
 }
 
 /** One absolutely-positioned sheet per PageGeometry. All painted
- * children live inside the scaled stack, so nothing compensates for zoom.
- *
- * Paper visuals — styling only: white paper (or the document's
- * pageColor via the background prop), 1px border-border, shadow-lg,
- * 6px radius. Every DIMENSION still comes from engine geometry. */
+ * children live inside the scaled stack — no zoom compensation.
+ * Styling only; every dimension comes from engine geometry. */
 export function PageSheet({ geometry, top, left = 0, observeRef, background, children }: PageSheetProps) {
   return (
     <div

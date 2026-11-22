@@ -12,10 +12,8 @@ import { useImperativeSlide } from '@/lib/layout/useImperativeSlide';
 import { useReducedMotion } from '@/lib/accessibility/useReducedMotion';
 import { useConfigStore } from '@/lib/config/store';
 
-// #101 — DRAGGABLE SIDEBARS: the dock-edge handle's resize bounds.
-// The min keeps every panel's content usable (the narrowest consumer
-// is the statistics dashboard); the max leaves the document half the
-// desk (Word's task-pane posture — the page must stay the star).
+// #101 — the resize bounds: the min keeps panel content usable, the
+// max leaves the document half the desk.
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_MAX_WIDTH = 640;
 const SIDEBAR_DEFAULT_WIDTH = 384;
@@ -28,11 +26,9 @@ const SIDEBAR_DEFAULT_BOTTOM_HEIGHT = 288;
 const DOCK_ZONE_BAND = 120;
 
 /**
- * #101 — THE ZONE LAW (pure, exported for the unit tests): the
- * pointer's dock target during a floating drag — edge bands of 120px
- * (bottom wins the corner overlap), null = no zone (snap back). A
- * zero-rect (jsdom's getBoundingClientRect) yields null — the grip's
- * release keeps the panel where it came from.
+ * #101 — the pointer's dock target during a floating drag: edge bands of
+ * 120px (bottom wins the corner overlap), null = no zone (snap back). A
+ * zero-rect (jsdom) yields null.
  */
 export function zoneForPointer(
   x: number,
@@ -46,28 +42,14 @@ export function zoneForPointer(
   return null;
 }
 
-// TODO(#NN): re-enable the animated slide once the WebKitGTK
-// layout-thrash issue is resolved. Animating a real box-offset property
-// (right/left/bottom, required to avoid an earlier, worse transform-based
-// race — see useImperativeSlide's doc comment for the full history)
-// forces a real reflow every frame, which was observed to visibly jostle
-// the document's own page-centering mid-animation — a symptom of this
-// project's already-known pagination layout fragility (see #45), not a
-// new bug in the sidebar itself. Shipping instant open/close for now
-// makes that entire bug family structurally impossible rather than
-// chasing a fifth timing fix. Revisit once smooth animation can be
-// tested against a less reflow-sensitive layout, and/or on
-// non-WebKitGTK platforms. WHEN ANIMATION RETURNS: the closed panel
-// must keep hiding via visibility (see the ghost fix below) — and the
-// slide's initial-value branch must handle a NOT-YET-LAID-OUT element
-// (offsetWidth 0 under a hidden ancestor read as -0 and docked the
-// panel visibly — the same bug through the animation path).
+// TODO: re-enable the animated slide once the WebKitGTK reflow-thrash is
+// resolved; the initial-value branch must then handle a hidden ancestor's
+// offsetWidth 0 (read as -0, docking the panel visibly).
 const SIDEBAR_ANIMATION_DISABLED = true;
 
 const ANCHOR_POSITION_CLASS: Record<SidebarAnchor, string> = {
-  // #101 — the WIDTH is no longer a class: it is inline (the stored/
-  // live-resized value; 384 when unmemoried) so the drag handle can
-  // retune it without fighting a Tailwind class.
+  // #101 — the width is inline (the stored/live value; 384 when unmemoried)
+  // so the drag handle can retune it without fighting a Tailwind class.
   left: 'inset-y-0 border-r',
   right: 'inset-y-0 border-l',
   bottom: 'inset-x-0 border-t',
@@ -80,16 +62,14 @@ interface SidebarHostProps {
 }
 
 /**
- * Generic docked-panel chrome. Must be rendered inside a `relative`
- * (or otherwise positioned) ancestor bounded to exactly the area it
- * should occupy — in practice, the wrapper in App.tsx spanning the space
- * between the Ribbon and StatusBar.
+ * Generic docked-panel chrome. Must render inside a positioned ancestor
+ * bounded to exactly the area it should occupy (the App.tsx wrapper
+ * between the Ribbon and StatusBar).
  */
 export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostProps) {
   const active = useSidebarStore((s) => s.active);
-  // #101 — DRAG-TO-REDOCK: the anchor is PER-SIDEBAR STATE (the store's
-  // memory, seeded by this prop) — a redocked panel renders on its NEW
-  // edge without the App re-mounting anything.
+  // #101 — the anchor is per-sidebar state (the store's memory, seeded by
+  // this prop): a redocked panel renders on its new edge, no re-mount.
   const anchor = useSidebarStore((s) => s.anchors[id]) ?? anchorProp;
   const dock = useSidebarStore((s) => s.dock);
   const isOpen = active?.id === id;
@@ -97,12 +77,9 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
 
   const prefersReducedMotion = useReducedMotion();
 
-  // #101 — DRAGGABLE SIDEBARS: the stored width (per-sidebar memory)
-  // seeds the panel; a drag live-resizes via local state and COMMITS
-  // to the config on release (the persistence debounce writes it).
-  // #101 — the per-sidebar size memory: WIDTH for left/right docks,
-  // HEIGHT for the bottom dock (the same record, the anchor decides
-  // which axis it drives).
+  // #101 — the stored size (per-sidebar memory) seeds the panel; a drag
+  // live-resizes via local state and commits to the config on release.
+  // Width for left/right docks, height for bottom (the same record).
   const storedWidth = useConfigStore((s) => s.config.sidebarWidths[id]);
   const setSidebarWidth = useConfigStore((s) => s.setSidebarWidth);
   const [liveSize, setLiveSize] = useState<number | null>(null);
@@ -149,8 +126,7 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
     });
   }
 
-  // #101 — DRAG-TO-REDOCK: the grip strip floats the panel (fixed,
-  // pointer-following); dock zones light up at the desk's edges; the
+  // #101 — the grip strip floats the panel (pointer-following); the
   // release docks into the hovered zone (no zone = snap back).
   const [float, setFloat] = useState<{ x: number; y: number } | null>(null);
   const [dockHint, setDockHint] = useState<SidebarAnchor | null>(null);
@@ -204,26 +180,19 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
     <div
       ref={ref}
       className={cn(
-        // M-T4 — z-40: docked panels are FLOATING chrome and must clear
-        // the M-RULER bar (a portal that mounts AFTER the SidebarHosts
-        // in the same stacking context at z-30 — DOM order made the
-        // ruler win, painting over the Find/Replace and Table panels).
-        // Panel-internal dropdowns (z-40) nest fine beneath this.
+        // z-40: docked panels must clear the ruler bar (a z-30 portal
+        // that mounts after the SidebarHosts — DOM order made the ruler
+        // paint over the panels). Panel-internal dropdowns nest beneath.
         float
-          ? // #101 — THE FLOAT: the panel is pointer-following fixed
-            // chrome, off the dock grid entirely (the anchor classes and
-            // the slide's offsets are bypassed; the dock zones below
-            // own the next position).
+          ? // #101 — the float: pointer-following fixed chrome, off the
+            // dock grid (anchor classes and slide offsets bypassed; the
+            // dock zones below own the next position).
             'fixed z-50 flex flex-col bg-background border shadow-xl rounded-lg overflow-hidden'
           : 'absolute z-40 flex flex-col bg-background border-border',
         float ? null : ANCHOR_POSITION_CLASS[anchor],
-        // #103 — THE GHOST FIX: a closed panel is INVISIBLE. The host
-        // mounts while the start screen owns the window (the desk is
-        // display:none), so the slide's initial offset read offsetWidth
-        // as 0 and parked the panel at its DOCK position (-0 === 0) —
-        // fully visible the moment the desk showed, aria-hidden and
-        // pointer-events-none: an uncloseable ghost. visibility (not
-        // display) keeps the element laid out for the slide machinery.
+        // #103 — a closed panel is invisible: the host mounts while the
+        // desk is display:none (offsetWidth 0 parks the panel visibly);
+        // visibility (not display) keeps the element laid out for the slide.
         !isOpen && !float && 'invisible pointer-events-none',
       )}
       style={
@@ -240,12 +209,9 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
       }
       aria-hidden={!isOpen && !float}
     >
-      {/* #101 — THE GRIP STRIP: the redock handle (host chrome on every
-          panel). Pointer users GRAB it — the panel floats, the desk's
-          edges light up as dock zones, and the release docks into the
-          hovered zone. REDUCED-MOTION users CLICK it — the drag gesture
-          is replaced by a tiny redock menu (left/down/right — the
-          a11y alternative to the float, no motion required). */}
+      {/* #101 — the grip strip: the redock handle. Pointer users grab it
+          (the panel floats; release docks into the hovered zone);
+          reduced-motion users click it (a tiny redock menu instead). */}
       {isOpen &&
         (prefersReducedMotion ? (
           <DropdownMenu>
@@ -299,11 +265,9 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
           </div>
         ))}
       {children}
-      {/* #101 — THE RESIZE HANDLE: a strip on the dock edge (the left
-          edge of a right-anchored panel). The grip line highlights on
-          hover/drag (the ruler's margin-handle treatment); the pointer
-          capture keeps the drag alive outside the strip. Not while
-          FLOATING (the dock position is undecided mid-drag). */}
+      {/* #101 — the resize handle: a strip on the dock edge; pointer
+          capture keeps the drag alive outside it. Not while floating
+          (the dock position is undecided mid-drag). */}
       {horizontal && isOpen && !float && (
         <div
           role="separator"
@@ -326,7 +290,7 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
           }}
         />
       )}
-      {/* #101 — the BOTTOM variant: the handle rides the TOP edge (a
+      {/* #101 — the bottom variant: the handle rides the top edge (a
           horizontal strip, ns-resize — dragging up grows the panel). */}
       {anchor === 'bottom' && isOpen && !float && (
         <div
@@ -345,7 +309,7 @@ export function SidebarHost({ id, anchor: anchorProp, children }: SidebarHostPro
           onDoubleClick={() => setSidebarWidth(id, SIDEBAR_DEFAULT_BOTTOM_HEIGHT)}
         />
       )}
-      {/* #101 — THE DOCK ZONES: fixed overlays over the desk's edge
+      {/* #101 — the dock zones: fixed overlays over the desk's edge
           bands, lit while floating (the release target's preview). */}
       {float &&
         (

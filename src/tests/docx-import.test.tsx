@@ -15,11 +15,10 @@ import { BUILTIN_DEFINITIONS } from '@/lib/styles/builtins';
 import { sha256Hex } from '@/lib/media/insert';
 
 /**
- * M-DOCX — the #38a import suite. Hand-written OOXML fixtures (zipped
+ * #38a — the docx import suite. Hand-written OOXML fixtures (zipped
  * with fflate, the same reader the flow uses) assert the inverse
- * mapping; THE GATE at the bottom runs the full export → import →
- * normalized-equality loop that the in-place .docx editing vision
- * stands on.
+ * mapping; the gate at the bottom runs the full export → import →
+ * normalized-equality loop.
  */
 
 // A valid 1x1 red PNG. The GATE's source image must carry the REAL
@@ -87,7 +86,7 @@ function importParts(entries: Record<string, string | Uint8Array>, fontPolicy: '
 }
 void importParts;
 
-describe('docx import — M-FLOW pagination properties', () => {
+describe('docx import — pagination properties', () => {
   it('the pPr pagination block maps to paragraph attrs (on flags, off overrides, break-before)', () => {
     const parts = zipParts({
       'word/document.xml': body(
@@ -524,14 +523,14 @@ describe('docx import — the loud postures', () => {
     const trees = parseDocxTrees(parts);
     const parsed = mapDocxDocument(trees, { fontPolicy: 'keep', mediaPartToId: new Map() });
     const firstPara = parsed.json.content![0]!;
-    // M-PAGEFIELD: the field IMPORTS as the live node — the cached
-    // "3" never landed (the node resolves per page).
+    // The field IMPORTS as the live node — the cached "3" never
+    // lands (the node resolves per page).
     expect(firstPara.type).toBe('paragraph');
     expect(firstPara.content!.some((c) => c.type === 'pageField' && c.attrs!.kind === 'page')).toBe(true);
     expect(firstPara.content!.some((c) => c.type === 'text' && c.text === '3')).toBe(false);
     expect(parsed.report.pageFields).toBe(0); // they import — never dropped
     expect(docxImportNoticeLines(parsed.report).some((l) => l.includes('Page-number fields'))).toBe(false);
-    // THE CONVERSION: the dead Word field became a LIVE reference table
+    // The dead Word field becomes a LIVE reference table
     const toc = parsed.json.content![1]!;
     expect(toc.type).toBe('referenceTable');
     expect(toc.attrs!.kind).toBe('toc');
@@ -561,10 +560,9 @@ describe('docx import — the loud postures', () => {
 });
 
 describe('docx import — THEME fonts (the dialog that never fired)', () => {
-  // Modern Word documents reference fonts as asciiTheme="minorHAnsi"
-  // (pointing at theme1.xml) — never literal rFonts. The theme part
-  // resolves: the inventory flags Calibri (the dialog fires) and the
-  // docDefaults/normal definition carries the document's real font.
+  // Modern Word references fonts as asciiTheme="minorHAnsi" (pointing
+  // at theme1.xml), never literal rFonts. The theme resolves: the
+  // inventory flags Calibri and docDefaults/normal carries the real font.
   const THEME_XML = `${W_DECL}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:themeElements><a:fontScheme><a:majorFont><a:latin typeface="Calibri Light"/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>`;
 
   it('asciiTheme resolves through theme1.xml; the inventory flags it', () => {
@@ -597,7 +595,7 @@ describe('docx import — THEME fonts (the dialog that never fired)', () => {
   });
 });
 
-describe('docx import — page fields (M-PAGEFIELD round-trip)', () => {
+describe('docx import — page fields (page-field round-trip)', () => {
   it('fldSimple PAGE/NUMPAGES in a band part import as live fields', () => {
     const parts = zipParts({
       'word/document.xml': body(
@@ -727,7 +725,7 @@ describe('docx import — fonts (ruling 4)', () => {
   });
 });
 
-// ─── THE ROUND-TRIP GATE ─────────────────────────────────────────────────
+// The round-trip gate
 
 /** Strip everything both directions agree to be default-valued — the
  *  equality contract both mappings must satisfy. */
@@ -865,11 +863,9 @@ describe('THE ROUND-TRIP GATE (export → import → normalized equality)', () =
   });
 
   it('multi-section documents round-trip (breaks + per-section bands)', async () => {
-    // Three sections: A4 for section 0 (custom header), Narrow margins
-    // for section 1 (NO own header — inherits), the final on Letter
-    // with the doc-default header. Section 0's header DIFFERS from the
-    // doc default → a tagged container; section 1's would equal the
-    // default (it has none) → inherits, no container.
+    // Three sections: A4 + custom header (0), Narrow, no own header
+    // (1), Letter + doc-default header (final). Section 0's header
+    // differs from the default → tagged container; section 1 inherits.
     const source = doc(
       { type: 'headerBlock', attrs: { variant: 'default', sectionId: 'sec-0' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 's0 header' }] }] },
       { type: 'headerBlock', attrs: { variant: 'default' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'doc default' }] }] },
@@ -904,7 +900,7 @@ describe('THE ROUND-TRIP GATE (export → import → normalized equality)', () =
     const untagged = headers.find((h) => !(h.attrs as { sectionId?: string }).sectionId);
     expect(untagged!.content![0]!.content![0]!.text).toBe('doc default');
 
-    // No loss lines: the breaks are no longer collapsed.
+    // No loss lines: the breaks are not collapsed.
     expect(docxImportNoticeLines(imported.report)).toEqual([]);
   });
 

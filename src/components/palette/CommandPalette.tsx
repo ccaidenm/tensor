@@ -20,14 +20,9 @@ import {
   CommandShortcut,
 } from '@/components/ui/command';
 
-/**
- * M-PALETTE. Pure chrome over the command registry — never an editor
- * surface: it reads nothing from ProseMirror and writes nothing to it,
- * so opening it can't move the selection or scroll the document. The
- * PM selection stays intact for the whole overlay lifetime; closing
- * (palette store) refocuses the editor and the caret comes back where
- * it was.
- */
+// Pure chrome over the command registry — reads nothing from
+// ProseMirror and writes nothing to it, so the selection survives the
+// whole overlay lifetime; closing refocuses the editor.
 
 const GROUP_ORDER: { group: CommandGroupKind; heading: string }[] = [
   { group: 'actions', heading: 'Actions' },
@@ -72,23 +67,19 @@ export function CommandPalette() {
   const editorContext = usePaletteStore((s) => s.editorContext);
   const commands = useAppCommands(editorContext);
 
-  // M-T3b — the typed table spec: "4x4" (also "4 x 4", "4×4",
-  // "table 4x4", "4x4 table") parses to a table-create command with
-  // dimensions BEYOND the grid picker's 8×8 hover grid. The item's
-  // value embeds the "create N×M table" text so cmdk's own filter
-  // matches the search; dims=null renders nothing.
+  // The typed table spec ("4x4", "table 4x4", …) parses to a create-table
+  // command with dims beyond the grid picker's 8×8. The item's value
+  // embeds the text so cmdk's own filter matches the search.
   const [search, setSearch] = useState('');
   const tableDims = useMemo(() => parseTableDims(search), [search]);
   const tableEditor = useDocumentStore((s) => s.editor);
-  // THE CODEPOINT PATH (the tableDims precedent): "U+03A9" in the
-  // search surfaces a one-item insert group — keyboard-first symbol
-  // entry, the bubble picker's keyboard sibling.
+  // "U+03A9" in the search surfaces a one-item insert group —
+  // keyboard-first symbol entry.
   const codepoint = useMemo(() => parseCodepointQuery(search), [search]);
 
-  // Close FIRST, then run: close() refocuses the editor while the
-  // selection is still intact (editor commands apply to it), and any
-  // dialog the command opens (settings, properties...) takes focus
-  // after — never fighting the palette for it.
+  // Close first, then run: close() refocuses the editor while the
+  // selection is intact, and any dialog the command opens takes
+  // focus after — never fighting the palette for it.
   const runCommand = (command: CommandAction) => {
     usePaletteStore.getState().close();
     void command.run();

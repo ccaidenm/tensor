@@ -22,10 +22,10 @@ import {
 import { renderTensor } from './harness';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 
-// ─── Tauri surface mocks (fs/path/window — quit & recovery paths) ────────
+// Tauri surface mocks (fs/path/window — quit & recovery paths)
 
-// M-IMAGES-0: the .wpdoc v2 container simulator (recovery snapshots
-// package through package_document now).
+// .wpdoc v2 container simulator (recovery snapshots package through
+// package_document).
 const wpdocFiles = vi.hoisted(() => new Map<string, { kind: 'v2'; document: string; media: unknown[] }>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -54,7 +54,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ close: windowMocks.close }),
 }));
 
-// ─── Store resets (module singletons persist across tests) ───────────────
+// Store resets (module singletons persist across tests)
 
 beforeEach(() => {
   useDocumentStore.setState({
@@ -105,7 +105,7 @@ function paletteHint(id: string): HTMLElement | null {
   return document.querySelector(`[data-testid="palette-hint-${id}"]`);
 }
 
-// ─── 1. Registry shape ─────────────────────────────────────────────────────
+// 1. Registry shape
 
 // #100 — the old menu-parity block died with the native menu (absorbed
 // into the app: the Ribbon + palette + web shortcuts own its items).
@@ -129,10 +129,10 @@ describe('registry shape', () => {
   });
 });
 
-// ─── 2. Palette shortcut wiring ──────────────────────────────────────────
+// 2. Palette shortcut wiring
 
 describe('palette shortcut', () => {
-  it('registered: ctrl+shift+p, app context (collision-free — STEP 0 receipt)', () => {
+  it('registered: ctrl+shift+p, app context', () => {
     const def = SHORTCUTS.find((s) => s.id === 'palette')!;
     expect(def.keys).toBe('ctrl+shift+p');
     expect(def.context).toBe('app');
@@ -213,7 +213,7 @@ describe('palette shortcut', () => {
   });
 });
 
-// ─── 3. Context filtering & enablement in the palette UI ────────────────
+// 3. Context filtering & enablement in the palette UI
 
 describe('palette UI', () => {
   it('editor-context commands are absent when the palette was opened outside the editor', () => {
@@ -233,7 +233,7 @@ describe('palette UI', () => {
     expect(paletteItem('applyStyleQuote')).not.toBeNull();
   });
 
-  it('open() captures the editor-focus context at open time', () => {
+  it('open captures the editor-focus context at open time', () => {
     renderTensor('<p>hello</p>');
     // Not focused → editorContext false.
     act(() => {
@@ -350,7 +350,7 @@ describe('palette UI', () => {
   });
 });
 
-// ─── 4. Dispatch (the one-path law: palette/shortcuts run the same body) ─
+// 4. Dispatch: palette/shortcuts run the same body
 
 describe('dispatch equivalence', () => {
   it('the palette path runs the save (the single dispatch body)', () => {
@@ -431,7 +431,7 @@ describe('dispatch equivalence', () => {
   });
 });
 
-// ─── 5. Safe quit: recovery snapshot before close ────────────────────────
+// 5. Safe quit: recovery snapshot before close
 
 describe('safe quit (requiresSafeQuit)', () => {
   it('dirty doc → recovery snapshot written to appDataDir/recovery/ with current content, THEN close', async () => {
@@ -445,9 +445,8 @@ describe('safe quit (requiresSafeQuit)', () => {
     });
 
     expect(windowMocks.close).toHaveBeenCalledTimes(1);
-    // M-IMAGES-0: snapshots are v2 CONTAINERS now — one
-    // package_document command at the recovery path (recovery.ts law
-    // unchanged otherwise):
+    // Snapshots are v2 CONTAINERS — one package_document command at
+    // the recovery path:
     const { invoke } = await import('@tauri-apps/api/core');
     const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
     const packageCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'package_document');
@@ -480,9 +479,9 @@ describe('safe quit (requiresSafeQuit)', () => {
   });
 });
 
-// ─── M-HEADER-FOOTER-3: the header/footer palette commands ────────────────
+// The header/footer palette commands
 
-describe('header/footer palette commands (M-HEADER-FOOTER-3)', () => {
+describe('header/footer palette commands', () => {
 
   it('the four entries register; presence enablement hides remove-when-empty', () => {
     // Registration (the unique-ids pin lives in the base suite).

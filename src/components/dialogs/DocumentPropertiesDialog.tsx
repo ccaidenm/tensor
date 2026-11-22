@@ -16,32 +16,9 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
 import type { DocumentCoreProperties } from '@/lib/document/coreProperties';
 
-/**
- * Review > Document Properties — the standard core-properties editor
- * (M-META): title, author, subject, keywords, comments. Live controls
- * do not live here: margins are in Layout > Margins, statistics in
- * Review > Document Statistics, paper setup in Layout > Page Setup.
- * Out of scope by ruling: custom/arbitrary user-defined fields.
- *
- * COMMIT-GATED (the MarginsDialog contract): fields edit a DRAFT
- * only. DONE performs exactly ONE setCoreProperties call (one dirty
- * flag → one autosave cycle) and closes; CANCEL discards — so do
- * Esc/outside-click (cancel semantics). The store normalizes on
- * write — whitespace-only values drop out and the file never carries
- * empty strings (absent = never set, the lineNumbers precedent).
- *
- * Author falls back to the app's user identity (Settings > General >
- * User) as a PLACEHOLDER — a pristine document's store value is
- * already seeded from the identity; this covers docs whose author was
- * cleared without suggesting the field is required.
- *
- * Keywords stay ONE comma-separated string in the model (the OOXML/PDF
- * spelling — the schema and export contract never see chips). The tag
- * box below is pure presentation: chips parse from the string, the
- * pending token commits on comma/Enter/blur, X and Backspace remove.
- * The pending token lives in THIS component (lifted, not field-local)
- * so Done can fold it in synchronously — see keywordsWithPending.
- */
+// The core-properties editor. Fields edit a draft; Done makes exactly one
+// setCoreProperties call (one autosave cycle); Cancel discards. Keywords
+// stay one comma-separated string in the model — the tag box is presentation.
 
 interface PropertyFieldProps {
   label: string;
@@ -81,9 +58,8 @@ function PropertyTextarea({ label, value, onChange }: Omit<PropertyFieldProps, '
 }
 
 /** Pure: the draft's keywords string folded with the pending token —
- *  "tensor, priva" + pending "vacy" → "tensor, priva, vacy". Both the
- *  commit handlers and Done compute through this, so every path
- *  converges on the same string regardless of blur timing. */
+ *  "tensor, priva" + "vacy" → "tensor, priva, vacy". Commit handlers
+ *  and Done both compute through this, so blur timing cannot diverge. */
 function keywordsWithPending(draftKeywords: string, pending: string): string {
   const chips = draftKeywords.split(',').map((t) => t.trim()).filter(Boolean);
   const token = pending.trim();
@@ -98,10 +74,8 @@ interface KeywordsFieldProps {
   onRemove: (index: number) => void;
 }
 
-/** The keywords tag box: chips + a trailing free-text input. Pure
- *  presentation — every mutation routes back to the dialog's draft
- *  (the one string). Clicking the box focuses the input; Backspace on
- *  an empty input pops the last chip. */
+/** The keywords tag box: chips + a trailing free-text input, purely
+ *  presentational — mutations route back to the draft string. */
 function KeywordsField({ chips, pending, onPendingChange, onCommit, onRemove }: KeywordsFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -170,15 +144,13 @@ export function DocumentPropertiesDialog() {
     }
   }, [isOpen, coreProperties]);
 
-  /** DRAFT ONLY — no store write. The document diverges from the
-   *  draft until Done; that is the contract this dialog exists for. */
+  /** Draft only — no store write until Done. */
   function edit(key: keyof DocumentCoreProperties, value: string) {
     setDraft((d) => ({ ...d, [key]: value }));
   }
 
-  /** Comma/Enter/blur: fold the pending token into the draft string
-   *  (the blur handler may run first on a Done click — harmless; the
-   *  two paths compute through the same pure function). */
+  /** Comma/Enter/blur: fold the pending token into the draft. The blur
+   *  handler may run first on a Done click — harmless, same pure function. */
   function commitKeywordsPending() {
     edit('keywords', keywordsWithPending(draft.keywords ?? '', pendingKeywords));
     setPendingKeywords('');
@@ -189,9 +161,8 @@ export function DocumentPropertiesDialog() {
     edit('keywords', chips.filter((_, i) => i !== index).join(', '));
   }
 
-  /** ONE commit → one dirty flag, then close. Normalization (trim,
-   *  empty-drop) is the store's job (setCoreProperties), not the
-   *  dialog's — an empty keywords fold normalizes away. */
+  /** One commit → one dirty flag, then close. Normalization (trim,
+   *  empty-drop) is the store's job, not the dialog's. */
   function done() {
     setCoreProperties({
       ...draft,

@@ -1,20 +1,11 @@
 /**
- * M-HEADER-FOOTER-2 — the header/footer SETTINGS model.
- *
- * SPLIT (the unified-pipeline ruling): CONTENT (the paragraphs) rides
- * the ONE PM document as doc-level `headerBlock`/`footerBlock` nodes
- * (lib/editor/HeaderFooterNodes.ts) — .wpdoc docJSON, the hidden input
- * view, the engine pipeline — while these DOCUMENT-WIDE SETTINGS ride
- * .wpdoc metadata (the optional-field precedent). The old per-region
- * JSON docs are GONE; the region editors are GONE.
- *
- * UNITS NOTE (the pageSetup.ts law): settings carry no geometry. The
- * band anchor (36pt from the page edge) is the ENGINE's fact
- * (BAND_ANCHOR_PX) — the shell never re-derives it.
+ * Document-wide header/footer settings; the content rides the PM
+ * document as `headerBlock`/`footerBlock` nodes (HeaderFooterNodes.ts).
+ * Settings carry no geometry — the band anchor is the engine's fact.
  */
 
 export interface HeaderFooterSettings {
-  /** Scope tag — the seam the sections milestone grows into. */
+  /** Scope tag — reserved as the seam for future section-level scoping. */
   scope: { kind: 'document' };
   /** Page 1 paints the first* variant nodes; other pages the defaults. */
   differentFirstPage: boolean;
@@ -36,9 +27,9 @@ export function cloneHeaderFooterSettings(s: HeaderFooterSettings): HeaderFooter
 }
 
 /**
- * The legacy v1 model (M-HEADER-FOOTER-1): per-region TipTap JSON docs.
- * Recognized ONLY by the open path's one-time migration (below) — the
- * live model never holds region content.
+ * The legacy v1 model: per-region TipTap JSON docs, recognized only
+ * by the open path's one-time migration — the live model never holds
+ * region content.
  */
 export interface LegacyHeaderFooterSettings {
   headerEnabled?: boolean;

@@ -4,11 +4,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useSymbolBubbleStore } from '@/lib/editor/symbols/bubbleStore';
 
 /**
- * THE SYMBOL TRIGGER — the Insert tab's entry for the floating Symbol
- * BUBBLE. Store-driven and dumb: the bubble itself mounts in App.tsx
- * (so it PERSISTS across ribbon tab switches — park it in a corner,
- * switch to Home, keep dropping symbols); this button only opens it
- * (with its rect as the anchor) or closes it when already open.
+ * The Insert tab's Symbol trigger. The bubble itself mounts in App.tsx,
+ * so it persists across ribbon tab switches; this button only opens it
+ * (anchored to its rect) or closes it when already open.
  */
 export function SymbolButton() {
   const open = useSymbolBubbleStore((s) => s.open);

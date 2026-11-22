@@ -4,16 +4,9 @@ import { Copy, Minus, Square, X } from 'lucide-react';
 import { inTauriWindow } from '@/lib/window/tauriEnv';
 
 /**
- * #100 — the custom window controls: the far-right lane of the merged
- * titlebar row (the Ribbon's h-10 strip). macOS NEVER mounts these —
- * its native traffic lights overlay the row's left lane instead
- * (titleBarStyle: Overlay; the layout branch lives in Ribbon).
- *
- * The MAXIMIZE/RESTORE glyph tracks the live window state (onResized →
- * isMaximized) so the icon always tells the truth — including the
- * double-click-to-maximize on the drag regions and the OS's own
- * keyboard shortcuts. All calls gate on inTauriWindow (a plain-browser
- * dev session renders inert buttons instead of throwing).
+ * #100 — titlebar window controls; macOS never mounts them (its native
+ * traffic lights overlay instead). The maximize glyph tracks live window
+ * state; all calls gate on inTauriWindow (browser dev = inert buttons).
  */
 
 export function WindowControls() {
@@ -80,8 +73,7 @@ export function WindowControls() {
         type="button"
         aria-label="Close"
         data-testid="window-close"
-        // The close hover: the universal destructive red with WHITE ink
-        // (the muted ink on red read as black-on-red — the user's call).
+        // Destructive red with white ink — muted ink on red reads as black-on-red.
         className="flex h-10 w-11 flex-none items-center justify-center text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset hover:bg-destructive hover:text-white"
         onClick={close}
       >

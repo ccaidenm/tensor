@@ -19,17 +19,9 @@ import {
 } from '@/lib/editor/pageSetupHistory';
 
 /**
- * #58 — the undo/redo COMMANDS with the page-setup co-restore: the
- * store's pageSetup lives outside ProseMirror, so the raw history
- * would half-undo a page-setup action (the break nodes revert, the
- * final section keeps the new values). This override runs the SAME PM
- * undo/redo, and when the page-setup write is the NEWEST recorded
- * action (the doc-snapshot + pending correlation in
- * pageSetupHistory.ts), it restores the store side in the SAME step.
- *
- * Registers after StarterKit's history — the last command definition
- * wins, and EVERY surface (shortcuts, palette, context menu, ribbon)
- * routes through editor.commands.undo()/redo().
+ * #58 — undo/redo with the page-setup co-restore: the store's
+ * pageSetup lives outside PM, so raw history would half-undo a
+ * page-setup action; this restores the store side in the same step.
  */
 export const PAGE_SETUP_HISTORY_KEY = new PluginKey<PageSetupPendingState>('pageSetupHistoryPending');
 
@@ -56,12 +48,9 @@ export const PageSetupHistoryExtension = Extension.create({
             if (tr.getMeta(PAGE_SETUP_SYNTH_REDO)) {
               return { pending: nextPending(prev.pending, 'history-redo'), redoNonEmpty: prev.redoNonEmpty };
             }
-            // A PM undo/redo movement: prosemirror-history's own
-            // undo/redo transactions carry its plugin meta ({ redo,
-            // historyState }) — detected by SHAPE, not by key name (the
-            // key dedupes to 'history$' when the name collides). The
-            // meta's historyState IS the post-movement state — its
-            // undone stack tells whether a redo stack survives.
+            // prosemirror-history's undo/redo trs carry its plugin meta
+            // — detected by SHAPE, not key name (the key dedupes to
+            // 'history$' on collisions); the undone stack tells redo survival.
             const meta = (tr as unknown as { meta?: Record<string, unknown> }).meta ?? {};
             const hist = Object.values(meta).find(
               (v) =>
@@ -92,39 +81,29 @@ export const PageSetupHistoryExtension = Extension.create({
     return {
       undo:
         () =>
-        // TipTap's command contract: build from the PROVIDED state and
-        // dispatch through the PROVIDED dispatcher (a deferred dispatch —
-        // post-dispatch doc reads come from the ENTRY's snapshots, never
-        // live).
+        // TipTap's contract: build from the PROVIDED state, dispatch
+        // through the PROVIDED dispatcher — post-dispatch doc reads come
+        // from the ENTRY's snapshots, never live.
         ({ state, dispatch, view }) => {
           const top = peekPageSetupUndo();
           const { pending, redoNonEmpty } = PAGE_SETUP_HISTORY_KEY.getState(state) ?? { pending: null, redoNonEmpty: false };
-          // The precise path: our item is PM's done-top. The RECOVERY
-          // path: a foreign edit was undone since (pending null after
-          // the burial, but PM's redo stack survives) — the doc
-          // snapshot alone can't tell these from a net-zero edit
-          // cycle's coincidence, the redo-stack signal can.
+          // The precise path: our item is PM's done-top. The recovery
+          // path: a foreign undo happened (redo stack survives) — the
+          // redo-stack signal separates it from a net-zero edit cycle.
           const precise = pending === 'undo';
           const recovered = pending === null && redoNonEmpty;
           if (top && (precise || recovered) && state.doc.eq(top.docAfter)) {
-            // OURS — one Ctrl+Z reverts the PM part and the store part.
-            // #48 — STORE-ONLY entries (a page style; a doc-scope
-            // write on an unsectioned doc) recorded NOTHING in PM
-            // (an empty tr has no steps) — pmUndo would pop SOMEONE
-            // ELSE'S last item instead (reverting the user's typing
-            // with the store write — a pre-existing hole the map makes
-            // load-bearing). Content-equal before/after docs are the
-            // store-only signature: PM must not move; the synthetic
-            // transition below stands in for the history movement.
+            // OURS — one Ctrl+Z reverts the PM and store parts together.
+            // #48 — STORE-ONLY entries recorded nothing in PM; pmUndo
+            // would pop an unrelated item. Content-equal before/after
+            // docs are the store-only signature: PM must not move.
             const storeOnly = top.docAfter.eq(top.docBefore);
             popPageSetupUndo();
             const nextSetup = currentPageSetup();
             if (!storeOnly) pmUndo(state, dispatch, view);
-            // The REDO entry: next = the setup the undo replaced; the
-            // docs are the ORIGINAL action's snapshots (captured at
-            // write time — immune to the deferred dispatch). #48: the
-            // map rides the same entry — an action that never touched
-            // it captured undefined, and undefined RESTORES nothing.
+            // The redo entry: next = the setup the undo replaced; docs
+            // are the ORIGINAL action's write-time snapshots (immune to
+            // the deferred dispatch). #48: undefined restores nothing.
             pushPageSetupRedo({
               next: nextSetup,
               nextPageStyles: top.prevPageStyles !== undefined ? currentPageStyles() : undefined,

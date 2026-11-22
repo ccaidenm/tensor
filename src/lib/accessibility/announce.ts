@@ -1,13 +1,7 @@
 /**
- * #COMMENTS (and future surfaces) — the screen-reader announcer: ONE
- * module-level `aria-live="polite"` region appended to <body> on first
- * use (the codebase had no live-region infrastructure; this seeds it).
- *
- * The clear-then-set timeout is the standard re-announcement trick: a
- * live region only fires when its CONTENT CHANGES, so announcing the
- * same message twice ("resolved" on two threads) needs a blink of
- * emptiness between the writes. polite (not assertive) — thread state
- * changes are context, never interruptions.
+ * The screen-reader announcer: one module-level aria-live="polite"
+ * region appended to <body> on first use. Clear-then-set re-announces
+ * repeat messages (live regions fire only on content changes).
  */
 let region: HTMLDivElement | null = null;
 
@@ -16,10 +10,7 @@ export function announce(message: string): void {
   if (!region || !region.isConnected) {
     region = document.createElement('div');
     region.setAttribute('aria-live', 'polite');
-    // sr-only: visually hidden, fully exposed to assistive tech (the
-    // tailwind sr-only utility's own spellings, inlined — index.css
-    // loads it, but a raw class dependency on the utility bundle is
-    // brittle for an element created outside React's tree).
+    // sr-only inlined — a class dependency on the tailwind bundle is brittle outside React's tree.
     region.style.position = 'absolute';
     region.style.width = '1px';
     region.style.height = '1px';

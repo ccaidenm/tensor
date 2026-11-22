@@ -27,17 +27,9 @@ import { useConfigStore } from '@/lib/config/store';
 import { BLANKS, STARTERS, type DocTemplate } from '@/lib/document/templates';
 import { inTauriWindow } from '@/lib/window/tauriEnv';
 
-/**
- * #103 — THE START SCREEN (the landing half; the setup wizard is the
- * follow-up): the GDocs-postured Home — greeting, the template row
- * (blank paginated + blank pageless + the starters + Open), and the
- * recent documents below. The TitleBarRow (its home variant) owns the
- * chrome above; this component owns everything else.
- *
- * GREETING NAME: the user's author identity first (the field the
- * onboarding will set), the OS username (the Rust command) as the
- * fallback, a graceful no-name spelling last.
- */
+// #103 — the start screen: greeting, template row, recents. The TitleBarRow
+// (its home variant) owns the chrome above. The greeting name prefers the
+// author identity, then the OS username, then a graceful no-name spelling.
 
 /** The template cards' visual map (the catalog is data-only). */
 const TEMPLATE_VISUALS: Record<
@@ -132,9 +124,8 @@ export function StartScreen() {
       className="relative flex-1 overflow-y-auto bg-background"
       data-testid="start-screen"
     >
-      {/* #103 — the RETURN ROW overlays the top-right (the user's
-          ruling: the library's content position NEVER shifts — the row
-          layers in reserved top space instead of pushing the column). */}
+      {/* #103 — the return row overlays the top-right; the content
+          below never shifts. */}
       {hasDocument && (
         <div
           className="absolute right-8 top-4 z-20 flex items-center gap-3"
@@ -172,13 +163,12 @@ export function StartScreen() {
         </div>
       )}
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-10 px-8 pt-16 pb-12">
-        {/* THE GREETING */}
+        {/* The greeting */}
         <h1 className="text-3xl font-semibold tracking-tight" data-testid="start-greeting">
           {greeting}
         </h1>
 
-        {/* THE CORE ROW — the blanks (Tensor's two identities) + the
-            open card (the user's "core three"). */}
+        {/* The core row — the blanks + the open card. */}
         <section aria-label="Start a new document">
           <h2 className="mb-4 text-sm font-medium text-muted-foreground">
             Start a new document
@@ -207,8 +197,7 @@ export function StartScreen() {
                         onClick={() => create(template)}
                         className="group flex w-36 flex-col items-start gap-3 rounded-lg border border-border bg-card p-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                  {/* The preview block: a tinted page tile per template
-                      (the GDocs card posture — icon-forward, honest). */}                  <span
+                  {/* The preview block: a tinted page tile per template. */}                  <span
                     aria-hidden="true"
                     className={cn(
                       'flex h-20 w-full items-center justify-center rounded-md',
@@ -245,8 +234,7 @@ export function StartScreen() {
                 </Tooltip>
               );
             })}
-            {/* Open a file — the core row's third card (GDocs's
-                gallery tile). */}
+            {/* Open a file — the core row's third card. */}
             <button
               type="button"
               role="listitem"
@@ -271,7 +259,7 @@ export function StartScreen() {
           </div>
         </section>
 
-        {/* THE STARTERS — one divider line, then the genres. */}
+        {/* The starters. */}
         <section aria-label="Templates">
           <h2 className="mb-4 text-sm font-medium text-muted-foreground">
             Or choose a template
@@ -314,10 +302,9 @@ export function StartScreen() {
           </div>
         </section>
 
-        {/* #103 — UNSAVED WORK: the recovery snapshots, PINNED above
-            the recents (the user's ruling — unsaved work outranks
-            recently opened work). A restore consumes the snapshot
-            (it becomes the live doc) and the card leaves. */}
+        {/* #103 — the recovery snapshots, pinned above the recents
+            (unsaved work outranks recent work). A restore consumes
+            the snapshot (it becomes the live doc). */}
         {recoveries.length > 0 && (
           <section aria-label="Unsaved work">
             <h2 className="mb-4 text-sm font-medium text-muted-foreground">
@@ -350,7 +337,7 @@ export function StartScreen() {
           </section>
         )}
 
-        {/* RECENT DOCUMENTS */}
+        {/* Recent documents */}
         <section aria-label="Recent documents">
           <h2 className="mb-4 text-sm font-medium text-muted-foreground">
             Recent documents

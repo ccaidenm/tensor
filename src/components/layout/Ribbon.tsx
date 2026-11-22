@@ -42,17 +42,12 @@ export function Ribbon() {
 
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
 
-  // M-CONTEXTUAL-RIBBON — the contextual interplay lives HERE, next to
-  // the tab state it acts on (the store stays producer-facing). Entering
-  // a context appends + auto-focuses its tab and remembers the tab the
-  // user was on; exiting restores it. Clicking a NORMAL tab does NOT
-  // exit — the trigger lingers in the strip while the selection kind
-  // persists, and a fresh enter re-focuses it.
+  // Entering a context auto-focuses its tab and remembers the tab the
+  // user was on; exiting restores it. Clicking a normal tab does NOT
+  // exit the context — the trigger stays while the selection kind persists.
   const activeContext = useRibbonContextStore((s) => s.active);
-  // FOCUS MODE: the ribbon owns its own hide (unmount, not CSS — the
-  // contextual producers, tooltips, everything stops with it). The
-  // component-level gate means ANY mount context hides correctly, not
-  // just App's.
+  // Focus Mode hides the ribbon by unmount, not CSS — the contextual
+  // producers and tooltips stop with it.
   const focusActive = useFocusStore((s) => s.active);
   const reduceMotion = useReducedMotion();
   const previousTabRef = useRef<ActiveTab | null>(null);
@@ -72,8 +67,6 @@ export function Ribbon() {
   }, [activeContext]);
 
   const editor = useDocumentStore((s) => s.editor);
-  // M-CONTEXTUAL-RIBBON — the selection producers (table / image;
-  // header/footer stubs until its milestone).
   useSelectionContexts(editor);
   if (!editor || focusActive) return null;
 
@@ -84,8 +77,7 @@ export function Ribbon() {
         onValueChange={(value) => setActiveTab(value as ActiveTab)}
         className="gap-0 bg-card border-b border-border"
       >
-        {/* #100/#103 — the merged titlebar row, extracted (the start
-            screen renders the same chrome in its home variant). */}
+        {/* #100/#103 — the titlebar row; the start screen renders the same chrome in its home variant. */}
         <TitleBarRow variant="editor">
           <TabsList
             variant="line"
@@ -153,9 +145,7 @@ export function Ribbon() {
           </div>
         </TabsContent>
 
-        {/* M-CONTEXTUAL-RIBBON — the active context's tab content. Same
-            wrapper chrome as the static tabs (h-14 flex-none px-3) — the
-            content comes from the registry, so this block never grows. */}
+        {/* The active context's tab content — comes from the registry, so this block never grows. */}
         {activeContext && (
           <TabsContent value={activeContext} className="m-0 h-14 flex-none px-3">
             <div className="flex h-full items-center">
@@ -169,17 +159,9 @@ export function Ribbon() {
 }
 
 /**
- * M-CONTEXTUAL-RIBBON — the contextual strip trigger. Accent (primary)
- * ink in EVERY state — hover, active, dark mode — by design: the
- * contextual tab announces itself against the neutral static strip
- * (Word colors its contextual tabs). `text-primary!` (important) is
- * deliberate: the ui/tabs base classes carry `data-active:text-foreground`
- * and `dark:data-active:text-foreground`, and a variant utility beats a
- * plain one in Tailwind's sheet order — the plain `text-primary` lost
- * exactly there (the "turns neutral once active" bug). The entrance
- * animation is applied ONLY when motion is allowed (useReducedMotion:
- * the accessibility 'on' override and the system preference both
- * suppress it — instant appear instead).
+ * Contextual trigger keeps accent ink in every state (as Word does):
+ * `text-primary!` — the ui/tabs base's data-active:text-foreground beats
+ * a plain utility in Tailwind sheet order.
  */
 function ContextualTabTrigger({
   id,

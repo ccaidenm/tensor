@@ -20,21 +20,14 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from 'cn';
 
 /**
- * THE TRANSLATE PANEL — the Review tab's on-demand translation, docked
- * beside Find/Table/Accessibility (the same SidebarHost chrome).
- *
- * Posture (the issue's acceptance criteria, spelled out):
- *  - scope: the SELECTION (partially selected blocks translate whole —
- *    disclosed) or the WHOLE DOCUMENT;
- *  - consent: an unconfigured panel is the setup surface — no picker,
- *    no run, no network (the gate lives in the client module);
- *  - apply: REPLACE the original, or INSERT ALONGSIDE — interleaved
- *    (each translation right under its block) or appended (the whole
- *    translated copy at the end) for document runs;
- *  - on-demand only: one run at a time, cancellable, no background.
- *
- * The privacy line is ALWAYS visible while configured: "Sent to
- * <endpoint>" — consent is per-action, not per-session.
+ * The Translate panel — on-demand translation, docked. Scope: the
+ * SELECTION (partially selected blocks translate whole, disclosed) or
+ * the WHOLE DOCUMENT. An unconfigured panel is the setup surface — no
+ * picker, no run, no network (the gate lives in the client module).
+ * Apply: REPLACE, or INSERT ALONGSIDE (interleaved or appended for
+ * document runs). One run at a time, cancellable, no background. The
+ * privacy line ("Sent to <endpoint>") is ALWAYS visible while
+ * configured — consent is per-action, not per-session.
  */
 export function TranslatePanel() {
   const editor = useDocumentStore((s) => s.editor);
@@ -68,9 +61,8 @@ export function TranslatePanel() {
 
   const isLocal = provider === 'local';
 
-  // Seed the picker from the remembered choice (the print dialog's
-  // lastDestination law — reopening lands where you were). Local mode
-  // picks PAIRS, not targets — no seed there.
+  // Seed the picker from the remembered choice (reopening lands where
+  // you were). Local mode picks PAIRS, not targets — no seed there.
   useEffect(() => {
     if (!isOpen || targetLang || isLocal) return;
     const remembered = useConfigStore.getState().config.translation.lastTargetLang;
@@ -174,7 +166,6 @@ export function TranslatePanel() {
         </div>
       ) : (
         <div className="flex flex-1 flex-col overflow-y-auto">
-          {/* Scope */}
           <div className="border-b border-border p-3">
             <div className="mb-1.5 text-xs font-medium text-muted-foreground">What to translate</div>
             <div className="flex gap-1" data-testid="translate-scope">
@@ -207,10 +198,9 @@ export function TranslatePanel() {
             )}
           </div>
 
-          {/* Target — a language for online providers, an explicit
-              DIRECTION for local (Bergamot has no auto-detect). The
-              local picker is an IN-PANEL list, not a popup: 115 pairs
-              need a filter, and the catalog is visible at a glance. */}
+          {/* Target — a language for online providers, an explicit DIRECTION
+              for local (Bergamot has no auto-detect). The local picker is
+              an IN-PANEL list: 115 pairs need a filter. */}
           <div className="border-b border-border p-3">
             {isLocal ? (
               <>
@@ -332,8 +322,7 @@ export function TranslatePanel() {
                 </div>
               </div>
             ) : isLocal && selectedPairCode && !selectedInstalled ? (
-              // The chosen direction isn't downloaded yet — the download
-              // IS the next action (the spell installer's inline flow).
+              // Not downloaded yet — the download IS the next action.
               <Button
                 size="sm"
                 className="h-8 w-full"
@@ -356,7 +345,6 @@ export function TranslatePanel() {
             )}
           </div>
 
-          {/* Errors */}
           {lastError && (
             <div
               className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
@@ -454,9 +442,7 @@ function useLanguages(enabled: boolean): TranslationLanguage[] | null {
   return languages;
 }
 
-/** ONE PAIR ROW — the local picker's unit (the search-results row
- *  pattern): the direction, its state (Downloaded / ≈size), click =
- *  select. No popup: the list lives in the panel. */
+/** One pair row: the direction, its state, click = select. */
 function PairRow({ pair, selected, downloaded }: { pair: { code: string; from: string; to: string; bytes?: number }; selected: boolean; downloaded?: boolean }) {
   return (
     <li>

@@ -11,9 +11,8 @@ import { caretGeometry, textRangeLineRects } from '@/lib/paginated/positionMap';
 import { hitTest } from '@/lib/paginated/hitTest';
 import { DEFAULT_MARGINS, PAGE_GAP, toLayoutOptions } from '@/lib/document/pageSetup';
 
-// INDENT PARITY (M6.2). METRICS: FakeMetrics @16 → 10px/char, line 16px
-// (a 12.8 / d 3.2). Letter content box 624×864 at (96, 96) → 62
-// chars/line, 54 lines/page.
+// METRICS: FakeMetrics @16 → 10px/char, line 16px (a 12.8 / d 3.2).
+// Letter content box 624×864 at (96, 96) → 62 chars/line, 54 lines/page.
 
 // baseStyle MUST match the view's (identity-cache generation — the
 // projection.test lesson).
@@ -61,7 +60,7 @@ async function settle() {
   await settleLayout();
 }
 
-// ─── STEP 0d receipts, pinned: Tab TODAY vs the new wiring ───────────────
+// Tab receipts, pinned
 
 describe('Tab keymaps (receipts pinned)', () => {
   it('RECEIPT: inside a list, Tab/Shift+Tab are the LIST\'s (sink/lift) — never the paragraph indent', async () => {
@@ -128,7 +127,7 @@ describe('Tab keymaps (receipts pinned)', () => {
     expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
   });
 
-  it('P1 → M-RULER Phase 4: mid-line Tab inserts a REAL tab character (no indent change)', async () => {
+  it('mid-line Tab inserts a REAL tab character (no indent change)', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settle();
     act(() => {
@@ -137,9 +136,8 @@ describe('Tab keymaps (receipts pinned)', () => {
       pressTab(true);
     });
     // The block-start indent branch does NOT fire mid-line; the tab
-    // character is real content whose advance the ENGINE rules on (the
-    // stops or the 0.5" default grid). Shift+Tab mid-line is still a
-    // no-op for indents.
+    // character's advance is the ENGINE's (stops or the 0.5" default
+    // grid). Shift+Tab mid-line is a no-op for indents.
     expect(editor.getAttributes('paragraph').indentLeft).toBe(0);
     expect(editor.getAttributes('paragraph').firstLineIndent).toBeNull();
     expect(editor.state.doc.textContent).toBe('he\tllo world');
@@ -164,7 +162,7 @@ describe('Tab keymaps (receipts pinned)', () => {
     expect(editor.getAttributes('paragraph').firstLineIndent).toBe(0);
     expect(editor.getAttributes('paragraph').indentLeft).toBe(step);
     expect(editor.state.doc.childCount).toBe(1);
-    // Second: the paragraph indentLeft steps (the M6.2 rule).
+    // Second: the paragraph indentLeft steps.
     act(() => {
       useDocumentStore.getState().editor!.view.dom.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true })
@@ -222,14 +220,11 @@ describe('Tab keymaps (receipts pinned)', () => {
   });
 });
 
-// ─── Backspace step (Word/GDocs) ──────────────────────────────────────────
+// Backspace step (Word/GDocs)
 describe('Backspace at an indented paragraph start', () => {
-  // Harness notes (receipts): raw Backspace keydowns reach the tiptap
-  // shortcut registry — our step — and, at a BLOCK START, PM's native
-  // join-at-start (prosemirror-view's keydown fallback). MID-TEXT char
-  // deletion rides the browser's beforeinput pipeline and cannot be
-  // driven in jsdom — pinned here by the DECLINE (the step not firing),
-  // which is the part that is ours.
+  // Harness notes: raw Backspace keydowns reach the tiptap registry
+  // (our step) and PM's native join-at-start. MID-TEXT deletion rides
+  // beforeinput (undrivable in jsdom) — pinned by the DECLINE.
 
   it('steps the indent out INSTEAD of joining; at 0 the normal join runs', async () => {
     const { editor } = renderTensor('<p>first</p><p>second</p>');
@@ -282,7 +277,7 @@ describe('Backspace at an indented paragraph start', () => {
   });
 });
 
-// ─── STEP 1: adapter mapping + validation ──────────────────────────────────
+// Adapter mapping + validation
 
 describe('adapter: indent family mapping', () => {
   it('indentLeft/indentRight/firstLineIndent pass through px 1:1 (consumed, not dropped)', async () => {
@@ -312,8 +307,7 @@ describe('adapter: indent family mapping', () => {
     });
     adapt(editor.state.doc);
     const calls = warn.mock.calls.map((c) => String(c[0]));
-    // BEFORE (M5.13): 'indent,indentLeft,indentRight' appeared in the
-    // dropped signature. AFTER (M6.2): none of the three.
+    // The indent family must never appear in the dropped-attrs warning.
     expect(calls.some((c) => c.includes('dropped') && /indent/.test(c))).toBe(false);
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('dropped by the semantic doc: indent'));
     warn.mockRestore();
@@ -376,7 +370,7 @@ describe('adapter: indent family mapping', () => {
   });
 });
 
-// ─── STEP 4: input geometry ───────────────────────────────────────────────
+// Input geometry
 
 describe('indent input geometry (paginated)', () => {
   function block(id: string, text: string, extra: Record<string, number> = {}): AdapterBlock {
@@ -472,7 +466,7 @@ describe('indent input geometry (paginated)', () => {
 
   it('fragment continuation keeps the BASE indent (fli never reapplies across pages)', () => {
     // 100 lines → 2 pages. Line 0 (block start): left 32 + fli −32 = 0.
-    // Continuation page's first line: BASE edge 32 (engine ruling).
+    // Continuation page's first line: BASE edge 32.
     const { result } = layoutBlocks([
       {
         id: 'h',
@@ -491,7 +485,7 @@ describe('indent input geometry (paginated)', () => {
   });
 });
 
-// ─── Ribbon: First Line / Hanging presets ────────────────────────────────
+// Ribbon: First Line / Hanging presets
 
 describe('Layout ribbon: first-line / hanging buttons', () => {
   it('First Line toggles +32 / clear; Hanging sets the reference-list style and clears', async () => {
@@ -537,7 +531,7 @@ describe('Layout ribbon: first-line / hanging buttons', () => {
   });
 });
 
-// ─── STEP 5: the essay — every indent style, both modes, round-trip ───────
+// The essay: every indent style, both modes, round-trip
 
 describe('essay acceptance (M6.2)', () => {
   it('all styles render in BOTH modes; attrs survive the .wpdoc round-trip; Tab/Backspace work through them', async () => {
@@ -554,9 +548,7 @@ describe('essay acceptance (M6.2)', () => {
     const { editor } = renderTensor(essay);
     await settle();
 
-    // blocks: [0]=heading, [1]=long, [2]=left, [3]=fli, [4]=hang,
-    // [5]=right (+ PM's trailing paragraph after the list-free doc? —
-    // no list at doc end, none appended; text ends with a paragraph).
+    // blocks: [0]=heading, [1]=long, [2]=left, [3]=fli, [4]=hang, [5]=right.
     const paras = adapt(editor.state.doc).blocks;
     const [left, fli, hang, right] = [paras[2], paras[3], paras[4], paras[5]].map(
       (b: AdapterBlock) => b
@@ -576,9 +568,8 @@ describe('essay acceptance (M6.2)', () => {
       editor.commands.updateAttributes('paragraph', { indentRight: 96 });
     });
 
-    // Tab at the indented starts (P1: firstLineIndent, the GDocs
-    // convention) and the ctrl+] command (indentLeft) both work
-    // through the essay.
+    // Tab at the indented starts (firstLineIndent, the GDocs convention)
+    // and the ctrl+] command (indentLeft) both work through the essay.
     act(() => {
       editor.commands.setTextSelection(left!.from + 1); // block start
       pressTab();
@@ -589,8 +580,8 @@ describe('essay acceptance (M6.2)', () => {
     // right had indentRight 96 only — one indentLeft step lands 32.
     expect(editor.state.doc.nodeAt(right!.from)!.attrs.indentLeft).toBe(step);
 
-    // Backspace-at-start ordering (P1): firstLineIndent steps out
-    // first, then the paragraph indentLeft — never joins.
+    // Backspace-at-start ordering: firstLineIndent steps out first,
+    // then indentLeft — never joins.
     act(() => {
       editor.commands.setTextSelection(left!.from + 1);
       useDocumentStore.getState().editor!.view.dom.dispatchEvent(

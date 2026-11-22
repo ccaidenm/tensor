@@ -1,29 +1,16 @@
 import type { LTMatch } from './types';
 
 /**
- * THE CLASSIFICATION MAP — which LanguageTool categories the app
- * treats as spelling vs. grammar vs. never-rendered. The provider
- * (local sidecar or the online API) speaks the same wire; every match
- * it returns carries `rule.category.id`, and THIS map is the single
- * client-side ruling on what each becomes.
- *
- * THE SCOPE LINE (the issue's own): grammar = agreement, punctuation,
- * common usage — mechanical errors. Style/tone/clarity is explicitly
- * out, so every style-flavored category is dropped — not just at the
- * render step but at the REQUEST step (`disabledCategories`), so the
- * engine never even spends cycles on them.
- *
- * Unknown categories are dropped CONSERVATIVELY (they may be new
- * style categories we haven't met) — a loud dev-only warn, never a
- * silent flag.
+ * THE CLASSIFICATION MAP — the single client-side decision on what each
+ * LT category becomes. Style/tone/clarity is dropped at the REQUEST step;
+ * unknown categories drop conservatively (dev-only warn).
  */
 
 /** The spelling feature: LT's misspelling stream. */
 const SPELLING_CATEGORIES = ['TYPOS'] as const;
 
-/** The grammar feature — the issue's "agreement, punctuation, common
- *  usage" translated to LT's category ids (validated against a real
- *  6.6 server: subject-verb rules ride GRAMMAR, e.g. "He don't"). */
+/** The grammar feature: agreement, punctuation, common usage, in LT's
+ *  category ids (validated against a real 6.6 server). */
 const GRAMMAR_CATEGORIES = [
   'GRAMMAR',
   'PUNCTUATION',
@@ -32,8 +19,8 @@ const GRAMMAR_CATEGORIES = [
   'TYPOGRAPHY',
 ] as const;
 
-/** Always-excluded (style/tone/clarity — the issue's out-of-scope
- *  clause), sent as disabledCategories on every request. */
+/** Always-excluded (style/tone/clarity — out of scope), sent as
+ *  disabledCategories on every request. */
 export const STYLE_CATEGORIES = [
   'STYLE',
   'COLLOQUIALISMS',

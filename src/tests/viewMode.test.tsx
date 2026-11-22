@@ -81,9 +81,9 @@ describe('View > Paginated / Pageless toggle', () => {
     });
     await settle();
 
-    // THE PER-DOCUMENT LAW: the toggle writes pageSetup.viewMode (the
-    // setting rides .wpdoc like the rest of pageSetup) and marks the
-    // document dirty — the config field stays the NEW-DOCUMENT default.
+    // The toggle writes pageSetup.viewMode (it rides .wpdoc like the
+    // rest of pageSetup) and marks the document dirty — the config
+    // field stays the NEW-DOCUMENT default.
     expect(useDocumentStore.getState().pageSetup.viewMode).toBe('pageless');
     expect(useDocumentStore.getState().isDirty).toBe(true);
     expect(useConfigStore.getState().config.editor.defaultPageLayout).toBe('Pages');
@@ -104,7 +104,7 @@ describe('View > Paginated / Pageless toggle', () => {
 
   it('the DOCUMENT choice wins over the config default (the resolver law)', async () => {
     // A doc carrying viewMode: 'pageless' opens pageless EVEN while the
-    // config default says Pages (the per-document law).
+    // config default says Pages (per-document).
     useDocumentStore.setState({
       pageSetup: { pageSize: 'Letter', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP, viewMode: 'pageless' },
     });
@@ -228,8 +228,8 @@ describe('Page Background in pageless mode', () => {
 
     const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
     expect(surface).not.toBeNull();
-    // THE STRIP LAW: the sheet paints WHITE by default (the strip IS
-    // the page now); a picked color replaces it on both surfaces.
+    // The sheet paints WHITE by default (the strip IS the page now);
+    // a picked color replaces it on both surfaces.
     expect(surface.style.background).toBe('rgb(255, 255, 255)');
 
     // Open the palette (the chevron) and pick a swatch — the real
@@ -262,8 +262,8 @@ describe('Page Background in pageless mode', () => {
     });
     await settle();
     expect(useDocumentStore.getState().pageSetup.pageColor).toBe('');
-    // THE STRIP LAW: cleared = back to the white sheet (never an
-    // empty style — the strip is the page now).
+    // Cleared = back to the white sheet (never an empty style — the
+    // strip is the page now).
     expect((document.querySelector('[data-testid="pageless-surface"]') as HTMLElement).style.background).toBe('rgb(255, 255, 255)');
   });
 });

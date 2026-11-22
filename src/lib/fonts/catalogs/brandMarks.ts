@@ -3,25 +3,9 @@ import { catalogsAllowed, catalogFetchBytes } from './http';
 import type { CatalogId } from './types';
 
 /**
- * M-FONTS-B — runtime brand marks for the catalog sources: fetch each
- * service's favicon ONCE at boot while the metadata prefetch warms
- * (only while allowFontCatalogs is ON — the same consent; the user
- * already allows outbound requests to these services). Keeps the mark
- * in sync with whatever icon the service itself uses.
- *
- * ALL catalog marks come from the same source — each service's own
- * favicon, fetched once per session at boot (receipts, the app's
- * reqwest path): www.google.com/favicon.ico → HTTP 200,
- * image/x-icon, 5,430 bytes (the four-color G favicon — fonts.google
- * .com/favicon.ico 404s, so the parent domain serves the mark);
- * fontsource.org/favicon.ico → HTTP 200, image/vnd.microsoft.icon,
- * 15,086 bytes; www.fontshare.com/favicon.ico (and /favicon.svg,
- * /static/…) → 691 bytes of HTML — the SPA serves no static icon to
- * non-JS clients. Byte-sniffing validates every response (HTML bodies
- * are NOT marks) and rejects failures → the fallback mark shows, by
- * the same isolation posture as any third party. When Font Share
- * serves a real favicon, the brand mark lights up with zero code
- * changes.
+ * Runtime brand marks: each catalog service's own favicon, fetched
+ * once per session while opted in. Responses are byte-sniffed (HTML
+ * bodies are not marks); failures fall back to the bundled icon.
  */
 
 const FAVICON_URLS: Record<CatalogId, string> = {
@@ -31,18 +15,14 @@ const FAVICON_URLS: Record<CatalogId, string> = {
 };
 
 /** data-URL per source once fetched; absent = fallback icon.
- *  Reactive (zustand): components subscribe with useBrandMark, so a
- *  mark arriving AFTER first paint swaps the fallback icon out
- *  immediately — the "plain text G instead of the logo" class of
- *  staleness. */
+ *  Reactive so a mark arriving after first paint swaps the
+ *  fallback out immediately. */
 const useBrandMarkStore = create<{ marks: Partial<Record<CatalogId, string>> }>(() => ({
   marks: {},
 }));
-/** Attempted within the current ensure round — retried on the NEXT
- *  ensureBrandMarks() when the mark is still missing, so a failed or
- *  HTML-body boot fetch never pins the fallback icon for a whole
- *  session (the staleness fix): the font browser retries on open,
- *  which is an explicit user action. */
+/** Attempted within the current ensure round — cleared on failure,
+ *  so a bad boot fetch never pins the fallback for a whole session:
+ *  the browser retries on every open. */
 const attempted = new Set<CatalogId>();
 
 /** Magic-byte sniff — the honest favicon check (content, not URL). */
@@ -63,10 +43,9 @@ function toDataUrl(bytes: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(binary)}`;
 }
 
-/** Fetch any still-missing marks. Called at boot (prefetchCatalogs)
- *  and on every font-browser open (user action) — a mark that failed
- *  once gets retried, so the fallback icon is always temporary.
- *  Failures stay silent — the fallback icon is the design. */
+/** Fetch any still-missing marks. Called at boot and on every
+ *  font-browser open, so the fallback icon is always temporary.
+ *  Failures stay silent — the fallback is the design. */
 export async function ensureBrandMarks(): Promise<void> {
   if (!catalogsAllowed()) return;
   await Promise.allSettled(
@@ -90,7 +69,7 @@ export async function ensureBrandMarks(): Promise<void> {
 }
 
 /** The fetched mark as a data URL, or null → render the fallback.
- *  REACTIVE hook — components re-render when the mark lands. */
+ *  Components re-render when the mark lands. */
 export function useBrandMark(id: CatalogId): string | null {
   return useBrandMarkStore((s) => s.marks[id] ?? null);
 }
@@ -100,7 +79,7 @@ export function brandMarkUrl(id: CatalogId): string | null {
   return useBrandMarkStore.getState().marks[id] ?? null;
 }
 
-/** TEST SEAM. */
+/** Test seam. */
 export function resetBrandMarksForTests(): void {
   useBrandMarkStore.setState({ marks: {} });
   attempted.clear();

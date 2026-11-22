@@ -8,12 +8,10 @@ import { insertPageField } from '@/lib/editor/PageFieldNode';
 import type { LineBox, Run } from '@tensor-editor/engine';
 
 /**
- * M-PAGEFIELD (#34) — the page-number field: the PM node is a MARKER
- * (never carrying a resolved value — the M-REFS law); the adapter
- * measures it at the warm total's max-width digits with the fieldKind
- * marker riding the run; the PAINT resolves per page (the pages field
- * draws exactly the placeholder; the page field right-anchors in its
- * slot).
+ * #34 — the page-number field: the PM node is a MARKER (never carrying
+ * a resolved value); the adapter measures it at the warm total's
+ * max-width digits; the PAINT resolves per page (the pages field draws
+ * exactly the placeholder; the page field right-anchors in its slot).
  */
 
 const BASE = { fontFamily: 'system-ui', fontSize: 16 };
@@ -22,7 +20,7 @@ function lastBlock(r: ReturnType<typeof pmDocToSemantic>) {
   return r.blocks[r.blocks.length - 1]!;
 }
 
-describe('pageField — the adapter (M-PAGEFIELD)', () => {
+describe('pageField — the adapter', () => {
   it('a field in a band paragraph emits a marker run measured at the warm total', () => {
     const { editor } = renderTensor(
       '<div data-header-footer="header"><p>Page </p></div>',
@@ -107,7 +105,7 @@ describe('pageField — the adapter (M-PAGEFIELD)', () => {
   });
 });
 
-describe('pageField — the position mapping (selectability, M-PAGEFIELD)', () => {
+describe('pageField — the position mapping (selectability)', () => {
   it('selection maps THROUGH the field (the atom is 1 PM position; the placeholder is N chars)', async () => {
     const { editor } = renderTensor('<div data-header-footer="footer"><p>Page</p></div>');
     await settleLayout();
@@ -132,7 +130,7 @@ describe('pageField — the position mapping (selectability, M-PAGEFIELD)', () =
     expect(block.text).toBe('Page12');
 
     // The atom's PM position maps to the placeholder START and
-    // round-trips exactly (the old linear mapping shifted by 1).
+    // round-trips exactly.
     const atomBo = pmPosToBlockOffset(adapted.blocks, atomPos)!;
     expect(atomBo.offset).toBe(4); // '1' of '12'
     expect(blockOffsetToPmPos(atomBo.block, atomBo.offset)).toBe(atomPos);
@@ -141,9 +139,8 @@ describe('pageField — the position mapping (selectability, M-PAGEFIELD)', () =
     const before = pmPosToBlockOffset(adapted.blocks, atomPos - 1)!;
     expect(blockOffsetToPmPos(before.block, before.offset)).toBe(atomPos - 1);
 
-    // AFTER the field — the old bug's clamp point: the PM position
-    // past the atom round-trips exactly (a selection spanning the
-    // field reaches the paragraph end).
+    // AFTER the field: the PM position past the atom round-trips
+    // exactly (a selection spanning the field reaches the paragraph end).
     const after = atomPos + 1;
     const afterBo = pmPosToBlockOffset(adapted.blocks, after)!;
     expect(afterBo.offset).toBe(6); // past the placeholder — the text end
@@ -154,13 +151,10 @@ describe('pageField — the position mapping (selectability, M-PAGEFIELD)', () =
   });
 });
 
-describe('pageField — the paint resolution (M-PAGEFIELD)', () => {
-  /** A LineBox + runs shaped like a band line: [text 'Page ', field
-   *  '12', text ' of ', field '12'] — the adapter's own emission
-   *  shape, hand-built to pin the PAINT contract. `pageIndex` is the
-   *  ECHO's page (0-based) — the shift derives the page number from
-   *  it, exactly as production does (BlockCanvas passes page.index+1
-   *  as fieldPage.number — the two are the same page). */
+describe('pageField — the paint resolution', () => {
+  /** A LineBox + runs shaped like a band line — the adapter's own
+   *  emission shape, hand-built to pin the PAINT contract. `pageIndex`
+   *  is the ECHO's page (BlockCanvas passes page.index+1 — same page). */
   function bandLines(pageIndex: number): { lines: LineBox[]; runs: Run[] } {
     const style = { fontFamily: 'system-ui', fontSize: 16 };
     const runs: Run[] = [

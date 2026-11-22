@@ -15,9 +15,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TensorLogo } from '@/components/icons/TensorIcon';
 
-/** The menu item's right-aligned shortcut: the USER'S live binding for
- *  the id (useShortcutDisplay), Word's convention. Nothing renders when
- *  the command is unbound (Save As…, Export — the no-binding lie). */
+/** The menu item's right-aligned shortcut: the user's live binding for
+ *  the id, Word's convention. Nothing renders when the command is unbound. */
 function MenuShortcut({ id }: { id: string }) {
   const binding = useShortcutDisplay(id);
   if (!binding) return null;
@@ -36,18 +35,9 @@ import { inTauriWindow, isMacOS } from '@/lib/window/tauriEnv';
 import { cn } from 'cn';
 
 /**
- * #100/#103 — THE MERGED TITLEBAR ROW: the h-10 strip that IS the
- * window chrome (the Tensor menu, the tab lane, the drag regions, the
- * document name, the window controls). Extracted from the Ribbon so
- * the START SCREEN can own the same chrome without the ribbon: the
- * app renders this row in both modes, with the ribbon tabs riding as
- * the editor variant's children (inside the Ribbon's Tabs context).
- *
- * variant 'home': the Tensor menu simplifies to Open…/Settings/Quit
- * (New lives on the start screen itself; Save/Export own nothing
- * without a document), the name lane is drag-only, and the row
- * carries its own card frame + border (the editor variant borrows the
- * Tabs strip's).
+ * #100/#103 — the h-10 titlebar row that IS the window chrome, shared
+ * by the editor and the start screen (which owns it without the ribbon).
+ * variant 'home': simplified menu, drag-only name lane, own card frame.
  */
 
 interface TitleBarRowProps {
@@ -86,11 +76,9 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
       <div className="relative z-10 flex h-10 items-center px-1">
         <div className="flex h-10 items-center">
           {/*
-            #100 — the macOS lane: the native traffic lights overlay
-            the row's left edge (titleBarStyle: Overlay in
-            tauri.conf); reserve their lane (a drag region — it is
-            empty chrome) so the Tensor button clears them. Linux/
-            Windows never reserves it: the row IS the frame.
+            #100 — the native macOS traffic lights overlay this edge
+            (titleBarStyle: Overlay); reserve an empty drag lane so
+            the Tensor button clears them.
           */}
           {!isMacOS() && controlsSide === 'left' && <WindowControls />}
           {isMacOS() && (
@@ -124,8 +112,7 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
                     Save As…
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  {/* M-MD/M-DOCX: the export surface — Markdown and Word
-                      now; PDF joins when #39 lands. */}
+                  {/* Markdown and Word exports; PDF joins when #39 lands. */}
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger>Export</DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
@@ -140,10 +127,7 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
                 </>
               )}
               <DropdownMenuSeparator />
-              {/* #103 — the LIBRARY item (the user's naming): the start
-                  screen IS the library — templates, recents, open. The
-                  return path from a live doc is the start screen's OWN
-                  return card (the menu item was its clumsy twin). */}
+              {/* #103 — "Library" names the start screen (templates, recents, open). */}
               <DropdownMenuItem onClick={() => useDocumentStore.getState().goHome()}>
                 Library
               </DropdownMenuItem>
@@ -163,14 +147,9 @@ export function TitleBarRow({ variant, children }: TitleBarRowProps) {
         </div>
 
         {/*
-          #100 — THE TITLE LANES. The drag lane absorbs the row's
-          leftover width (data-tauri-drag-region; double-click toggles
-          maximize — the tauri drag listener owns the mousedown). The
-          document name: on Linux/Windows it floats ABSOLUTELY
-          CENTERED in the WINDOW (the user's ruling), dragging on its
-          own band; on macOS it stays in-flow at the far right (the
-          traffic lights own the left lane). The HOME variant has no
-          name — the whole lane drags.
+          #100 — the drag lane absorbs the leftover width; double-click
+          toggles maximize (Tauri's drag listener owns the mousedown).
+          The doc name sits window-centered on Linux/Windows, far right on macOS.
         */}
         <div className="min-w-3 flex-1 self-stretch" data-tauri-drag-region />
         {!isHome &&

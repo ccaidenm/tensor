@@ -18,12 +18,12 @@ import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { __resetAnnouncerForTests } from '@/lib/accessibility/announce';
 
 /**
- * #COMMENTS — the boundary gutter: the anchored thread cards in the
- * document's right whitespace (the GDocs model). The stack is pure
- * (unit-tested with real heights); the components pin the visibility
- * law, the card interactions (draft/reply/edit/resolve/delete), the
- * orphan state, jump-to-thread, the SR announcements, and the desk
- * reservation syncing with the gutter.
+ * Comments — the boundary gutter: the anchored thread cards in the
+ * document's right whitespace. The stack is pure (unit-tested with
+ * real heights); the components pin the visibility, the card
+ * interactions (draft/reply/edit/resolve/delete), the orphan state,
+ * jump-to-thread, the SR announcements, and the desk reservation
+ * syncing with the gutter.
  */
 
 function thread(id: string, text = 'note', resolved = false): CommentThread {
@@ -230,7 +230,7 @@ describe('#COMMENTS gutter: cards', () => {
     expect(gutterEl).not.toBeNull();
     const post = document.querySelector('[data-testid="comment-draft-post"]') as HTMLButtonElement;
     expect(post.disabled).toBe(true); // empty draft cannot post
-    // The commit action is the PRIMARY accent (the user's ruling).
+    // The commit action is the PRIMARY accent.
     expect(post.className).toContain('bg-primary');
     const input = document.querySelector('[data-testid="comment-draft-input"]') as HTMLTextAreaElement;
     act(() => {
@@ -239,7 +239,7 @@ describe('#COMMENTS gutter: cards', () => {
     expect(
       (document.querySelector('[data-testid="comment-draft-post"]') as HTMLButtonElement).disabled,
     ).toBe(false);
-    // ENTER posts too (the composer's keystroke law).
+    // ENTER posts too.
     act(() => {
       fireEvent.keyDown(input, { key: 'Enter' });
     });
@@ -400,7 +400,7 @@ describe('#COMMENTS gutter: THE OVERLAY RULING — the document never moves', ()
     await settleLayout();
     const wrapper = document.querySelector('[data-testid="paginated-zoom-wrapper"]') as HTMLElement;
     // 'margin: 0 auto' — the centered page, untouched by comments
-    // forever (the overlay ruling: no reservation, no desk shift).
+    // forever (no reservation, no desk shift).
     expect(wrapper.style.marginRight).toBe('auto');
 
     act(() => {
@@ -451,8 +451,8 @@ describe('#COMMENTS gutter: THE OVERLAY RULING — the document never moves', ()
     );
     await settleLayout();
     const editor = useDocumentStore.getState().editor!;
-    // Threads FIRST (the write-order law — the janitor strips marks
-    // whose thread is not yet in the store).
+    // Threads FIRST (the janitor strips marks whose thread is not
+    // yet in the store).
     useCommentStore.setState({ threads: { t1: thread('t1') }, anchoredIds: new Set(['t1']) });
     act(() => {
       editor.commands.setContent({
@@ -469,11 +469,11 @@ describe('#COMMENTS gutter: THE OVERLAY RULING — the document never moves', ()
     await settleLayout();
     const strip = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
     expect(strip).not.toBeNull();
-    // No reservation ever (the overlay ruling) — the strip centers
-    // exactly as before, and the gutter attaches at its right edge.
+    // No reservation ever — the strip centers exactly as before, and
+    // the gutter attaches at its right edge.
     expect(strip.style.marginRight).toBe('');
     expect(gutter()).not.toBeNull();
-    // The anchored span tint class rides the pageless DOM (commit 3).
+    // The anchored span tint class rides the pageless DOM.
     expect(strip.querySelector('[data-comment-thread-id]')).not.toBeNull();
   });
 });
@@ -507,8 +507,8 @@ describe('#COMMENTS gutter: comment surfaces', () => {
 
     // THE FIX (layer 1): clicking the anchored TEXT again makes the
     // draft the active thread — the card hands focus back to the
-    // composer. (The textbox itself is the only other focus
-    // affordance — the user's focus law; the card body never steals.)
+    // composer. (The textbox is the only other focus affordance; the
+    // card body never steals.)
     act(() => {
       editor.commands.setTextSelection(3);
     });
@@ -516,8 +516,8 @@ describe('#COMMENTS gutter: comment surfaces', () => {
     expect(document.activeElement).toBe(
       document.querySelector('[data-testid="comment-draft-input"]'),
     );
-    // The composer carries NO manual resize handle (the autogrow
-    // ruling — the browser's corner grip is gone).
+    // The composer carries NO manual resize handle (autogrow — the
+    // browser's corner grip is gone).
     expect(
       (document.querySelector('[data-testid="comment-draft-input"]') as HTMLTextAreaElement)
         .className,
@@ -532,7 +532,7 @@ describe('#COMMENTS gutter: comment surfaces', () => {
     const btn = button('Comment')!;
     expect(btn).not.toBeNull();
 
-    // Caret → still enabled (the user's ruling)…
+    // Caret → still enabled…
     act(() => {
       editor.commands.setContent({
         type: 'doc',

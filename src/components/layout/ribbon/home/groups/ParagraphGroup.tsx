@@ -15,8 +15,7 @@ import { LineSpacingButton } from '../LineSpacingButton';
 import { IndentButtons } from '../IndentButtons';
 
 export function ParagraphGroup() {
-  // M-HEADER-FOOTER-2: ONE editor again — header/footer content rides
-  // the same PM doc (formatting works there via the same groups).
+  // Header/footer content rides the same PM doc — the formatting groups work there too.
   const editor = useDocumentStore((s) => s.editor);
 
   const attrs = useEditorState({

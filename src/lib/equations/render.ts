@@ -1,25 +1,9 @@
 import katex from 'katex';
 
 /**
- * M-EQ-0 — the ONE KaTeX surface. Every render of equation math in the
- * app goes through here (node views, the EquationLayer, the editor
- * popover's preview, the palette glyphs) — one options set, one cache,
- * never a second spelling.
- *
- * LIBRARY RECEIPT (the issue's evaluation): KaTeX over MathJax v3 —
- * ~78KB gz JS + per-family woff2 fonts vs ~280KB gz and an async
- * typesetting pipeline; a SYNCHRONOUS string-in/string-out API (a node
- * view re-renders on every keystroke — async typesetting cannot);
- * print-grade TeX output; and the default 'htmlAndMathml' output ships
- * a visually-hidden MathML copy beside the HTML — the a11y receipt the
- * hidden-input mirror relies on (the M5 Orca law's equation arm),
- * free. MathJax's advantages (speech rules, MathML-first) don't buy
- * back that weight in an editor node view.
- *
- * OFFLINE LAW (the media/privacy precedents): KaTeX and its fonts are
- * bundled from npm — katex.min.css is imported once in index.css and
- * Vite hashes its font urls into the build. NO CDN, ever; trust: false
- * disables \href/\includegraphics so a formula can never reach out.
+ * The one KaTeX surface: every equation render goes through here (one
+ * options set, one cache). Synchronous (node views re-render per
+ * keystroke); bundled, no CDN, trust: false so formulas never reach out.
  */
 
 export const KATEX_RENDER_OPTIONS = {
@@ -67,11 +51,8 @@ export function renderInlineMath(latex: string): string {
 }
 
 /** Validation for the editor UI: the ParseError message, or null when
- *  the source parses. A separate throw-catch call (the doc render uses
- *  throwOnError: false so the DOCUMENT never crashes on bad input —
- *  the invalid state is the editor's to surface, the node view paints
- *  its own styled invalid face). Memoized: validation runs on every
- *  keystroke in the source input. */
+ *  the source parses. Separate from the doc render (throwOnError: false
+ *  there means the document never crashes on bad input). Memoized. */
 const parseCache = new Map<string, string | null>();
 
 export function parseEquation(latex: string): string | null {

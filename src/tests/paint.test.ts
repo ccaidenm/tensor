@@ -366,7 +366,7 @@ describe('paint: alignment (one shared offset)', () => {
   });
 });
 
-// ─── M-HEADER-FOOTER-3: the DESATURATE ruling ─────────────────────────────
+// Desaturating muted ink
 // Inactive band ink keeps its LUMA, loses its HUE (grayscale at 55%
 // opacity) — never a flat gray that erases the author's color choice.
 
@@ -395,10 +395,9 @@ describe('mutedColorOf (the desaturate ruling)', () => {
   });
 });
 
-// M-REFS — the field border (the GDocs bounds box): drawn CANVAS-LOCAL
-// (the first version's negative-x/y padding clipped to nothing — the
-// "no gray outline" report), full-extent only (a damage slice skips
-// it: lines[0] sits below the block's first line).
+// The reference-table field border: drawn CANVAS-LOCAL (negative-x/y
+// padding would clip to nothing), full-extent only (a damage slice
+// skips it: lines[0] sits below the block's first line).
 describe('reference-table field border', () => {
   const refPaint: BlockPaint = { reference: true };
 
@@ -462,18 +461,15 @@ describe('reference-table field border', () => {
     expect(recorded.some((o) => o.op === 'roundRect' || o.op === 'strokeRect')).toBe(false);
   });
 
-  // M-REFS-5: the painted-leader tests are GONE with the painted
-  // leader — the dots are a REAL run now (refLeader-marked text,
-  // engine-stretched at the run's own style; engine
-  // tests/referenceTable.test.ts pins the stretch math).
+  // The dots are a REAL run (refLeader-marked text, engine-stretched
+  // at the run's own style; engine tests/referenceTable.test.ts pins
+  // the stretch math).
 });
 
-// M-REFS-8 — the LEADER INK (gap-filling dots): the span's own text
-// paints via the segment loop; the PAINTER draws extra dots after it
-// — at the span's own measured style — up to the page number. A
-// smaller font ⇒ narrower dots ⇒ MORE dots fill the same gap (the
-// user's ruling: the leader is always ~100% of the gap).
-describe('reference-table leader ink (round 8)', () => {
+// The LEADER INK (gap-filling dots): the span's text paints via the
+// segment loop; the PAINTER adds dots at the span's measured style up
+// to the page number — a smaller font ⇒ more dots fill the same gap.
+describe('reference-table leader ink', () => {
   const refPaint: BlockPaint = { reference: true };
   const STYLE16 = { fontFamily: 'Test Sans', fontSize: 16 };
 
@@ -521,11 +517,10 @@ describe('reference-table leader ink (round 8)', () => {
     });
     // FakeMetrics: 10px/char. The seed dots end at x = 50 + 120 = 170
     // (already painted by the segment loop); the number starts at 614.
-    // NO PADS (the seam fix): the gap [170, 614] = 444px at the
-    // span's 10px/dot → 44 dots, starting EXACTLY at the seed's end
-    // (the user's "one visible space" — the old +4 pad's hole).
-    // The SEGMENT loop paints the seed ('............' at x 50); the
-    // GAP ink is the dots call at the gapStart x (170).
+    // NO PADS: the gap [170, 614] = 444px at the span's 10px/dot → 44
+    // dots, starting EXACTLY at the seed's end (one visible space,
+    // no hole). The SEGMENT loop paints the seed ('............' at x
+    // 50); the GAP ink is the dots call at the gapStart x (170).
     const gapDots = recorded.filter(
       (o) => o.op === 'fillText' && String(o.args[0]).match(/^\.{2,}$/) && o.args[1] === 170,
     );

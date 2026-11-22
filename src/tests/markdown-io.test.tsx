@@ -14,12 +14,10 @@ import {
 import { useImportReportDialogStore } from '@/components/dialogs/ImportReportDialog';
 
 /**
- * M-MD — the file-flow suite: export (confirm gate → save dialog →
+ * The markdown file-flow suite: export (confirm gate → save dialog →
  * assets) and import (read → parse → ingest) against the in-memory
- * tauri mock pattern (wpdoc.test.tsx). The gate is the IN-APP shadcn
- * dialog (the developer-mode warning's spelling) driven through its
- * promise-bridge store — the tests settle it the way the dialog's
- * buttons do.
+ * tauri mock pattern. The gate is the IN-APP dialog, settled the way
+ * its buttons do.
  */
 
 type Stored = string | Uint8Array;
@@ -221,7 +219,7 @@ describe('import flow', () => {
   });
 });
 
-describe('the export confirm dialog (in-app, M-MD)', () => {
+describe('the export confirm dialog (in-app)', () => {
   it('lists only the losses present and settles the gate with its buttons', async () => {
     render(<ExportConfirmDialog />);
     let answer: boolean | null = null;

@@ -56,10 +56,7 @@ export function StatusBar() {
       onMouseDown={handleBenchClick}
       className="flex h-8 items-center gap-4 border-t border-border bg-card px-4 text-xs text-muted-foreground"
     >
-      {/* THE COUNTS REGION opens the Statistics dashboard (the Review
-          sidebar) — the bar's own affordance for the numbers it shows.
-          Clicks still bubble to the container, so the bench trigger
-          keeps working. */}
+      {/* Opens the Statistics dashboard; clicks still bubble to the container so the bench trigger keeps working. */}
       <Tooltip>
         <TooltipTrigger
           render={

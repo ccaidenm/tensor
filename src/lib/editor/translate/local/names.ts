@@ -1,8 +1,7 @@
 /**
- * Language names for the local pair picker (the catalog speaks codes —
- * "en-de" — the UI speaks languages). Intl.DisplayNames does the work;
- * the code itself is the fallback (unknown/unsupported codes render as
- * codes, never crash).
+ * Language names for the local pair picker (the catalog speaks codes,
+ * the UI speaks languages) — the code itself is the fallback, never a
+ * crash.
  */
 
 const display = typeof Intl !== 'undefined' && 'DisplayNames' in Intl

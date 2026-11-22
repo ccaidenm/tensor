@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Scroll-spy: tracks which SettingsSection is most visible inside the
- * scrollable container right now, for highlighting the matching sub-nav
- * item. Picks whichever tracked section has the greatest intersection
- * ratio rather than "first intersecting entry" — more stable at
- * boundaries where two adjacent sections are both partially visible.
+ * Scroll-spy: tracks which SettingsSection is most visible in the
+ * scrollable container. Picks the greatest intersection ratio rather
+ * than the first intersecting entry — more stable at boundaries.
  */
 export function useActiveSection(containerRef: React.RefObject<HTMLElement | null>, sectionIds: string[]) {
   const [activeId, setActiveId] = useState<string | null>(sectionIds[0] ?? null);

@@ -1,20 +1,7 @@
 /**
- * Spell check — shared types: the LanguageTool wire contract, the
- * checked-span model, and the provider/status surfaces.
- *
- * THE TWO PROVIDERS, ONE PROTOCOL: the local sidecar
- * (org.languagetool.server.HTTPServer, loopback only) and the online
- * API (api.languagetool.org) both speak the same /v2/check form-POST
- * protocol and return the same match shape — one Rust client, one TS
- * parser, two base URLs. The provider is a *routing* concern, never a
- * data-shape concern.
- *
- * PRIVACY POSTURE (the consent law, matching the fonts/privacy
- * precedents): spell check is OFF by default. Nothing downloads and
- * nothing phones home until the user (a) enables it and (b) picks a
- * provider with an informed choice — Online sends text to
- * LanguageTool's servers; Local downloads ≈250MB once and never
- * touches the network again (one-time install download excepted).
+ * Shared types: the LT wire contract, the checked-span model, the
+ * provider/status surfaces. One /v2/check protocol — the provider routes,
+ * never reshapes. Spell check is OFF by default (Online sends text out).
  */
 
 /** One replacement candidate for a flagged span (LT's shape, verbatim). */
@@ -23,10 +10,9 @@ export interface LTReplacement {
 }
 
 /**
- * One LanguageTool match — the verbatim wire subset the app consumes.
- * `offset`/`length` are character offsets into the text WE sent (the
- * joined block texts, '\n\n'-separated), never PM positions: the
- * controller translates through its per-block position index.
+ * One LanguageTool match — the verbatim wire subset consumed here.
+ * `offset`/`length` index the text WE sent (joined block texts), never
+ * PM positions; the controller translates via its position index.
  */
 export interface LTMatch {
   message: string;
@@ -47,9 +33,8 @@ export interface LTMatch {
 export type SpellProvider = 'online' | 'local';
 
 /**
- * A checked-and-flagged span, already translated into PM positions.
- * `kind` selects the feature (and the visual color): spelling or
- * grammar — one span model, one pipeline, two features.
+ * A checked-and-flagged span, already in PM positions. `kind` selects
+ * the feature — one span model, one pipeline, two features.
  */
 export interface SpellError {
   from: number;

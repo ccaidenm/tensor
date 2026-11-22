@@ -20,12 +20,11 @@ import { DEFAULT_CONFIG } from '@/lib/config/schema';
 import { toast } from '@/components/ui/toast';
 
 /**
- * #COMMENTS — commit 1: the two-half model. The ANCHORING half is the
- * `comment` mark (attrs.threadId) riding the PM doc; the CONTENT half
- * rides the comment store and .wpdoc metadata.commentThreads. The tests
- * pin the anchoring semantics (edge extension, orphaning, the janitor,
- * the load-order law), the file round-trip, and the layout-invisibility
- * (the adapter's recognized-quiet posture).
+ * Comments — the two-half model. The ANCHORING half is the `comment`
+ * mark (attrs.threadId) riding the PM doc; the CONTENT half rides the
+ * comment store and .wpdoc metadata.commentThreads. The tests pin the
+ * anchoring semantics (edge extension, orphaning, the janitor, the
+ * load order), the file round-trip, and the layout-invisibility.
  */
 
 interface MarkedRange {
@@ -307,7 +306,7 @@ describe('#COMMENTS: the thread store', () => {
     const { editor } = renderTensor();
     await settleLayout();
 
-    // Empty store → the optional-field precedent (absent, not []).
+    // Empty store → the field is optional (absent, not []).
     const empty = assembleDocumentFile(editor!, {
       pageSetup: useDocumentStore.getState().pageSetup,
       commentThreads: useCommentStore.getState().threadsForSave(),
@@ -553,7 +552,7 @@ describe('#COMMENTS: the one command body — toolbar, Ctrl+Alt+M, palette', () 
     await settleLayout();
 
     const cmd = getCommand('addComment')!;
-    // A bare caret is no longer a disabled state — the ruling.
+    // A bare caret is not a disabled state.
     act(() => {
       editor.commands.setTextSelection(3);
     });

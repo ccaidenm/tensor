@@ -14,13 +14,9 @@ import { create } from 'zustand';
 import { useDocumentStore } from '@/lib/document/store';
 import { insertTableAtSelection } from '@/lib/editor/tableInsert';
 
-/**
- * M-TABLES — the "Insert Table…" dialog. Exact rows/cols entry (the
- * grid picker's companion — Word offers both). The insertion is the
- * ONE built-in command path (editor.commands.insertTable), so the
- * dialog, the ribbon grid picker, and the palette all converge on the
- * same schema-level insert.
- */
+// The "Insert Table…" dialog — exact rows/cols entry alongside the grid
+// picker. Insertion goes through the one editor.commands.insertTable path
+// so dialog, grid picker, and palette all converge on the same insert.
 
 interface InsertTableStore {
   isOpen: boolean;

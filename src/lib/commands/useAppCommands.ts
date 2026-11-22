@@ -2,16 +2,9 @@ import { useDocumentStore } from '@/lib/document/store';
 import { COMMANDS } from './registry';
 import type { CommandAction } from './registry';
 
-/**
- * The live, availability-filtered command list for the palette.
- *
- * The registry itself is a plain module (no store needed — commands are
- * static); predicates read live store state, so this hook subscribes
- * to the document-store slices they touch. `revision` bumps on every
- * markDirty — the cheap reactive proxy for history/enablement changes
- * (undo/redo availability). Keybinding-driven re-renders are not
- * needed here: hints are read per-item via useShortcutDisplay.
- */
+/** The live, availability-filtered command list for the palette.
+ *  Subscribes to the store slices the enablement predicates read;
+ *  `revision` bumps on every markDirty — the cheap reactive proxy. */
 export function useAppCommands(editorContext: boolean): CommandAction[] {
   // Reactive triggers for the enablement predicates — reading the
   // values (not using them directly) is the point.

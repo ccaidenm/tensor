@@ -72,7 +72,7 @@ describe('the pageless strip', () => {
     expect(surface.style.background).toBe('rgb(255, 255, 255)');
     expect(surface.className).toContain('pageless-strip');
 
-    // The document's page color paints the strip (the pageColor law).
+    // The document's page color paints the strip.
     act(() => {
       useDocumentStore.getState().setPageSetup({
         ...useDocumentStore.getState().pageSetup,
@@ -86,9 +86,9 @@ describe('the pageless strip', () => {
     harness('<p>margins</p>');
     await goPageless();
     const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
-    // DEFAULT_MARGINS = 1" = 72pt = 96px on every side (pt→px law).
+    // DEFAULT_MARGINS = 1" = 72pt = 96px on every side.
     expect(surface.style.padding).toBe('96px');
-    // The responsive max-width column (the GDocs-pageless ruling).
+    // The responsive max-width column.
     expect(surface.style.maxWidth).toBe('960px');
 
     // A margin change rides the strip (one concept, two surfaces).
@@ -111,9 +111,8 @@ describe('the pageless strip', () => {
     const surface = document.querySelector('[data-testid="pageless-surface"]')!;
     const bands = surface.querySelectorAll('header-block, footer-block');
     // ONCE each — the schema pins their positions, the flow renders
-    // them exactly there (the acceptance criterion). The BAND CHROME
-    // (the dashed muted band) is stylesheet-side (index.css — the
-    // pageless styling source of truth); jsdom runs without stylesheets
+    // them exactly there. The BAND CHROME (the dashed muted band) is
+    // stylesheet-side (index.css); jsdom runs without stylesheets
     // (vitest css: false), so the test pins the STRUCTURE the chrome
     // decorates.
     expect(bands.length).toBe(2);
@@ -129,9 +128,9 @@ describe('the pageless strip', () => {
     const surface = document.querySelector('[data-testid="pageless-surface"]')!;
     const marker = surface.querySelector('.page-break-marker') as HTMLElement;
     // The manual break renders INSIDE the continuous sheet (a simple
-    // visual divider — the acceptance criterion). Its label chip is
-    // stylesheet-side; jsdom runs without stylesheets (vitest css:
-    // false) and cannot compute ::after at all.
+    // visual divider). Its label chip is stylesheet-side; jsdom runs
+    // without stylesheets (vitest css: false) and cannot compute
+    // ::after at all.
     expect(marker).not.toBeNull();
     expect(marker.getAttribute('data-page-break')).toBe('true');
   });
@@ -143,9 +142,8 @@ describe('the pageless sheet lifecycle', () => {
     await goPageless();
     const surface = document.querySelector('[data-testid="pageless-surface"]') as HTMLElement;
     // jsdom's zero-height desk floors at the 200px fallback; the REAL
-    // behavior (desk-height fill, zoom-divided) is the component's
-    // measure law — pinned here as "the component sets an explicit
-    // min-height" (never unstyled).
+    // behavior (desk-height fill, zoom-divided) is pinned here as "the
+    // component sets an explicit min-height" (never unstyled).
     expect(surface.style.minHeight).not.toBe('');
     expect(parseInt(surface.style.minHeight, 10)).toBeGreaterThanOrEqual(200);
   });

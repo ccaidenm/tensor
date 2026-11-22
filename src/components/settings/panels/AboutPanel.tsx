@@ -17,9 +17,8 @@ export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'licenses', label: 'Third-Party Licenses' },
 ];
 
-// #97 — the repo is the app (the git remote is the source of truth);
-// the version is single-sourced from tauri.conf.json at build time
-// (src/generated/version.ts, the generate-licenses pattern).
+// #97 — the repo is the app; the version is single-sourced from
+// tauri.conf.json at build time (src/generated/version.ts).
 const GITHUB_REPO_URL = 'https://github.com/ccaidenm/tensor';
 const LICENSE = 'AGPL-3.0';
 
@@ -105,8 +104,7 @@ export function AboutPanel() {
           <p className="mb-3 text-xs text-muted-foreground">
             Tensor is built with {licenses.length} open-source packages — thank you to their authors and
             maintainers! Tensor couldn't be built without you.{' '}
-            {/* #97 — the heart speaks the accent (text-primary follows the
-                brand token; the old hardcoded 🧡 emoji couldn't). */}
+            {/* #97 — the heart speaks the accent (text-primary follows the brand token). */}
             <Heart
               className="inline h-3.5 w-3.5 fill-current text-primary align-text-bottom"
               aria-hidden="true"

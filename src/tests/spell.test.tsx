@@ -28,12 +28,11 @@ import type { SpellError } from '@/lib/editor/spell/types';
 import type { Editor } from '@tiptap/core';
 
 /**
- * SPELL CHECK (model layer): the plugin's state contract — flags
+ * Spell check (model layer): the plugin's state contract — flags
  * survive unrelated edits by MAPPING, die instantly on content edits
- * (the unflag-as-typed law), replace per-block, and ignore/clear. The
- * pageless surface renders the decorations as DOM, which makes this
- * suite the cheap receipt for both view modes (Pages projects the same
- * state through positionMap — covered once the overlay lands).
+ * (unflag-as-typed), replace per-block, and ignore/clear. The
+ * pageless surface renders the decorations as DOM, making this suite
+ * the cheap receipt for both view modes.
  */
 
 const HELLO_ERR: SpellError = {

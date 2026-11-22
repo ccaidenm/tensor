@@ -11,11 +11,10 @@ import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { renderTensor, settleLayout } from './harness';
 
 /**
- * M-IMAGES-0 — the .wpdoc v2 container layer, TS side. The REAL zip
- * behavior (round-trip bytes, corrupted-archive handling, atomicity,
- * the file-size receipt) is the Rust suite's five tests in
- * src-tauri/src/lib.rs; this suite exercises the TS layer against an
- * in-memory package/unpackage simulator that mirrors the Rust wire
+ * The .wpdoc v2 container layer, TS side. The REAL zip behavior
+ * (round-trip bytes, corrupted archives, atomicity, the file-size
+ * receipt) is the Rust suite's (src-tauri/src/lib.rs); this exercises
+ * the TS layer against an in-memory simulator mirroring the wire
  * contract (including the NOT_ZIP marker for v1 detection).
  */
 
@@ -93,17 +92,16 @@ beforeEach(() => {
   });
 });
 
-// ─── 1. v2 round-trip: document identical + media byte-identical ────────
+// 1. v2 round-trip: document identical + media byte-identical
 
 describe('v2 round-trip', () => {
   it('save → open: document JSON identical AND media byte-identical (sha assert)', async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]);
     useMediaStore.getState().add(sha(png), 'png', png);
 
-    // Images don't exist as a document node yet (later milestones) —
-    // the media:// reference is an ordinary PM attr value on a mark,
+    // The media:// reference is an ordinary PM attr value on a mark,
     // crafted at the file level exactly as an image-carrying docJSON
-    // will spell it.
+    // spells it.
     const file: DocumentFile = {
       version: CURRENT_DOCUMENT_VERSION,
       docJSON: {
@@ -142,7 +140,7 @@ describe('v2 round-trip', () => {
   });
 });
 
-// ─── 2. The v1 converter (permanent) — the committed fixture ───────────
+// 2. The v1 converter (permanent)
 
 describe('v1 legacy converter', () => {
   it('the committed v1 fixture opens → converts → saves as v2', async () => {
@@ -176,7 +174,7 @@ describe('v1 legacy converter', () => {
   });
 });
 
-// ─── 3. Corrupted v2: loud error, no crash, no partial state ─────────────
+// 3. Corrupted v2: loud error, no crash, no partial state
 
 describe('corrupted v2 container', () => {
   it('rejects loudly and leaves the MediaStore untouched', async () => {
@@ -207,7 +205,7 @@ describe('corrupted v2 container', () => {
   });
 });
 
-// ─── 4. Save-time GC: only referenced ids package ────────────────────────
+// 4. Save-time GC: only referenced ids package
 
 describe('save-time GC', () => {
   it('unreferenced store entries never reach the container', async () => {
@@ -249,14 +247,14 @@ describe('save-time GC', () => {
   });
 });
 
-// ─── 6. Recovery round-trip (v2) + old-snapshot converter ───────────────
+// 6. Recovery round-trip (v2) + old-snapshot converter
 
 describe('recovery snapshots', () => {
   it('v2 round-trip: snapshot → read → identical document', async () => {
     const { editor } = renderTensor('<p>recover me</p>');
     await settleLayout();
     await saveRecoveryCopy(editor, null, { pageSetup: useDocumentStore.getState().pageSetup });
-    // The M5 recovery path convention: session-keyed when unnamed.
+    // Recovery path convention: session-keyed when unnamed.
     const snapPath = '/appdata/recovery/' + [...wpdocFiles.keys()][0]!.split('/').pop()!;
     const restored = await readRecoveryCopy(snapPath);
     const roundTrip = await readRecoveryCopy([...wpdocFiles.keys()].find((k) => k.includes('recovery'))!);
@@ -272,7 +270,7 @@ describe('recovery snapshots', () => {
   });
 });
 
-// ─── 7. The atomicity contract, TS side ─────────────────────────────────
+// 7. The atomicity contract, TS side
 
 describe('atomicity (TS contract)', () => {
   it('the write path is package_document ONLY — the atomic temp+rename lives Rust-side', async () => {
@@ -284,9 +282,9 @@ describe('atomicity (TS contract)', () => {
   });
 });
 
-// ─── 8. M-META: core properties ride metadata (save/open/recovery) ──────
+// 8. Core properties ride metadata (save/open/recovery)
 
-describe('M-META core properties', () => {
+describe('core properties', () => {
   it('save writes them normalized (empties omitted); open returns them', async () => {
     const { editor } = renderTensor('<p>meta</p>');
     await settleLayout();
@@ -331,8 +329,7 @@ describe('M-META core properties', () => {
     const snapPath = [...wpdocFiles.keys()].find((k) => k.includes('recovery'))!;
     const restored = await readRecoveryCopy(snapPath);
     expect(restored.metadata.author).toBe('Ada');
-    // The M-META unification: snapshots use the save assembler, so the
-    // doc style layer rides along (it never used to).
+    // Snapshots use the save assembler, so the doc style layer rides along.
     expect(restored.metadata.styles).toBeDefined();
   });
 });

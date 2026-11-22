@@ -3,26 +3,9 @@ import { ReactNodeViewRenderer } from '@tiptap/react';
 import { ImageNodeView } from '@/components/editor/ImageNodeView';
 
 /**
- * M-IMAGES-1 — the image model.
- *
- * CUSTOM NODE, not @tiptap/extension-image (the divergence receipt):
- * the stock extension ships a paragraph-grouped node whose attrs are
- * just {src, alt, title} aimed at external/data URLs, renders via
- * plain renderHTML with no size control, and parses pasted HTML <img>
- * on sight. Tensor needs: (a) src as an INTERNAL 'media://<sha256>'
- * ref — never a URL the document reaches out to; (b) REQUIRED
- * width/height document data (the engine's ImageBlock contract:
- * "intrinsic px, REQUIRED document data, never fetched at layout
- * time"); (c) align + keepNext (the caption bond); (d) a NODE VIEW so
- * the hidden PM view renders a real <img alt> (the M5 Orca a11y
- * mirror) and the pageless mode renders through the ONE MediaStore
- * resolution point. parseHTML/renderHTML are SCOPED to our own
- * data-tensor-image marker (M-IMAGES-2.2 — the clipboard round-trip):
- * external <img> HTML never parses in; internal copy/paste is exact.
- *
- * The node NEVER holds bytes or data URLs — refs only. Dims are
- * required at INSERT time; dim-less legacy nodes are backfilled on
- * open (imageBackfill.ts).
+ * Custom node (not @tiptap/extension-image): internal 'media://<sha256>'
+ * refs, REQUIRED width/height, parseHTML scoped to our own marker
+ * (external <img> never parses in); no bytes on the node.
  */
 
 export interface ImageAttrs {
@@ -37,13 +20,9 @@ export interface ImageAttrs {
    * relayout geometry changes. Clamped to half the min placed dim. */
   radius: number;
   /**
-   * M-A11Y — DECORATIVE: the image is presentational, content-free
-   * ink (a divider, a mood shot). The a11y checker exempts it from
-   * the alt-text rule, and the render surfaces carry the HTML
-   * semantics (alt="" / aria-hidden on the placeholder paths —
-   * screen readers skip it BY DESIGN). The user's explicit intent
-   * spelling: '' alt alone is "not yet written", decorative is "no
-   * description needed".
+   * Presentational, content-free ink — exempt from the alt-text rule;
+   * render surfaces carry alt=""/aria-hidden ('' alt = "not yet
+   * written"; decorative = "no description needed").
    */
   decorative: boolean;
 }
@@ -68,22 +47,9 @@ export const ImageNode = Node.create({
     };
   },
 
-  // M-IMAGES-2.2 — the CLIPBOARD-SCOPED round-trip. The ORIGINAL law
-  // (no parseHTML at all) died on its own success: an INTERNAL copy
-  // lost the image too — PM's clipboard rides text/html, the slice
-  // parsed back WITHOUT a rule for our node, so copy→paste deleted
-  // every image (and drag moved nothing). The law's actual intent was
-  // narrower and stays intact: EXTERNAL content must never parse in.
-  // So the round-trip is SCOPED to our own marker: renderHTML emits
-  // div[data-tensor-image] + the internal attrs (a media:// ref is a
-  // content address — meaningless outside the container, never a
-  // secret); parseHTML matches ONLY that marker — a web page's <img>
-  // (the original fear) still never parses in, and the M-IMAGES-1.5
-  // paste refusal owns the URL case. Internal fidelity is now exact —
-  // copy, cut, drag, and cross-document pastes round-trip the node
-  // (dims REQUIRED at insert keep the adapter contract true on paste).
-  // Node views still render the real <img>; toDOM is the clipboard
-  // and serialization form.
+  // PM's clipboard rides text/html, so without a parse rule for our
+  // node an internal copy would lose the image. The round-trip is
+  // scoped to our own marker — external <img> HTML never parses in.
   parseHTML() {
     return [
       {

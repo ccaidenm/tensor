@@ -4,25 +4,9 @@ import type { PageSetup } from '@/lib/document/pageSetup';
 import type { PageStyles } from '@/lib/document/pageSetup';
 
 /**
- * #58 — the PAGE-SETUP co-undo. The store's pageSetup (the FINAL
- * section's props + the doc defaults) lives OUTSIDE ProseMirror, so
- * prosemirror-history can't track it: a page-setup action that writes
- * both the break nodes (PM) and the store would half-undo — the breaks
- * revert while the final section keeps the new values.
- *
- * THE CORRELATION (doc-snapshot law): each entry carries the setup it
- * replaced plus the document BEFORE and AFTER the write. The undo
- * command override fires the co-restore ONLY when the live document
- * equals the entry's post-write snapshot (doc.eq — content equality)
- * AND the plugin's pending law says our item is the one PM's next
- * undo/redo would move; the redo mirrors on the pre-write snapshot.
- * Any later typing buries both (a foreign recorded transaction also
- * EMPTIES PM's redo stack — the coincidence guard: a net-zero edit
- * cycle like bold+unbold can return the doc to a snapshot without our
- * item being next, and the emptied redo stack is what refuses it).
- *
- * NOT undoable (by design): file-open migrations and test fixtures
- * write the store directly — opening a document must not be undoable.
+ * #58 — the page-setup co-undo: pageSetup lives outside prosemirror-
+ * history. The co-restore fires only when the live doc equals the
+ * entry's snapshot and our item is PM's next to move.
  */
 
 /** The marker on OUR page-setup transactions (the history-joined ones;
@@ -30,16 +14,9 @@ import type { PageStyles } from '@/lib/document/pageSetup';
 export const PAGE_SETUP_MARKER = 'pageSetupOurs';
 
 /**
- * #48 — the SYNTHETIC pending transitions. A STORE-ONLY write (a page
- * style; a doc-scope change on an unsectioned doc) dispatches a
- * marker-only EMPTY tr: PM history records nothing (no steps), so
- * pmUndo/pmRedo dispatch NOTHING for it and the pending state would
- * never flip — undo worked once, redo was dead (a pre-existing gap
- * the store-only per-page writes make load-bearing). The ours-branches
- * dispatch these marker metas after the restore; the plugin treats
- * them as the history movement they stand in for. Idempotent for
- * doc-touching actions (their real history tr already flipped the
- * state; the case arms return the same value on re-application).
+ * #48 — the synthetic pending transitions: a store-only write records
+ * nothing in PM, so pmUndo dispatches nothing and pending would never
+ * flip. The ours-branches dispatch these metas after the restore.
  */
 export const PAGE_SETUP_SYNTH_UNDO = 'pageSetupSyntheticUndo';
 export const PAGE_SETUP_SYNTH_REDO = 'pageSetupSyntheticRedo';
@@ -76,10 +53,9 @@ export interface PageSetupUndoEntry {
   docAfter: PMNode;
   docBefore: PMNode;
   /**
-   * #48 — the pageStyles the action replaced. undefined = the action
-   * never touched the map (a plain setup write): the co-restore leaves
-   * pageStyles alone. Present = one Ctrl+Z reverts the setup AND the
-   * map together (the never-half law, extended).
+   * #48 — the pageStyles the action replaced. undefined = untouched
+   * (leave the map standing); present = one Ctrl+Z reverts the setup
+   * AND the map together.
    */
   prevPageStyles?: PageStyles;
 }
@@ -97,11 +73,9 @@ export interface PageSetupRedoEntry {
 const undoStack: PageSetupUndoEntry[] = [];
 const redoStack: PageSetupRedoEntry[] = [];
 
-/** The store write's undo push (call AFTER the PM tr dispatches —
- *  `docAfter` must be the post-write document; `docBefore` the pre-write
- *  one. `null` docs skip the push, which makes the write non-undoable:
- *  file-open migrations, test fixtures). Clears the redo stack — a new
- *  write invalidates it (the standard rule). */
+/** The store write's undo push — call AFTER the PM tr dispatches
+ *  (`docAfter` post-write, `docBefore` pre-write). null docs skip the
+ *  push (file-open migrations); clears the redo stack. */
 export function pushPageSetupUndo(
   prev: PageSetup,
   docAfter: PMNode | null,
@@ -143,7 +117,7 @@ export function currentPageStyles(): PageStyles {
 }
 
 /** The co-restore. `pageStyles` undefined = the action never touched
- * the map — leave it standing (the never-half law). */
+ * the map — leave it standing. */
 export function restorePageSetup(setup: PageSetup, pageStyles?: PageStyles): void {
   const store = useDocumentStore.getState();
   store.setPageSetup(setup);

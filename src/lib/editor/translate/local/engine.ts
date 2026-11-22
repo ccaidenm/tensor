@@ -3,31 +3,14 @@ import { BatchTranslator } from '@browsermt/bergamot-translator/translator.js';
 import type { InstalledPair, WrapperRegistry } from './types';
 
 /**
- * THE LOCAL ENGINE — the on-device translation transport (the fourth
- * provider). One BatchTranslator for the app, lazily created, pointed
- * at a registry BLOB the TS side builds from Rust's installed-pair
- * manifests:
- *
- *   installed (disk truth, from Rust)
- *     → wrapper registry JSON (asset URLs + hashes)
- *     → Blob URL (the wrapper fetches it like any registry — but it
- *       only ever addresses LOCAL model bytes; zero translate-time
- *       network)
- *
- * THE REGISTRY-KEY LAW: the wrapper parses keys as
- * substring(0,2)/substring(2,4), so entries are keyed from+to and the
- * catalog only offers 2-letter code pairs (enforced Rust-side).
- *
- * INVALIDATION: the engine caches model buffers per pair inside its
- * worker — a change to the installed set (a download, a removal in
- * Settings) changes the registry key, and the next ensure() disposes
- * the old engine and builds a fresh one.
+ * THE LOCAL ENGINE — one lazy BatchTranslator pointed at a registry BLOB
+ * built from Rust's manifests (LOCAL bytes only). Keys parse as
+ * substring(0,2)/(2,4) → from+to; a changed set rebuilds on next ensure().
  */
 
 /** Build the wrapper's registry JSON from Rust's installed manifests.
- *  `toUrl` maps an absolute file path to a fetchable URL (production:
- *  convertFileSrc's asset protocol; tests: a marker). Pure — the blob
- *  assembly is the impure shell around it. */
+ *  `toUrl` maps an absolute path to a fetchable URL (production:
+ *  convertFileSrc; tests: a marker). Pure. */
 export function buildRegistrySource(
   installed: InstalledPair[],
   toUrl: (path: string) => string,
@@ -77,8 +60,8 @@ async function ensureEngine(installed: InstalledPair[]): Promise<BatchTranslator
   state.translator = new BatchTranslator({
     registryUrl: URL.createObjectURL(blob),
     workerUrl: '/bergamot/worker/translator-worker.js',
-    // Pivoting is deferred (the plan's ruling): a missing direct pair
-    // must fail honestly, not silently route through English.
+    // No pivot: a missing direct pair fails honestly, never routes
+    // silently through English.
     pivotLanguage: null,
     workers: 1,
     cacheSize: 0,

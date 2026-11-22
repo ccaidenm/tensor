@@ -28,11 +28,10 @@ import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import * as paintModule from '@/lib/paginated/paint';
 
 /**
- * M-REFS — the reference-collection system (issue #31): the scanner,
- * the node/mark model, the adapter projection + sidecar, the NodeView's
- * auto-update, click navigation in BOTH view modes, and the command/
- * dialog wiring. The engine's ReferenceTableBlock has its own suite
- * (engine/tests/referenceTable.test.ts); these pin the SHELL side.
+ * #31 — the reference-collection shell: the scanner, the node/mark
+ * model, the adapter projection + sidecar, NodeView auto-update, click
+ * navigation in both view modes, and the command/dialog wiring.
+ * Engine-side: engine/tests/referenceTable.test.ts.
  */
 
 function setPageless() {
@@ -123,7 +122,6 @@ describe('the scanner (pure model facts)', () => {
     const scan = scanCollections(editor.state.doc);
     expect(scan.index.map((e) => e.text)).toEqual(['Apple', 'banana', 'cherry', 'Tensor']);
     expect(scan.index.find((e) => e.text === 'Tensor')!.targets).toHaveLength(2);
-    // Doc order: the second paragraph's "Tensor" comes AFTER the first.
     const t1 = scan.index.find((e) => e.text === 'Tensor')!;
     expect(t1.targets[0]!.pos).toBeLessThan(t1.targets[1]!.pos);
   });
@@ -180,9 +178,6 @@ describe('the referenceTable node + indexEntry mark (model)', () => {
       editor.commands.setTextSelection(7); // inside "before"
       editor.commands.insertReferenceTable('toc', 2);
     });
-    // THE CONTAINER MODEL: after insert the caret sits inside the
-    // generator's first entry (PM's own mapping — GDocs-like); the
-    // block stays selectable via the gutter badge.
     let containerNode: ReturnType<typeof editor.state.doc.nodeAt> = null;
     editor.state.doc.forEach((n) => {
       if (n.type.name === 'referenceTable' && containerNode == null) containerNode = n;
@@ -190,16 +185,15 @@ describe('the referenceTable node + indexEntry mark (model)', () => {
     expect(containerNode).not.toBeNull();
     expect(containerNode!.attrs.kind).toBe('toc');
     expect(containerNode!.attrs.depth).toBe(2);
-    // NO TITLE ROW (round 5: the user types their own if wanted) — the
-    // container holds ROWS only; each row ends with the leader-dots
-    // span (real text, refLeader-marked, engine-stretched when painted).
+    // No title row — rows only; each row ends with the leader-dots
+    // span (real text, refLeader-marked).
     expect(containerNode!.childCount).toBe(1);
     expect(rowText(containerNode!.child(0) as unknown as Parameters<typeof rowText>[0])).toBe('Head');
     expect(containerNode!.child(0).textContent.endsWith('....')).toBe(true);
     expect(typeof containerNode!.child(0).attrs.refId).toBe('string');
 
-    // getJSON → schema parse → setContent: the .wpdoc round-trip —
-    // children are REAL content, they serialize with the container.
+    // getJSON → setContent: the .wpdoc round-trip — children are
+    // REAL content and serialize with the container.
     const json = editor.getJSON();
     act(() => {
       editor.commands.setContent(json as JSONContent);
@@ -382,14 +376,12 @@ describe('the adapter projection (paginated model facts)', () => {
       { relStart: expect.any(Number), leaderLen: 12, textStart: 0, textLen: 5 + 12, targets: [expect.any(Number)] },
       { relStart: expect.any(Number), leaderLen: 12, textStart: 18, textLen: 4 + 12, targets: [expect.any(Number)] },
     ]);
-    // The offset→PM bridge: offset 0 lands INSIDE the first row's
-    // entry text.
+    // The offset→PM bridge: offset 0 lands INSIDE the first row's entry text.
     const pmAtZero = blockOffsetToPmPos(adapter, 0);
     const $zero = editor.state.doc.resolve(pmAtZero);
     expect($zero.parent.attrs.refId).not.toBeNull();
     expect(rowText($zero.parent as unknown as Parameters<typeof rowText>[0])).toBe('Alpha');
-    // And the reverse: a position inside the Beta row's text maps
-    // back into its slice.
+    // The reverse: a position inside the Beta row's text maps back into its slice.
     const beta = entries[1]!;
     const betaTextPos = adapter.from + beta.relStart;
     const back = pmPosToBlockOffset(adapted.blocks, betaTextPos + 2);
@@ -406,7 +398,6 @@ describe('the adapter projection (paginated model facts)', () => {
     const adapted = adapt(editor);
     const block = adapted.doc.blocks.find((b) => b.kind === 'referenceTable');
     if (block?.kind !== 'referenceTable') throw new Error('missing block');
-    // ONE placeholder row — ZERO targets.
     expect(block.entries).toHaveLength(1);
     const adapter = adapted.blocks.find((b) => b.reference);
     expect(adapter?.reference?.entries[0]!.targets).toEqual([]);
@@ -425,8 +416,7 @@ describe('the adapter projection (paginated model facts)', () => {
     expect(b2).toBe(b1); // reference-stable (the identity-cache contract)
 
     act(() => {
-      // Retitle: insert "!" at the heading's text start (AFTER the
-      // toc atom — pos found, not hand-counted).
+      // Insert "!" at the heading's text start (pos found, not hand-counted).
       let headingTextPos: number | null = null;
       editor.state.doc.descendants((n, pos) => {
         if (n.type.name === 'heading' && headingTextPos === null) headingTextPos = pos + 1;
@@ -466,7 +456,7 @@ describe('the adapter projection (paginated model facts)', () => {
   });
 });
 
-describe('the pageless NodeView (round 7: restored, per the user ruling)', () => {
+describe('the pageless NodeView (restored, per the user ruling)', () => {
   beforeEach(() => setPageless());
 
   /** The container's row paragraphs — NATIVE PM DOM (no NodeView). */
@@ -536,12 +526,10 @@ describe('the pageless NodeView (round 7: restored, per the user ruling)', () =>
     });
     await settleScan();
     const container = document.querySelector('[data-tensor-ref-table-view]') as HTMLElement;
-    // The caret sits outside (post-insert selection lands in the
-    // heading) — no border.
+    // The caret sits outside (post-insert selection lands in the heading).
     expect(container.getAttribute('data-bordered')).toBe('false');
 
-    // Click into the row: the NodeView's selection state flips
-    // data-bordered (the user's GDocs ruling — the caret drives it).
+    // Click into the row: the caret drives data-bordered.
     const rowPos = (() => {
       let at: number | null = null;
       editor.state.doc.descendants((n, pos) => {
@@ -599,7 +587,6 @@ describe('the pageless NodeView (round 7: restored, per the user ruling)', () =>
     const $from = editor.state.selection.$from;
     expect($from.parent.attrs.refId).not.toBeNull();
     expect(rowText($from.parent as unknown as Parameters<typeof rowText>[0])).toBe('Target');
-    // And the row is truly IN the editable DOM.
     const row = rowEls()[0]!;
     expect(row.textContent!.startsWith('Target')).toBe(true);
     expect(editor.view.dom.contains(row)).toBe(true);
@@ -622,8 +609,7 @@ describe('the pageless NodeView (round 7: restored, per the user ruling)', () =>
       return at!;
     })();
     const row = rowEls()[0]!;
-    // The NodeView's onClick (React): plain Ctrl+click routes through
-    // the scan — no PM click pipeline needed.
+    // Plain Ctrl+click routes through the scan (no PM click pipeline).
     fireEvent.click(row, { ctrlKey: true });
     expect(editor.state.selection instanceof TextSelection).toBe(true);
     expect(editor.state.selection.from).toBe(headingTextPos);
@@ -631,7 +617,7 @@ describe('the pageless NodeView (round 7: restored, per the user ruling)', () =>
 });
 
 describe('commands + dialog wiring (the palette gate)', () => {
-  it('every M-REFS action is a registry command with keywords and editor context', () => {
+  it('every reference-table action is a registry command with keywords and editor context', () => {
     for (const id of [
       'insertTableOfContents',
       'insertTableOfFigures',
@@ -698,10 +684,9 @@ describe('commands + dialog wiring (the palette gate)', () => {
     expect(indexEntryActive(editor.state)).toBe(false);
   });
 
-  it('the palette surfaces the M-REFS actions (the coverage gate)', async () => {
+  it('the palette surfaces the reference-table actions (the coverage gate)', async () => {
     const { editor } = renderTensor(`<p>hello</p>`);
-    // Enablement is honest: a non-empty selection + an active mark let
-    // all three actions show (a bare caret would honestly hide two).
+    // A non-empty selection + an active mark let all three actions show.
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 6 });
       editor.commands.setIndexEntry();
@@ -731,8 +716,8 @@ describe('paginated interaction (the default mode)', () => {
       editor.commands.insertReferenceTable('toc', 3);
     });
     await settleLayout();
-    // THE ADOPTION SETTLES FIRST (the span grows to the measured
-    // count ~300ms in — positions below must be post-adoption).
+    // The span grows to the measured count ~300ms in — the sleep
+    // makes the positions deterministic.
     await new Promise((r) => setTimeout(r, 400));
     await settleLayout();
     const headingPos = (() => {
@@ -748,10 +733,9 @@ describe('paginated interaction (the default mode)', () => {
     const CY = GEOMETRY.contentY;
     const zoomWrap = document.querySelector('[data-testid="paginated-zoom-wrapper"]') as HTMLElement;
 
-    // PLAIN click — the container model's native path: the sidecar
-    // bridge maps the hit offset to the TRUE position inside the
-    // entry's real text. The TITLE row owns the block's first line
-    // (17.6px) — the entry row starts below it.
+    // Plain click: the sidecar maps the hit offset into the entry's
+    // real text. The title row owns the first line (17.6px), so the
+    // entry row starts below it.
     const ROW_Y = CY + 18 + 8;
     fireEvent.mouseDown(zoomWrap, { clientX: CB + 8, clientY: ROW_Y });
     expect(editor.state.selection instanceof TextSelection).toBe(true);
@@ -759,7 +743,6 @@ describe('paginated interaction (the default mode)', () => {
     expect($from.parent.attrs.refId).not.toBeNull();
     expect($from.parent.textContent).toBe('Target');
 
-    // Ctrl+click → caret INSIDE the target heading (pos + 1).
     fireEvent.mouseDown(zoomWrap, { clientX: CB + 8, clientY: ROW_Y, ctrlKey: true });
     expect(editor.state.selection instanceof TextSelection).toBe(true);
     expect(editor.state.selection.from).toBe(headingPos + 1);
@@ -767,7 +750,7 @@ describe('paginated interaction (the default mode)', () => {
 });
 
 describe('registry integrity', () => {
-  it('no duplicate command ids after the M-REFS additions', () => {
+  it('no duplicate command ids after the reference-table additions', () => {
     const ids = COMMANDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -842,8 +825,7 @@ describe('the GDocs affordances (border, badges, bookmarks, selection)', () => {
       useDocumentStore.getState().setLineNumbers({ enabled: true, mode: 'continuous' });
     });
     await settleLayout();
-    // Line 1 = the ToC's entry line → the badge owns the slot; the
-    // number hides. Line 2 = the heading → still numbered.
+    // Line 1 is the ToC's entry (the badge owns the slot); line 2 is the heading.
     const hidden = document.querySelector('[data-testid="line-number-1"]') as HTMLElement;
     expect(hidden).not.toBeNull();
     expect(hidden.style.visibility).toBe('hidden');
@@ -860,25 +842,23 @@ describe('the GDocs affordances (border, badges, bookmarks, selection)', () => {
       editor.commands.insertReferenceTable('toc', 3);
     });
     await settleLayout();
-    // THE ADOPTION SETTLES FIRST (round 10): the measured dot count
-    // rewrites the span ~300ms after the first layout — the drag
-    // positions below must be measured against the SETTLED doc.
+    // The measured dot count rewrites the span ~300ms after the first
+    // layout — the sleep pins the drag positions against the settled doc.
     await new Promise((r) => setTimeout(r, 400));
     await settleLayout();
     const CB = GEOMETRY.contentX;
     const CY = GEOMETRY.contentY;
     const zoomWrap = document.querySelector('[data-testid="paginated-zoom-wrapper"]') as HTMLElement;
 
-    // Mousedown on the entry line: the generic path arms a drag from
-    // the hit position (INSIDE the entry's real text — no unit mapping).
+    // The generic path arms a drag from the hit position (inside the
+    // entry's real text).
     fireEvent.mouseDown(zoomWrap, { clientX: CB + 8, clientY: CY + 8 });
     expect(editor.state.selection instanceof TextSelection).toBe(true);
     const anchor = editor.state.selection.from;
     expect(editor.state.doc.resolve(anchor).parent.attrs.refId).not.toBeNull();
 
-    // Drag below — into the heading's line: a REAL text selection from
-    // inside the entry into the heading's text. (settleLayout's poll
-    // lets the rAF-scheduled extend fire — the interaction pattern.)
+    // Drag into the heading's line: a REAL text selection across the
+    // boundary. (settleLayout's poll lets the rAF-scheduled extend fire.)
     act(() => {
       window.dispatchEvent(
         new MouseEvent('mousemove', { clientX: CB + 8, clientY: CY + 24 }),
@@ -901,11 +881,9 @@ describe('the GDocs affordances (border, badges, bookmarks, selection)', () => {
       editor.commands.setTextSelection(1);
       editor.commands.insertReferenceTable('toc', 3);
     });
-    // THE CONTAINER-MODEL AMENDMENT: the toText override was removed
-    // with the atom model — entry text is real and copies natively.
+    // No toText override — entry text is real and copies natively; no
+    // node carries a stray schema text serializer (the old leak).
     expect(editor.schema.nodes.referenceTable.spec.toText).toBeUndefined();
-    // THE LEAK STAYS DEAD (pinned from the atom era): no node carries
-    // a stray schema text serializer.
     expect(editor.schema.nodes.paragraph.spec.toText).toBeUndefined();
     expect(editor.schema.nodes.heading.spec.toText).toBeUndefined();
   });
@@ -916,8 +894,7 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     const out: string[] = [];
     editor.state.doc.forEach((n) => {
       if (n.type.name !== 'referenceTable') return;
-      // The TITLE row (refId '__title') is real content, not an entry —
-      // row assertions compare rows only.
+      // The TITLE row (refId '__title') is real content, not an entry.
       n.forEach((c) => {
         out.push(rowText(c as unknown as Parameters<typeof rowText>[0]));
       });
@@ -938,7 +915,6 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     await settleLayout();
     expect(tocChildren(editor)).toEqual(['Alpha']);
 
-    // AUTO-UPDATE (same-tick by the generator): retitle.
     let alphaPos: number | null = null;
     editor.state.doc.descendants((n, pos) => {
       if (n.type.name === 'heading' && alphaPos === null) alphaPos = pos + 1;
@@ -948,7 +924,6 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     });
     expect(tocChildren(editor)).toEqual(['Hi Alpha']);
 
-    // Add a NEW heading below → a second entry appears.
     act(() => {
       editor.chain().focus().insertContentAt(editor.state.doc.content.size, {
         type: 'heading',
@@ -958,8 +933,7 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     });
     expect(tocChildren(editor)).toEqual(['Hi Alpha', 'New Section']);
 
-    // REMOVE the heading entirely (backspace-through's end state: the
-    // heading node deleted) → its entry disappears.
+    // Backspace-through's end state: the heading deleted → its entry disappears.
     let newSectionPos: number | null = null;
     editor.state.doc.descendants((n, pos) => {
       if (n.type.name === 'heading' && n.textContent === 'New Section') newSectionPos = pos;
@@ -969,8 +943,6 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     });
     expect(tocChildren(editor)).toEqual(['Hi Alpha']);
 
-    // And the view never fell back (the stack stays — the paginated
-    // pipeline accepted every generator write).
     expect(document.querySelector('[data-testid="paginated-stack"]')).not.toBeNull();
   });
 
@@ -984,7 +956,6 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     });
     await settleLayout();
     expect(tocChildren(editor)).toEqual(['term']);
-    // Mark another term → the index grows (same-tick).
     act(() => {
       editor.chain().focus().insertContentAt(editor.state.doc.content.size, {
         type: 'paragraph',
@@ -1007,10 +978,9 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
     await settleLayout();
     expect(tocChildren(editor)).toEqual(['Hello World']);
 
-    // Delete the heading's chars one by one from its END (backspace
-    // semantics), positions found on the LIVE doc (the ToC sits
-    // before the heading now — hand-counted positions would hit the
-    // container's own entry text).
+    // Delete chars one by one from the END (backspace semantics);
+    // positions are found on the LIVE doc (hand-counted ones would
+    // hit the container's own entry text).
     const headingRange = () => {
       let at: { pos: number; text: string } | null = null;
       editor.state.doc.descendants((n, pos) => {
@@ -1040,12 +1010,10 @@ describe('the app flows (regression: the reported insert/auto-update issues)', (
       });
       // MODEL lockstep: the entry text matches the heading's new text.
       expect(tocChildren(editor)).toEqual(['Hello World'.slice(0, len - 1)]);
-      // VIEW lockstep: the adapter's heading projection (what the
-      // canvas paints is derived from exactly this) matches too — a
-      // mismatch here IS the ghost.
+      // VIEW lockstep: the adapter's heading projection (what the canvas
+      // paints derives from) — a mismatch here IS the ghost.
       expect(adaptHeadingText()).toBe('Hello World'.slice(0, len - 1));
     }
-    // The stack never fell back.
     expect(document.querySelector('[data-testid="paginated-stack"]')).not.toBeNull();
   });
 });
@@ -1070,9 +1038,8 @@ describe('the contextual tab (the GDocs refresh affordance)', () => {
       return out;
     };
 
-    // Click into an entry (what opens the contextual tab): the caret
-    // inside an entry paragraph announces the context (the tab strip
-    // renders from the same store signal).
+    // Click into an entry: the caret inside an entry paragraph
+    // announces the context (the tab strip renders from the same signal).
     const entryPos = (() => {
       let at: number | null = null;
       editor.state.doc.descendants((n, pos) => {
@@ -1092,17 +1059,15 @@ describe('the contextual tab (the GDocs refresh affordance)', () => {
     });
     expect(selectionInReferenceTable(editor)).toBe(true);
 
-    // The user edits the ENTRY text (caret inside — the generator
-    // defers; the live edit stays visible).
+    // Caret inside — the generator defers; the live edit stays visible.
     act(() => {
       editor.chain().focus().insertContentAt(entryPos, { type: 'text', text: 'X' }).run();
     });
     expect(entryTexts()).toEqual(['XAlpha']); // deferred, live
 
-    // Caret out (genuinely OUTSIDE the container — into the heading's
-    // text; pos 1 would still be INSIDE the container's first entry)
-    // + REFRESH (the forced pass): refresh-wins reverts the stale
-    // text; the generator's reuse law keeps formatting.
+    // Caret out (into the heading's text — pos 1 is still INSIDE the
+    // first entry) + REFRESH: refresh-wins reverts the stale text;
+    // reuse keeps formatting.
     const headingTextPos = (() => {
       let at: number | null = null;
       editor.state.doc.descendants((n, pos) => {
@@ -1117,8 +1082,7 @@ describe('the contextual tab (the GDocs refresh affordance)', () => {
     expect(entryTexts()).toEqual(['Alpha']);
     expect(selectionInReferenceTable(editor)).toBe(false); // caret is outside now
 
-    // SELECT TABLE (the tools button's semantics): NodeSelection on
-    // the container (found from the selection's ancestry).
+    // SELECT TABLE: NodeSelection on the container (from the ancestry walk).
     act(() => {
       editor.commands.setTextSelection(entryPos);
     });
@@ -1169,14 +1133,12 @@ describe('the join/ghost fix (dead entries never linger)', () => {
         editor.commands.deleteRange({ from: pos + 1 + text.length - 1, to: pos + 1 + text.length });
       });
     }
-    // The bare heading's entry synced to '' (a live entry — the
-    // heading still exists).
+    // The bare heading's entry synced to '' (the heading still exists).
     expect(entryTexts()).toEqual([{ text: '', refId: expect.any(String) }]);
 
-    // THE JOIN (the final backspace): the bare heading merges into the
-    // container and the caret lands INSIDE — the dead entry (its
-    // heading is GONE) must be removed IMMEDIATELY, not deferred into
-    // a ghost row that swallows the next keystroke.
+    // The final backspace joins the bare heading into the container;
+    // the dead entry (its heading GONE) must be removed IMMEDIATELY —
+    // never deferred into a ghost row that swallows the next keystroke.
     act(() => {
       editor.commands.joinBackward();
     });
@@ -1185,17 +1147,14 @@ describe('the join/ghost fix (dead entries never linger)', () => {
       { text: 'No headings yet — entries appear as you add them.', refId: null },
     ]);
 
-    // Typing goes wherever PM's join mapped the caret (its own
-    // semantics) — the INVARIANT is that no dead entry lingers to
-    // swallow it: the container's rows are the placeholder (refId
-    // null) or live entries, never a stale one.
+    // The INVARIANT: no dead entry lingers to swallow the caret —
+    // rows are the placeholder (refId null) or live entries, never stale.
     act(() => {
       editor.commands.insertContent('X');
     });
     const rows = entryTexts();
     expect(rows.every((r) => r.refId === null || r.text !== undefined)).toBe(true);
     expect(rows.some((r) => r.refId !== null)).toBe(false); // no dead entry came back
-    // The paginated pipeline survived the whole join flow (no fallback).
     await settleLayout();
     expect(document.querySelector('[data-testid="paginated-stack"]')).not.toBeNull();
   });
@@ -1215,10 +1174,9 @@ describe('page numbers + leaders (the two-pass fixpoint)', () => {
     await settleLayout();
     await settleLayout();
 
-    // The container's painted text carries the RESOLVED number: the
-    // entry text + '\t' + '1' (both blocks land on page 1).
-    // The painted container text: 'Alpha' + DOTS + '\t' + the number
-    // (the leader is a real run between text and tab now).
+    // The painted text carries the RESOLVED number: 'Alpha' + DOTS +
+    // '\t' + '1' (both blocks land on page 1; the leader is a real run
+    // between text and tab).
     const tocPaints = () =>
       spy.mock.calls
         .map((c) => c[3] as string)
@@ -1226,9 +1184,8 @@ describe('page numbers + leaders (the two-pass fixpoint)', () => {
     expect(tocPaints().length).toBeGreaterThan(0);
     expect(tocPaints().every((t) => /Alpha\.*\t1$/.test(t))).toBe(true);
 
-    // Force the heading onto page 2: a page break BETWEEN the ToC and
-    // the heading (a break at doc start is a fresh-page no-op — the
-    // ToC already starts the document).
+    // Force the heading onto page 2: a break between the ToC and the
+    // heading (a break at doc start would be a no-op).
     spy.mockClear();
     act(() => {
       let headingPos: number | null = null;
@@ -1336,8 +1293,8 @@ describe('round-5: no title; the leaders span is real, toggleable text', () => {
     expect(
       block.entries[0]!.runs.map((r) => (r as { kind?: string; text?: string }).text)
     ).toEqual(['Alpha', '.'.repeat(12), '\t', '']);
-    // The sidecar's slice covers the entry text + seed dots (PM-mapped)
-    // and carries leaderLen — the PAINTER's gap-fill tag.
+    // The sidecar's slice covers the text + seed dots and carries
+    // leaderLen (the painter's gap-fill tag).
     const adapter = adapted.blocks.find((b) => b.reference)!;
     expect(adapter.text).toBe('Alpha' + '.'.repeat(12) + '\t');
     expect(adapter.reference!.entries[0]!.leaderLen).toBe(12);
@@ -1345,9 +1302,8 @@ describe('round-5: no title; the leaders span is real, toggleable text', () => {
   });
 });
 
-describe('round 9: the reactive toggle fix + the layout presets', () => {
-  /** The reference-table tools mounted for real (the React surface —
-   *  the stale-getState bug's repro surface). */
+describe('the reactive toggle fix + the layout presets', () => {
+  /** The tools mounted for real — the stale-getState bug's repro surface. */
   function mountTools() {
     const utils = render(<ReferenceTableTools />);
     return utils;
@@ -1392,11 +1348,9 @@ describe('round 9: the reactive toggle fix + the layout presets', () => {
     });
     mountTools();
     expect(dotsOf(editor)).toBe(1);
-    // The FACE button applies the current/default preset through the
-    // REAL React handler (the popover's inner rows are portal-mounted
-    // and base-ui's jsdom open-lifecycle is out of scope; the FACE is
-    // the always-mounted interactive surface).
-    // The FACE carries the current preset's label — click applies it.
+    // The FACE button applies the current preset through the REAL React
+    // handler (the popover's portal-mounted rows are out of jsdom scope;
+    // the FACE is the always-mounted interactive surface).
     const faceButton = [...document.querySelectorAll('button')].find((b) =>
       (b.textContent ?? '').includes('Numbers and leading'),
     ) as HTMLButtonElement | null;
@@ -1404,8 +1358,8 @@ describe('round 9: the reactive toggle fix + the layout presets', () => {
     act(() => {
       fireEvent.click(faceButton!);
     });
-    // Re-applying the current preset is a no-op on the dots (1 → 1),
-    // but the WIRE is proven: the handler ran, the attrs wrote.
+    // Re-applying the preset is a no-op on the dots, but the handler ran
+    // and wrote attrs.
     expect(attrsOf(editor).leaders).toBe(true);
     expect(attrsOf(editor).numberDisplay).toBe('plain');
   });
@@ -1436,9 +1390,9 @@ describe('round 9: the reactive toggle fix + the layout presets', () => {
       });
     };
 
-    // THE PRESETS' ADAPTER FACTS (the bare adapter — no resolver map,
-    // so the number TEXT is '' throughout; the DECOR carries the
-    // preset's effect — the two-pass supplies the text in the app):
+    // The bare adapter has no resolver map — the number TEXT is ''
+    // throughout; the DECOR carries the preset's effect (the two-pass
+    // supplies the text in the app).
     const adapt = () => {
       const registry = useStyleRegistryStore.getState();
       const base = resolveNormalBase('sans-serif', 16, registry.merged);
@@ -1452,19 +1406,16 @@ describe('round 9: the reactive toggle fix + the layout presets', () => {
       return a.runDecor[a.runDecor.length - 1]!;
     };
 
-    // M-REFS-11: the number presets no longer have a hyperlink arm —
-    // the whole TOC is ALWAYS hyperlinking via the rows' semantic link
-    // marks (tensor-ref: hrefs); the presets only shape the visible
-    // layout. The number runs' decor stays bare in every preset.
+    // The number presets have no hyperlink arm — hyperlinking rides the
+    // rows' semantic link marks (tensor-ref: hrefs); the presets only
+    // shape the visible layout.
     setAttr('numberDisplay', 'none');
     setAttr('numberDisplay', 'plain');
     const decorKeys = Object.keys(lastDecor());
     expect(decorKeys).not.toContain('hyperlink'); // the option is gone
 
-    // THE SEMANTIC LINK (the always-on ruling, pinned): the row's
-    // entry text carries the link mark with the tensor-ref: href to
-    // the target's stable blockId — the data the future PDF/DOCX
-    // exporters map.
+    // The row's entry text carries the link mark with the tensor-ref:
+    // href to the target's stable blockId — the data the exporters map.
     let linkHref: string | null = null;
     editor.state.doc.forEach((n) => {
       if (n.type.name !== 'referenceTable' || linkHref) return;

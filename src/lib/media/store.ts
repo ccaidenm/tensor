@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 
 /**
- * M-IMAGES-0 — the ONE resolution point for media:// references.
- * Fed by unpackage on document open and (later milestones) by insert
- * paths; the save path GCs against it. This milestone wires load/save
- * only — no document content references media yet.
+ * The one resolution point for media:// references — fed by
+ * unpackage on document open and by insert paths; the save path GCs
+ * against it.
  */
 
 export interface MediaEntry {
@@ -20,7 +19,7 @@ interface MediaState {
   entries: Map<string, MediaEntry>;
   /** Replace the store with an opened document's media set. */
   setFromUnpackage: (media: { id: string; ext: string; bytes: Uint8Array }[]) => void;
-  /** Insert paths (later milestones). */
+  /** Insert paths. */
   add: (id: string, ext: string, bytes: Uint8Array) => void;
   remove: (id: string) => void;
   clear: () => void;

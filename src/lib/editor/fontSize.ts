@@ -2,14 +2,9 @@ import type { Editor } from '@tiptap/core';
 import { useConfigStore } from '@/lib/config/store';
 
 /**
- * FONT-SIZE UNITS (M6-PRE): pt at the chrome, px in the core. The
- * core (PM mark attrs, config defaults, engine TextStyle, canvas
- * metrics) stays in CSS px; ONLY display-facing chrome converts.
- * Same 96/72 ratio as the page-geometry law (pageSetup.PX_PER_PT).
- *
- * Chrome conversion rule: display = Math.round(px × 0.75);
- * commit = Math.round(pt × 4/3). 16px ⇄ "12", so Word's common sizes
- * round-trip exactly; intermediate values pick the nearest px.
+ * Units: pt at the chrome, px in the core (PM attrs, config, engine,
+ * canvas metrics) — only display-facing chrome converts, at the same
+ * 96/72 ratio as pageSetup.PX_PER_PT. 16px ⇄ "12" round-trips exactly.
  */
 
 export const PX_PER_PT = 96 / 72;
@@ -43,8 +38,7 @@ export function effectiveFontSizePx(editor: Editor): number {
 
 /**
  * Step the selection's font size by ±FONT_STEP_PT (chrome pt), committing
- * px to the core. The pt math rides the display rule (round both ways)
- * so stepping up then down returns to the same px for common sizes.
+ * px. The pt math rounds both ways, so up-then-down returns the same px.
  */
 export function stepFontSize(editor: Editor, direction: 1 | -1): boolean {
   const currentPx = effectiveFontSizePx(editor);

@@ -6,10 +6,9 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useConfigStore } from '@/lib/config/store';
 
 /**
- * #100 — THE CUSTOM TOPBAR: the merged titlebar row (the Ribbon's h-10
+ * #100 — the custom topbar: the merged titlebar row (the Ribbon's h-10
  * strip IS the window chrome), the custom window controls, the drag
- * regions, the OS-title follow, and the absorbed-menu seams (the
- * web-side accelerators that replaced the native menu's).
+ * regions, the OS-title follow, and the absorbed-menu seams.
  *
  * The window API is mocked locally (the palette.test pattern); jsdom's
  * userAgent reads as Linux, so the tests exercise the Linux/Windows

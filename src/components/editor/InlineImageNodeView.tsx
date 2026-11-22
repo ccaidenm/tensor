@@ -4,16 +4,11 @@ import type { ReactNodeViewProps } from '@tiptap/react';
 import { useMediaStore } from '@/lib/media/store';
 
 /**
- * M-IMAGES-2 — the INLINE image node view (pageless rendering + the
- * hidden-PM-view a11y surface). Natural size inline (the CSS baseline
- * seats it — the engine's seating law made visible); clamped by CSS's
- * own max-width:100% (a paint-side nicety; the ENGINE's fitDownImage
- * owns the paginated clamp).
- *
- * M-IMAGES-2.2 — decode failure is not a broken glyph: the <img>'s
- * onerror flips the view to the hatched failed box (the M-IMAGES-1
- * placeholder law — never a broken-image glyph), matching the canvas
- * surfaces' failed box.
+ * The inline image node view (pageless rendering + the hidden-PM-view
+ * a11y surface). Natural size inline — the CSS baseline seats it;
+ * clamped by CSS max-width:100% (the engine's fitDownImage owns the
+ * paginated clamp). Decode failure flips to the hatched failed box —
+ * never a broken-image glyph, matching the canvas surfaces.
  */
 type InlineImageNodeViewProps = ReactNodeViewProps;
 
@@ -28,7 +23,7 @@ export function InlineImageNodeView({ node }: InlineImageNodeViewProps) {
   };
   const id = src?.startsWith('media://') ? src.slice('media://'.length) : null;
   const entry = useMediaStore((s) => (id ? s.entries.get(id) : undefined));
-  // M-IMAGES-2.2: the <img>'s own decode failure (see ImageNodeView).
+  // The <img>'s own decode failure (see ImageNodeView).
   const [imgFailed, setImgFailed] = useState(false);
 
   if (!id || !entry) {

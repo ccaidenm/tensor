@@ -39,7 +39,7 @@ async function settle() {
   await settleLayout();
 }
 
-// ─── STEP 1: empty-line inheritance ──────────────────────────────────────
+// Empty-line inheritance
 
 describe('empty-textblock inheritance (P1)', () => {
   it('an empty paragraph in a 2.0-spaced doc measures 2.0 — heights match its neighbors', async () => {
@@ -58,8 +58,8 @@ describe('empty-textblock inheritance (P1)', () => {
       { text: '', style: { fontFamily: 'system-ui', fontSize: 16, lineHeight: 2 } },
     ]);
 
-    // Engine receipt (P1 ruling): the present run's style wins — the
-    // blank line is as tall as its 2.0 siblings, not the 1.0 default.
+    // Engine receipt: the present run's style wins — the blank line is
+    // as tall as its 2.0 siblings, not the 1.0 default.
     const result = layoutBlocks(adapted.doc.blocks);
     expect(result.lines.map((l) => [l.rect.y, l.rect.height])).toEqual([
       [0, 32],
@@ -102,7 +102,7 @@ describe('empty-textblock inheritance (P1)', () => {
   });
 });
 
-// ─── STEP 4: find-highlight geometry ─────────────────────────────────────
+// Find-highlight geometry
 
 describe('find-highlight text extents (P1)', () => {
   it('match rects hug the glyphs; selection keeps the full leading box — different geometry, both pinned', async () => {
@@ -121,12 +121,12 @@ describe('find-highlight text extents (P1)', () => {
     const find = textRangeTextExtents(adapted.blocks, result, from, to, FakeMetrics, PAGE_GAP);
     expect(find).toHaveLength(1);
     expect(find[0].height).toBe(16); // glyph box: 12.8 + 3.2
-    // Under the M6 bottom-only ruling the glyphs sit at the box top
+    // Under the bottom-only leading the glyphs sit at the box top
     // (baseline − ascent = 0), so the extent starts at the line top.
     expect(find[0].top).toBe(CB.y + 32);
 
     const selection = textRangeLineRects(adapted.blocks, result, from, to, FakeMetrics, PAGE_GAP);
-    expect(selection[0].height).toBe(32); // full leading box — the ruling stands
+    expect(selection[0].height).toBe(32); // full leading box
     expect(selection[0].top).toBe(CB.y + 32);
 
     // Same x span (one span walk, no forks).

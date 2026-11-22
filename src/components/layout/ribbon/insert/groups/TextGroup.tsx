@@ -9,12 +9,9 @@ import { SymbolButton } from '../SymbolButton';
 import { EquationButton } from '../EquationButton';
 import { HorizontalRuleButton } from '../HorizontalRuleButton';
 
-/** Insert ▸ Text: link/comment/symbol/equation — plus the horizontal
- *  rule (moved from Pages when Header/Footer split into their own
- *  group; the rule is an inline content object, this is its crowd).
- *  M-REFS: "Mark Index Entry" lives here too (the user's grouping —
- *  the line-annotation crowd), riding the SAME command the palette
- *  and context menu run. */
+/** Insert ▸ Text. The horizontal rule belongs here too (an inline
+ *  content object, not a page break). Mark Index Entry rides the same
+ *  command the palette and context menu run. */
 export function TextGroup({ editor }: { editor: Editor }) {
   const canMark = useEditorState({
     editor,
@@ -23,12 +20,8 @@ export function TextGroup({ editor }: { editor: Editor }) {
   return (
     <RibbonGroup showSeparator={false}>
       <LinkButton editor={editor} />
-      {/* #COMMENTS — dispatches the ONE command body (the registry's
-          law: the ribbon, the floating toolbar, Ctrl+Alt+M, and the
-          palette share EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED
-          (the user's ruling): a bare caret anchors the word it sits
-          in — the command body's toasts are the loud fallbacks, not
-          disabled states. */}
+      {/* Always enabled: a bare caret anchors the word it sits in —
+          toasts are the fallback, not disabled states. */}
       <IconButton
         label="Comment"
         icon={<MessageSquarePlus size={16} />}

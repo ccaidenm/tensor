@@ -6,10 +6,8 @@ interface DocumentPropertiesStore {
   close: () => void;
   customSizeIsOpen: boolean;
   /**
-   * #58 — WHO the custom size is for: 'document' (the ribbon's path —
-   * Done applies document-wide) or 'draft' (the Page Setup dialog's
-   * path — Done hands the pick back through customSizeOnPick; the
-   * page-setup scope then decides where it lands).
+   * #58 — who the custom size is for: 'document' (Done applies it
+   * document-wide) or 'draft' (Done hands the pick back via customSizeOnPick).
    */
   customSizeTarget: 'document' | 'draft';
   customSizeSeed: { pageSize: string; customWidth?: number; customHeight?: number } | null;
@@ -23,15 +21,11 @@ interface DocumentPropertiesStore {
     onPick?: (pick: { pageSize: string; customWidth?: number; customHeight?: number }) => void;
   }) => void;
   closeCustomSize: () => void;
-  /** #58 — the ONE Page Setup dialog (paper/orientation/margins with
-   *  an Apply-to scope: whole document / this section / this point
-   *  forward). The old per-feature margins dialog is merged into it. */
+  /** #58 — the Page Setup dialog (paper/orientation/margins with an Apply-to scope). */
   pageSetupIsOpen: boolean;
   openPageSetup: () => void;
   closePageSetup: () => void;
-  /** #74 COLUMNS — the ONE Columns dialog (the spec with an Apply-to
-   *  scope — the Page Setup machinery, no page scope: columns are
-   *  geometry, never page decor). */
+  /** #74 — the Columns dialog (Apply-to scope like Page Setup, but no page scope: columns are geometry). */
   columnsIsOpen: boolean;
   openColumns: () => void;
   closeColumns: () => void;

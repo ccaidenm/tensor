@@ -5,13 +5,9 @@ import { IconButton } from '@/components/layout/IconButton';
 import { useLinkEditorStore } from '@/lib/editor/linkEditorStore';
 
 /**
- * Now a thin trigger — same component instance used in the Ribbon's
- * ActionsGroup and in FloatingToolbar, both of which just need to open
- * the shared link editor (LinkBubble, via useLinkBubble's
- * insertRequestId), not maintain their own popover. If the cursor is
- * already on an existing link, the shared hook detects that and opens
- * the rich edit view instead of a blank insert form — see
- * useLinkBubble.ts.
+ * A thin trigger: opens the shared link editor (LinkBubble) rather than
+ * maintaining its own popover; if the cursor is on an existing link it
+ * opens the rich edit view instead (see useLinkBubble.ts).
  */
 export function LinkButton({ editor }: { editor: Editor }) {
   const isActive = useEditorState({

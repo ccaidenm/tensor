@@ -3,28 +3,11 @@ import type { PaintedRect } from '@/lib/paginated/positionMap';
 import type { SpellError } from '@/lib/editor/spell/types';
 
 /**
- * SPELL & GRAMMAR projection (Pages mode): flat flagged-span lines,
- * the SearchHighlights receipt adapted to bar geometry —
- *
- *  - `pointer-events: none` — right/left-clicks must fall through to
- *    the painted surface (hitTest owns the routing);
- *  - stack-local pre-zoom px inside the transform (the zoom law: the
- *    scale() parents scale these for free, nothing compensates);
- *  - aria-hidden + role none — the flag is ink, not content (a11y
- *    consumers read the hidden input view's text, as ever).
- *
- * KIND = COLOR (the distinction ruling): spelling red, grammar the
- * advisory blue (Word/GDocs convention). The optional DOUBLE line
- * for grammar (Accessibility → Visual Cues) adds a second bar below
- * the first — a non-color cue for color-blind users; the pageless
- * surface does the same via CSS text-decoration-style: double.
- *
- * The rects arrive from positionMap.textRangeUnderlineRects — the
- * same span walk the search/selection projections ride, so a flagged
- * span's bar hugs the glyphs through wraps, table lanes, and
- * alignment exactly like its selection would. The bar carries a touch
- * of transparency (the user's tuning — it reads as signal ink, not a
- * hard rule).
+ * Spell/grammar bars: pointer-events-none (hitTest owns the routing),
+ * stack-local pre-zoom px inside the zoom transform, aria-hidden — ink,
+ * not content. Spelling red, grammar blue; the optional double bar adds
+ * a non-color cue for color-blind users. Rects come from
+ * positionMap.textRangeUnderlineRects — bars hug the glyphs through wraps.
  */
 export type SpellBar = PaintedRect & { kind: SpellError['kind'] };
 

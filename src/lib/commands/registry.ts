@@ -101,15 +101,10 @@ import { useSpellStore } from '@/lib/editor/spell/store';
 import { spellCheckActive } from '@/lib/config/schema';
 
 /**
- * M-PALETTE. The declarative app command registry — the single source
- * of truth for app actions, consumed by the command palette and the
- * web-side shortcut system. (The native menu — their old third
- * consumer — was absorbed into the app at #100; the Ribbon's Tensor
- * dropdown and the palette own its items.)
- *
- * Editor commands are NOT re-implemented here — each entry dispatches
- * through the shared EDITOR_COMMAND_MAP path (editorCommands.ts), the
- * same one ShortcutsExtension uses for keybindings.
+ * The declarative app command registry — the single source of truth
+ * for app actions, consumed by the command palette and the web-side
+ * shortcut system. Editor commands dispatch through the shared
+ * EDITOR_COMMAND_MAP path (editorCommands.ts), never re-implemented.
  */
 
 export type CommandGroup = 'actions' | 'format' | 'navigate';
@@ -130,11 +125,8 @@ export interface CommandAction {
   /** Palette VISIBILITY filter only — run() ignores
    *  it, so a hidden action still fires from its shortcut. */
   hidden?: () => boolean;
-  /** Destructive surface marker (quit; 'new' once real): run() must
-   *  first persist a recovery snapshot of unsaved work via the
-   *  existing autosave recovery path — same format, same recovery/
-   *  location, so the existing restore flow picks it up with zero new
-   *  machinery. */
+  /** Destructive surface (quit, new): run() persists a recovery
+   *  snapshot of unsaved work first, via the existing recovery path. */
   requiresSafeQuit?: boolean;
   /** Palette availability filter only — run() ignores it. Must be
    *  cheaply/synchronously readable from store state; if not, omit
@@ -146,9 +138,8 @@ export interface CommandAction {
 const doc = () => useDocumentStore.getState();
 const cfg = () => useConfigStore.getState();
 
-/** M-REFS: the insert trio's shared enablement — editor present AND
- * the insertion not refused (bands/cells — the same facts the ONE
- * insertion helper toasts on; a disabled button must never write). */
+/** The insert trio's shared enablement — editor present and the
+ * insertion not refused (bands/cells). */
 const canInsertReferenceTable = () => {
   const editor = doc().editor;
   return !!editor && !selectionInBand(editor) && !findTableUnderSelection(editor.state);
@@ -165,14 +156,8 @@ function editorCommand(id: string, def: Omit<CommandAction, 'id' | 'run' | 'cont
   return { ...def, id, contexts: ['editor'], run: () => { runEditorCommand(id); } };
 }
 
-/** ─── M-IMAGES-1.5 module-scope image helpers (shared by the
- * command closure and the direct-entry write above). ──────────────
- * M-IMAGES-2.1: BOTH node kinds qualify (block image + inlineImage)
- * — a NodeSelection on either is an image selection. `kind` narrows
- * when a command is shape-specific (align is a BLOCK-only fact — the
- * adapter reads align on kind 'image' alone; inline objects are
- * seated by the engine's baseline rule, so their align attr is
- * inert). */
+/** Both node kinds qualify (block image + inlineImage); `kind` narrows
+ * when a command is shape-specific (align is block-only). */
 function selectedImageRef(kind?: 'image' | 'inlineImage'): { pos: number; attrs: Record<string, unknown> } | null {
   const editor = useDocumentStore.getState().editor;
   if (!editor) return null;
@@ -195,11 +180,8 @@ function clampRadiusRef(value: number, attrs: Record<string, unknown>): number {
   return Math.max(0, Math.min(max, value));
 }
 
-/** One attr write on the selected image (setNodeAttribute — the
- *  standard PM path; paint-only attrs splice, geometry attrs
- *  relayout). `kind` narrows the accepted selection shape — align
- *  passes 'image' (a BLOCK-only fact; the enablement and the write
- *  must agree, or a disabled button would still write dead state). */
+/** One attr write on the selected image (paint-only attrs splice,
+ * geometry attrs relayout); kind must agree with the enablement. */
 function writeImageAttrsRef(writes: Record<string, unknown>, kind?: 'image' | 'inlineImage'): void {
   const editor = useDocumentStore.getState().editor;
   const sel = selectedImageRef(kind);
@@ -223,11 +205,8 @@ export const COMMANDS: CommandAction[] = [
     icon: FileStack,
     group: 'navigate',
     keywords: ['new', 'document', 'window', 'blank'],
-    // #103 — REAL: the store's newDocument (a dirty current doc is
-    // recovery-snapshotted first — the quit law; requiresSafeQuit
-    // marks the destructive surface). The view mode follows the
-    // config default; the start screen's two blank cards pick their
-    // surface explicitly.
+    // #103 — a dirty current doc is recovery-snapshotted first
+    // (requiresSafeQuit); view mode follows the config default.
     requiresSafeQuit: true,
     run: () => {
       const layout = useConfigStore.getState().config.editor.defaultPageLayout;
@@ -245,10 +224,7 @@ export const COMMANDS: CommandAction[] = [
     run: () => void doc().openFile(),
   },
   {
-    // M-IMAGES-2.2 — Insert > Image through the palette: the SAME
-    // pipeline as the ribbon's Illustrations button (OS picker → the
-    // ONE insertion pipeline, media/insert.ts). No keyboard shortcut —
-    // the palette IS the reach.
+    // The same pipeline as the ribbon's Illustrations button.
     id: 'insertImage',
     title: 'Insert Image',
     icon: ImageIcon,
@@ -262,9 +238,8 @@ export const COMMANDS: CommandAction[] = [
     },
   },
   {
-    // M-TABLES — Insert > Table through the palette: opens the same
-    // exact-dimension dialog the ribbon grid picker's "Insert Table…"
-    // opens. No keyboard shortcut — the palette IS the reach.
+    // Opens the same exact-dimension dialog the ribbon picker's
+    // "Insert Table…" opens.
     id: 'insertTable',
     title: 'Insert Table…',
     icon: Table,
@@ -299,9 +274,8 @@ export const COMMANDS: CommandAction[] = [
     title: 'Export Markdown',
     icon: FileDown,
     group: 'actions',
-    // M-MD: palette-only for now (ruling 6) — the native menu item can
-    // ride along with the PDF/DOCX export entries. The lossy confirm
-    // lives inside exportMarkdownFile, so palette and menu share it.
+    // Palette-only for now; the lossy confirm lives inside
+    // exportMarkdownFile.
     keywords: ['export', 'markdown', 'md', 'convert', 'save as'],
     enablement: () => !!doc().editor,
     run: () => void doc().exportMarkdown(),
@@ -312,8 +286,7 @@ export const COMMANDS: CommandAction[] = [
     icon: Printer,
     group: 'actions',
     shortcutId: 'printPreview',
-    // M-PRINT (#43, Mark 3): the preview modal — the Chromium-style
-    // print surface (Mark 2's Print command joins it).
+    // #43 — the preview modal.
     keywords: ['print', 'preview', 'printer', 'pdf'],
     enablement: () => !!doc().editor,
     run: () => usePrintPreviewStore.getState().open(),
@@ -323,7 +296,7 @@ export const COMMANDS: CommandAction[] = [
     title: 'Export Word Document',
     icon: FileText,
     group: 'actions',
-    // M-DOCX (#37): same one-body law — the gate lives in exportDocxFile.
+    // #37 — the gate lives in exportDocxFile.
     keywords: ['export', 'word', 'docx', 'microsoft', 'convert', 'save as'],
     enablement: () => !!doc().editor,
     run: () => void doc().exportDocx(),
@@ -337,10 +310,8 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['undo', 'revert', 'history'],
     enablement: canUndo,
     run: () => {
-      // A focused text control (dialog fields) owns undo: the native
-      // menu accelerator consumed the keystroke, so execCommand
-      // replays it on THAT control's own history — the same
-      // focused-surface stance as cut/copy below.
+      // A focused text control owns undo: execCommand replays it on
+      // that control's own history (the same stance as cut/copy).
       if (focusedTextControl()) {
         document.execCommand('undo');
         return;
@@ -371,8 +342,8 @@ export const COMMANDS: CommandAction[] = [
     icon: Scissors,
     group: 'actions',
     keywords: ['cut', 'clipboard', 'selection'],
-    // TODO(Clipboard API): document.execCommand is deprecated but
-    // universally supported — replacing it is not this milestone.
+    // execCommand, not the async Clipboard API: cut must act on the
+    // focused surface's own selection, synchronously.
     run: () => {
       document.execCommand('cut');
     },
@@ -383,7 +354,7 @@ export const COMMANDS: CommandAction[] = [
     icon: Copy,
     group: 'actions',
     keywords: ['copy', 'clipboard', 'duplicate'],
-    // TODO(Clipboard API): see cut — execCommand v1, not this milestone.
+    // execCommand per the cut rationale.
     run: () => {
       document.execCommand('copy');
     },
@@ -412,10 +383,6 @@ export const COMMANDS: CommandAction[] = [
       setTheme(config.theme === 'dark' ? 'light' : 'dark');
     },
   },
-    // M-RULER: ONE toggle for both ruler bars (the config's
-  // showHorizontalRuler/showVerticalRuler flags — either visible → hide
-  // both; else show both — mirroring the ribbon button). Pages mode
-  // only; the bars unmount themselves outside it.
   {
     id: 'toggleRulers',
     title: 'Toggle Rulers',
@@ -436,19 +403,14 @@ export const COMMANDS: CommandAction[] = [
     requiresSafeQuit: true,
     run: async () => {
       const { editor, filePath, isDirty, pageSetup, lineNumbers, coreProperties, headerFooter } = doc();
-      // Safe-quit: dirty doc → recovery snapshot NOW via the EXISTING
-      // autosave recovery path (recovery.ts saveRecoveryCopy — same
-      // format, same appDataDir()/recovery/ location), so the existing
-      // restore flow picks it up. No second snapshot format, no
-      // forked restore logic.
+      // Safe-quit: a dirty doc snapshots via the existing recovery
+      // path — same format, same restore flow.
       if (editor && isDirty) {
         await saveRecoveryCopy(editor, filePath, {
           pageSetup,
           lineNumbers,
           coreProperties,
           headerFooter,
-          // #COMMENTS: the snapshot parity law — threads ride like the
-          // rest of the metadata bundle.
           commentThreads: useCommentStore.getState().threadsForSave(),
         });
       }
@@ -500,8 +462,7 @@ export const COMMANDS: CommandAction[] = [
     keywords: ['properties', 'metadata', 'title', 'author', 'subject', 'keywords', 'comments', 'document', 'info'],
     run: () => useDocumentPropertiesStore.getState().open(),
   },
-  // #58 — the ONE page-setup surface (paper/orientation/margins with
-  // an Apply-to scope), palette-reachable like its sibling dialogs.
+  // #58 — the one page-setup surface, palette-reachable.
   {
     id: 'pageSetup',
     title: 'Page Setup',
@@ -520,9 +481,8 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('search', 'right'),
   },
   {
-    // M-T3c — the Table side panel (the Find/Replace sidebar's twin):
-    // dimensions + flow fine-tuning, and the alternate route for the
-    // table ops when the floating toolbar is turned off.
+    // The table side panel: fine-tuning + the alternate route when
+    // the floating toolbar is off.
     id: 'tableSidebar',
     title: 'Table Properties (Sidebar)',
     icon: TableProperties,
@@ -533,10 +493,8 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('table', 'right'),
   },
   {
-    // M-A11Y — the Accessibility Check panel: the document-content
-    // checker (missing alt text, heading hierarchy, color contrast),
-    // on-demand from the Review tab or the palette. Palette-only,
-    // zero Rust surface (the tableSidebar precedent).
+    // The document-content checker (alt text, headings, contrast),
+    // on-demand.
     id: 'accessibilityCheck',
     title: 'Check Accessibility',
     icon: PersonStanding,
@@ -547,10 +505,8 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('accessibilityCheck', 'right'),
   },
   {
-    // #WATERMARK — the watermark panel: the decorative page overlay's
-    // editor (text/image, rotation/opacity, whole document or one
-    // section), docked beside Find/Table/Accessibility. Palette-only —
-    // zero Rust surface (the tableSidebar precedent).
+    // The watermark editor panel — text/image, whole document or one
+    // section.
     id: 'watermarkPanel',
     title: 'Watermark',
     icon: Droplet,
@@ -561,10 +517,7 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('watermark', 'right'),
   },
   {
-    // TRANSLATE — the Review tab's on-demand translation (the
-    // accessibilityCheck twin): opens the docked panel. Palette-only —
-    // zero Rust surface beyond the translate wire
-    // commands the consented runs invoke.
+    // The Review tab's on-demand translate panel.
     id: 'translateSidebar',
     title: 'Translate',
     icon: Languages,
@@ -575,10 +528,7 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('translate', 'right'),
   },
   {
-    // STATISTICS — the Review tab's dashboard sidebar (the
-    // accessibilityCheck twin): headline-number cards + the
-    // heading-delimited region list, live while open. Palette-only —
-    // zero Rust surface (the tableSidebar precedent).
+    // The statistics dashboard sidebar, live while open.
     id: 'statisticsSidebar',
     title: 'Document Statistics (Sidebar)',
     icon: ChartColumn,
@@ -589,9 +539,7 @@ export const COMMANDS: CommandAction[] = [
     run: () => useSidebarStore.getState().open('statistics', 'right'),
   },
 
-  // ─── M-HEADER-FOOTER-3: the header/footer commands. Enablement rides
-  // PRESENCE (the band containers in the one PM doc) — the same fact the
-  // Insert buttons' active state reads. ─────────────────────────────
+  // Header/footer commands: enablement rides band-container presence.
   {
     id: 'insertHeader',
     title: 'Insert Header',
@@ -618,8 +566,7 @@ export const COMMANDS: CommandAction[] = [
     icon: Eye,
     group: 'navigate',
     keywords: ['header', 'footer', 'show', 'hide', 'display', 'toggle', 'band'],
-    // The captions/ruler NPC pattern: a DISPLAY toggle is always
-    // offered (presentation-only; the model round-trips regardless).
+    // Display-only toggle; the model round-trips regardless.
     run: () => {
       const { config, setShowHeadersFooters } = cfg();
       setShowHeadersFooters(!config.editor.showHeadersFooters);
@@ -632,9 +579,8 @@ export const COMMANDS: CommandAction[] = [
     group: 'actions',
     contexts: ['editor'] as ('app' | 'editor')[],
     keywords: ['header', 'footer', 'remove', 'delete', 'clear', 'band', 'all'],
-    // Enablement is honest: nothing to remove → the palette hides it.
-    // Runs delete every band container node (content included) and
-    // reset differentFirstPage — undoable (one PM history step each).
+    // Honest enablement: nothing to remove → hidden. Deletes every
+    // band + resets differentFirstPage; undoable.
     enablement: () => {
       const editor = doc().editor;
       return (
@@ -647,10 +593,8 @@ export const COMMANDS: CommandAction[] = [
     run: () => {
       const editor = doc().editor;
       if (!editor) return;
-      // COLLECT then delete in REVERSE document order — deleting while
-      // walking invalidates the later positions (the "Position N out of
-      // range" crash the test caught). One PM step, so undo restores
-      // everything at once.
+      // Collect then delete in REVERSE order — deleting while walking
+      // invalidates later positions. One PM step.
       const targets: Array<{ pos: number; size: number }> = [];
       editor.state.doc.descendants((node, pos) => {
         if (node.type.name !== 'headerBlock' && node.type.name !== 'footerBlock') return true;
@@ -672,11 +616,9 @@ export const COMMANDS: CommandAction[] = [
       }
     },
   },
-  // ─── M-REFS: the reference-table commands (palette + menu share
-  // the SAME runs — the M-PALETTE law). The insert trio routes through
-  // the ONE insertion helper (refusal checks + toast + command); the
-  // mark pair dispatches the schema commands. Enablement is honest and
-  // cheap: editor presence + the refusal facts + selection shape. ───
+  // Reference-table commands: the insert trio routes through the one
+  // insertion helper (refusal checks + toast); enablement is honest
+  // and cheap.
   {
     id: 'insertTableOfContents',
     title: 'Insert Table of Contents',
@@ -770,10 +712,8 @@ export const COMMANDS: CommandAction[] = [
     icon: SpellCheck,
     group: 'navigate',
     keywords: ['spell', 'spelling', 'grammar', 'check', 'proof', 'proofing', 'languagetool'],
-    // The consent gate (the ribbon button's rule): the FIRST enable
-    // opens the setup dialog — the provider choice is never defaulted.
-    // MASTER semantic: flips both features together (Settings →
-    // Proofing holds the per-feature switches).
+    // First enable opens the setup dialog (provider never defaulted);
+    // the master switch flips both features together.
     run: () => {
       const { config, setSpellCheckEnabled } = cfg();
       if (!config.spellCheck.configured) {
@@ -783,15 +723,10 @@ export const COMMANDS: CommandAction[] = [
       setSpellCheckEnabled(!spellCheckActive(config.spellCheck));
     },
   },
-  // ─── M-IMAGES-1.5: the image commands (toolbar + palette dispatch
-  // through the same runs; editor-context, enablement = an image node
-  // is SELECTED — a NodeSelection). ──────────────────────────────
+  // Image commands: enablement = an image NodeSelection.
   ...(() => {
     const imageSelected = () => selectedImageRef() !== null;
-    // M-IMAGES-2.1: align is a BLOCK-image fact (the adapter reads it
-    // on kind 'image' alone; an inline object's align attr is inert —
-    // the engine seats objects by baseline). Enablement is honest:
-    // block selection only.
+    // Align is a block-image fact; enablement is block-selection only.
     const blockImageSelected = () => selectedImageRef('image') !== null;
     const RADIUS_STEP = 4;
     const alignCommand = (align: 'left' | 'center' | 'right') => ({
@@ -912,26 +847,11 @@ export const COMMANDS: CommandAction[] = [
           if (editor) setWrapMode(editor, 'behind');
         },
       },
-      {
-        id: 'imageWrap',
-        title: 'Wrap Text Around Image',
-        icon: WrapText,
-        group: 'format' as const,
-        contexts: ['editor'] as ('app' | 'editor')[],
-        keywords: ['image', 'wrap', 'float', 'inline'],
-        // M-IMAGES-2 lights this (inline/floats) — the stub ships
-        // disabled everywhere (palette filters it out via enablement;
-        // the toolbar shows it disabled).
-        enablement: () => false,
-        run: () => {},
-      },
     ];
   })(),
 
-  // The mode flavors — every one enables with its mode; invoking the
-  // command while ALREADY in that exact state turns the gutter off
-  // (toggle semantics, so the palette alone can fully drive the
-  // setting without the ribbon).
+  // Mode flavors: invoking the command while already in that mode
+  // turns the gutter off (toggle semantics).
   ...(['per-page', 'continuous', 'per-paragraph'] as const).map((mode) => ({
     id: `lineNumbers:${mode}`,
     title: `Line Numbers: ${mode === 'per-page' ? 'Per Page' : mode === 'per-paragraph' ? 'Per Paragraph' : 'Continuous'}`,
@@ -974,12 +894,9 @@ export const COMMANDS: CommandAction[] = [
     run: () => cfg().setZoomLevel(100),
   },
   {
-    // FOCUS MODE — the View tab's toggle, F11, and the palette all
-    // dispatch through THIS one body (the registry's law). The run
-    // re-focuses the editor on exit: the View-tab button unmounts
-    // out from under the caret when the chrome hides, and PM's
-    // selection survives the unmount — focus just needs a nudge back
-    // (the caret reappears without moving — the acceptance criterion).
+    // One body for the View tab, F11, and the palette. On exit,
+    // re-focus the editor: the button unmounts under the caret, and
+    // PM's selection survives — focus just needs the nudge.
     id: 'toggleFocusMode',
     title: 'Toggle Focus Mode',
     icon: Maximize,
@@ -994,12 +911,8 @@ export const COMMANDS: CommandAction[] = [
     },
   },
   {
-    // #COMMENTS — the BOUNDARY CONTENT toggle (the rewired "Show
-    // Margins" stub): the outside space around the sheets — the comments
-    // gutter today, future boundary content later. One body for the
-    // View-tab button and the palette; persisted like the ruler
-    // toggles. Hiding never reflows the document (desk-level space
-    // reservation — the engine never sees it).
+    // The outside-space toggle — the comments gutter today. Hiding
+    // never reflows the document.
     id: 'toggleBoundaryContent',
     title: 'Show Boundary Content',
     icon: SquareDashed,
@@ -1075,8 +988,7 @@ export const COMMANDS: CommandAction[] = [
     shortcutId: 'insertSectionBreak',
     keywords: ['section', 'break', 'insert', 'new section'],
   }),
-  // #74 COLUMNS — the manual column break (the page break's twin;
-  // the ribbon button + the palette + a choosable shortcut).
+  // #74 — the manual column break (the page break's twin).
   editorCommand('insertColumnBreak', {
     title: 'Insert Column Break',
     icon: SeparatorHorizontal,
@@ -1091,11 +1003,8 @@ export const COMMANDS: CommandAction[] = [
     shortcutId: 'insertLink',
     keywords: ['link', 'hyperlink', 'url', 'insert'],
   }),
-  // #COMMENTS — the ONE comment body lives in EDITOR_COMMAND_MAP
-  // (editorCommands.ts); this entry is the palette/metadata face of it.
-  // ALWAYS ENABLED (the user's ruling): a bare caret anchors the word
-  // it sits in; the body's guards (band toast, no-word toast) are the
-  // loud fallbacks, not disabled states.
+  // The one comment body lives in EDITOR_COMMAND_MAP; always enabled —
+  // the body's guards are loud fallbacks, not disabled states.
   editorCommand('addComment', {
     title: 'Add Comment',
     icon: MessageSquarePlus,
@@ -1199,13 +1108,8 @@ export const COMMANDS: CommandAction[] = [
   }),
 ];
 
-/**
- * M-IMAGES-1.5 — direct radius entry (the toolbar's input): the SAME
- * clamp law the stepper commands enforce (half the min dim), written
- * through the SAME attr path. Returns the CLAMPED value actually
- * written (or null when no image is selected) so the input can
- * re-display the truth.
- */
+/** Direct radius entry (the toolbar input): the same clamp law;
+ * returns the clamped value actually written, or null with no selection. */
 export function setImageRadiusOnSelection(value: number): number | null {
   const sel = selectedImageRef();
   if (!sel) return null;

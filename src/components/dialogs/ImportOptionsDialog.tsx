@@ -11,21 +11,9 @@ import {
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
 
-/**
- * M-DOCX — the import options surface (ruling 4). When an imported
- * Word file references fonts outside Tensor's bundled catalog, the
- * user chooses — per import — what lands in the document:
- *
- *  - KEEP ORIGINAL (default): the Word font names ride the document
- *    data, the webview renders them through its fallback chain, and a
- *    round-trip back to Word is pixel-true.
- *  - SUBSTITUTE: names rewrite to the closest bundled family, so
- *    rendering is exactly what Tensor ships (at the cost of the
- *    original name).
- *
- * Promise bridge, same shape as the export confirm dialog. No cancel:
- * the file is already chosen — the choice is which fidelity wins.
- */
+// Per-import choice for Word fonts outside the bundled catalog: keep the
+// original names (fallback rendering, exact round-trip) or substitute the
+// closest bundled family. No cancel — the file is already chosen.
 
 type FontPolicy = 'keep' | 'substitute';
 

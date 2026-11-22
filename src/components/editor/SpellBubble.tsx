@@ -15,37 +15,21 @@ interface SpellBubbleProps {
 }
 
 /**
- * THE SUGGESTION BUBBLE — GDocs-style: a plain LEFT-CLICK on a flagged
- * span opens this floating menu; the RIGHT-CLICK context menu stays for
- * the app's other actions (the explicit user ruling). Rendered by both
- * view modes at VIEWPORT coordinates (outside the paginated zoom
- * transform — the LinkBubble/FloatingToolbar chrome precedent).
- *
- * KIND-AWARE (spelling red / grammar blue):
- *  - SPELLING: suggestions + Add to Dictionary + Ignore all (word).
- *  - GRAMMAR: THE EXPLANATION (LT's message — "the issue says show
- *    why") + suggestions + Ignore rule (session, rule-scoped — grammar
- *    false positives are rule-shaped, not word-shaped). Dictionary
- *    actions hide (meaningless for grammar).
- *
- * The replacement action rides a normal PM transaction (the search
- * replace spelling: tr.insertText), so UNDO HISTORY participation is
- * by construction — Ctrl+Z restores the original text.
- *
- * Dismissal rules (all of them): apply/add/ignore (an action was
- * taken), Escape, any click outside the bubble (document pointerdown
- * — covers the painted surface, the margins, and app chrome alike),
- * and any doc change (the view's 'update' listener — typing
- * invalidates the anchored span).
+ * The suggestion bubble: a plain LEFT-CLICK on a flagged span opens it
+ * (right-click stays the context menu), at VIEWPORT coordinates outside
+ * the zoom transform. Spelling: suggestions, Add to Dictionary, Ignore
+ * all (word-scoped); grammar: explanation, suggestions, session Ignore
+ * rule (grammar false positives are rule-shaped; dictionary actions
+ * hide). Replacements ride a normal PM transaction — undoable by
+ * construction. Dismissal: action, Escape, outside click, doc change.
  */
 export function SpellBubble({ editor, error, left, top, onClose }: SpellBubbleProps) {
   const ref = useRef<HTMLDivElement>(null);
   const isGrammar = error.kind === 'grammar';
 
-  // Click-outside and Escape dismissal. Capture phase for pointerdown
-  // so we close BEFORE the surface's own mousedown caret logic runs
-  // (the open handler below then re-opens for a click on the same span
-  // — click again to toggle, GDocs behavior).
+  // Click-outside and Escape dismissal. Capture-phase pointerdown so we
+  // close BEFORE the surface's caret logic — a click on the same span
+  // then re-opens (toggle).
   useEffect(() => {
     const el = ref.current;
     const onPointerDown = (e: PointerEvent) => {
@@ -67,8 +51,8 @@ export function SpellBubble({ editor, error, left, top, onClose }: SpellBubblePr
   }, [onClose]);
 
   function applySuggestion(suggestion: string) {
-    // The search-replace spelling: a plain doc transaction through
-    // PM's own machinery — undoable, remapping, history-grouped.
+    // A plain doc transaction through PM's own machinery — undoable,
+    // remapping, history-grouped.
     editor
       .chain()
       .focus()
@@ -109,7 +93,7 @@ export function SpellBubble({ editor, error, left, top, onClose }: SpellBubblePr
       data-word={error.word}
       data-kind={error.kind}
       // The bubble is its own click territory: the surface's mousedown
-      // must not fire from inside it (LinkBubble's stopPropagation).
+      // must not fire from inside it.
       onMouseDown={(e) => e.stopPropagation()}
       className="absolute z-30 w-60 rounded-lg border border-border bg-popover p-1 text-sm shadow-md"
       style={{ left: `${left}px`, top: `${top}px` }}
@@ -120,7 +104,6 @@ export function SpellBubble({ editor, error, left, top, onClose }: SpellBubblePr
             <EyeOff size={11} />
             Grammar
           </div>
-          {/* THE EXPLANATION — the issue's explicit ask for grammar. */}
           <p className="line-clamp-3 text-xs leading-snug text-muted-foreground">
             {error.message}
           </p>

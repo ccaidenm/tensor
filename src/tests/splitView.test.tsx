@@ -9,13 +9,9 @@ import { FakeMetrics } from './fakeMetrics';
 import { settleLayout } from './harness';
 
 /**
- * #101 — SPLIT VIEW ("Two Pages"): the desk arrangement test. The
- * grid math itself lives in pageStackGrid.test.ts; this suite pins the
- * WIRING: ribbon button → config.editor.pageColumns → the warm relayout
- * → the sheets' frames AND the painted caret (the frame adjustment:
- * the column offset folded into contentBox.x at the ONE layout commit).
- * The repro doc is three hard breaks apart — one paragraph per page,
- * so page 1 (index 1) is deterministic.
+ * #101 — split view ("Two Pages"): pins the WIRING — ribbon button →
+ * config.editor.pageColumns → relayout → sheet frames + the painted
+ * caret (grid math: pageStackGrid.test.ts).
  */
 
 const button = (label: string) =>
@@ -52,8 +48,8 @@ beforeEach(() => {
 
 function harness(initialHTML: string) {
   const utils = render(
-    // The desk wrapper: the rulers' portal target (the M-RULER mount
-    // law) — the split-view ruler test needs the real desk structure.
+    // The desk wrapper: the rulers' portal target — the split-view
+    // ruler test needs the real desk structure.
     <div data-desk-wrapper className="relative">
       <div data-desk-scroll style={{ overflow: 'auto' }}>
         <Editor metrics={FakeMetrics} />
@@ -122,11 +118,9 @@ describe('View > Two Pages (split view)', () => {
     expect(px(stack, 'width')).toBe(W * 2 + GAP);
     expect(px(stack, 'height')).toBe(H * 2 + GAP);
 
-    // THE SHEET FRAME (the regression the frame adjustment must never
-    // re-break): the text canvases live INSIDE the sheet — sheet-
-    // relative — so they carry the page-local margin (96px), never the
-    // folded stack coordinate (W/2 + 96 + column). The column offset
-    // rides the SHEET's own position, never the canvas.
+    // THE SHEET FRAME: the text canvases are sheet-relative — they
+    // carry the page-local margin (96px), never the folded stack
+    // coordinate; the column offset rides the SHEET's position.
     const canvasOf = (i: number) => sheet(i)!.querySelector('canvas') as HTMLCanvasElement;
     expect(canvasOf(0).style.left).toBe('96px');
     expect(canvasOf(1).style.left).toBe('96px');
@@ -169,11 +163,9 @@ describe('View > Two Pages (split view)', () => {
     const caretAfter = document.querySelector('[data-testid="synthetic-caret"]') as HTMLElement;
     const leftAfter = parseFloat(caretAfter.style.left!);
     const topAfter = parseFloat(caretAfter.style.top!);
-    // The SAME caret, SAME doc: page 1 left the second stack slot for
-    // the first row's second column — the column offset (+W+GAP) folds
-    // into its frame's contentBox.x, the row top (-H-GAP) replaces the
-    // stack stride. The engine facts (the caret's x/y inside the page)
-    // are untouched.
+    // The SAME caret, SAME doc: the column offset (+W+GAP) folds into
+    // the frame's contentBox.x; the row top (-H-GAP) replaces the
+    // stack stride. The engine facts (caret x/y inside the page) stay.
     expect(leftAfter - leftBefore).toBeCloseTo(W + GAP, 5);
     expect(topAfter - topBefore).toBeCloseTo(-(H + GAP), 5);
   });
@@ -259,10 +251,9 @@ describe('View > Two Pages (split view)', () => {
       return editor!.state.doc.resolve(sel.from).parent.textContent;
     };
 
-    // The gap's SECOND half (y = 1080 ∈ 1056+gap/2..1088) below the
-    // LEFT column → the next row's LEFT page ('three' — the doc's last
-    // page sits alone in row 1, so the right column's gap click ALSO
-    // clamps to it: the nearest content).
+    // The gap's SECOND half (y=1080) below the LEFT column → the next
+    // row's LEFT page ('three' — the last page sits alone in row 1, so
+    // the right column's gap click also clamps to it).
     act(() => {
       fireEvent.mouseDown(wrapper, { clientX: 400, clientY: 1080, button: 0 });
       fireEvent.mouseUp(wrapper, { clientX: 400, clientY: 1080 });
@@ -292,10 +283,9 @@ describe('View > Two Pages (split view)', () => {
     await settleLayout();
 
     // TWO HORIZONTAL strips: the desk-wide chrome bar keeps its canvas
-    // over column 0 (jsdom's zero-width desk puts the stack at pageLeft
-    // 0 — the canvas overhangs LABEL_PAD left of it); the transparent
-    // split strip's container starts at column 1's left minus the same
-    // overhang (848 − 12) and spans the strip plus both overhangs.
+    // over column 0 (the canvas overhangs LABEL_PAD left of the stack);
+    // the split strip starts at 848 − 12 and spans the strip plus
+    // both overhangs.
     const primaryCanvas = document.querySelector(
       '[data-testid="ruler"] canvas',
     ) as HTMLElement;
@@ -314,10 +304,9 @@ describe('View > Two Pages (split view)', () => {
     expect(rightRuler.style.width).toBe('16px');
 
     // THE STRIP'S HANDLES anchor to the PAGE-LOCAL frame (the fold's
-    // inverse): the margin grabbers sit at the page's own content edges
-    // (96px / 720px) INSIDE the 816px inner. The folded geometry
-    // (contentBox.x = 944) would push them ~944px into the strip — off
-    // the desk entirely — and mute every tick (no body-band two-tone).
+    // inverse): grabbers at the page's own content edges (96/720px).
+    // The folded geometry (contentBox.x = 944) would push them off
+    // the desk entirely.
     const stripLeftHandle = splitBar.querySelector(
       '[data-testid="ruler-margin-left"]',
     ) as HTMLElement;
@@ -348,11 +337,9 @@ describe('View > Two Pages (split view)', () => {
       '[data-testid="paginated-zoom-wrapper"]',
     ) as HTMLElement;
 
-    // THE REGRESSION (the y-only tops walk): the selection helpers
-    // derived their own stack-stride tops — page 1's bands painted one
-    // ROW down (into empty desk), so the selection was invisible and
-    // the toolbar anchored off-view. The grid's row tops ride the
-    // helpers now.
+    // THE REGRESSION: the helpers once derived stack-stride tops —
+    // page 1's bands painted one ROW down (into empty desk), so the
+    // selection was invisible and the toolbar anchored off-view.
     act(() => {
       fireEvent.mouseDown(wrapper, { clientX: 950, clientY: 104, button: 0 });
       fireEvent.mouseMove(window, { clientX: 968, clientY: 106 });
@@ -373,22 +360,19 @@ describe('View > Two Pages (split view)', () => {
       expect(left).toBeGreaterThanOrEqual(944); // the second column's frame
     }
 
-    // The floating toolbar surfaces at the settled selection.
     expect(document.querySelector('[data-testid="floating-toolbar"]')).not.toBeNull();
   });
 
   it('rides the caret across the page break: a block spanning both pages puts the model on the caret strip', async () => {
-    // One paragraph long enough to flow from page 0 onto page 1 — its
-    // FIRST line sits on page 0 while the caret sits on page 1. The
-    // model (indent markers, tab stops) must key on the CARET'S OWN
-    // line, or it pins to the left ruler forever.
+    // One paragraph flowing from page 0 onto page 1 — the FIRST line
+    // sits on page 0 while the caret sits on page 1. The model must
+    // key on the CARET'S OWN line, or it pins to the left ruler.
     const { editor } = harness(`<p>${'a'.repeat(62 * 60)}</p>`);
     await settleLayout();
     act(() => {
       fireEvent.click(button('Two Pages')!);
     });
     await settleLayout();
-    // The doc really spans: page 1's sheet is there with content.
     expect(document.querySelectorAll('[data-page-index]').length).toBeGreaterThanOrEqual(2);
 
     act(() => {

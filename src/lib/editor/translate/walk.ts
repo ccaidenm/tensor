@@ -4,26 +4,9 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import type { TranslateBlock } from './types';
 
 /**
- * THE SCOPE WALK — which top-level blocks a translation run covers.
- *
- * THE EXPLICIT CONTRACT (docs/markdown.md's habit — decide and
- * document what travels and what is intentionally left behind):
- *
- *  TRANSLATED: paragraph, heading, blockquote, bullet/ordered list,
- *              code-free table — top-level blocks, HTML-serialized by
- *              the schema's own DOMSerializer so the instance receives
- *              exactly the tags the document model speaks (and the
- *              response re-parses into the same model).
- *
- *  SKIPPED (never sent, never touched): header/footer BAND blocks
- *  (generated chrome), reference tables (generator-owned derived
- *  content), equations (math, not language), code blocks (code, not
- *  prose), page breaks, images, horizontal rules — and any block
- *  whose text is empty.
- *
- * The granularity is TOP-LEVEL blocks: a list's items or a table's
- * cells travel as part of their block, so nothing is ever re-nested
- * by hand and the interleaved insert is a sibling of a valid block.
+ * THE SCOPE WALK — TRANSLATABLE top-level blocks only (the set below);
+ * bands, reference tables, equations, code blocks, breaks, images, rules,
+ * and text-empty blocks are intentionally skipped. Lists travel whole.
  */
 
 /** Top-level node types a translation run touches. */
@@ -54,10 +37,8 @@ export function hasSelection(editor: Editor): boolean {
 
 /**
  * Collect the run's blocks. Selection scope covers every TRANSLATABLE
- * top-level block INTERSECTING the selection (a partially selected
- * paragraph translates whole — the panel discloses this). A CARET
- * touches nothing: selection scope with an empty selection collects
- * nothing (the panel's Selection button is disabled, not lying).
+ * block INTERSECTING the selection (a partially selected paragraph
+ * translates whole); an empty selection collects nothing.
  */
 export function collectBlocks(editor: Editor, scope: TranslateScope): TranslateBlock[] {
   const blocks: TranslateBlock[] = [];

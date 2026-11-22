@@ -13,21 +13,9 @@ export * from './types';
 import type { PrintElement, PrintImage, PrintPage } from './types';
 
 /**
- * M-PRINT (#43/#39) — THE PRINT RENDERER: the engine's placement facts
- * → positioned print elements. ONE walk, THREE consumers (the preview,
- * window.print, the PDF synthesizer). THE ONE-GEOMETRY LAW: every
- * position derives through the SAME functions the canvas paint uses —
- * alignOffset, fieldShiftBefore, fitDownImage — so printed output
- * matches the on-screen pagination by construction, which is #43's
- * core acceptance criterion.
- *
- * WHAT DOES NOT PRINT (the canvas/paint-vs-print split — ink vs.
- * editing state): NPC substitutes (¶/·/→), spell squiggles, search
- * highlights, selection, the muted-band desaturation (bands print
- * FULL ink — mute is an editing state), reference field borders
- * (selection-driven chrome), line-number gutters (chrome). WHAT
- * DOES: leader dots (part of the document's ink — the reference
- * tables' page numbers print resolved).
+ * #43/#39 — the print renderer: engine placement facts → positioned
+ * print elements, via the canvas's own geometry functions so output
+ * matches the screen. Only document ink prints — never editing state.
  */
 
 const DEFAULT_TEXT_COLOR = '#000';
@@ -40,7 +28,7 @@ const LIST_INDENT_PX = 32;
 export interface PrintRenderInput {
   result: LayoutResult;
   blocks: readonly AdapterBlock[];
-  /** The REAL metrics (the on-screen singleton) — identical layout. */
+  /** The real metrics (the on-screen singleton) — identical layout. */
   metrics: TextMetricsPort;
   /** sha → renderable URL (the bitmap cache's img.src). */
   bitmapSrc: (sha: string) => string | undefined;
@@ -62,7 +50,7 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
     const geo = result.pages[page.index]!;
     const cb = geo.contentBox;
 
-    // 1. TABLE CELL FILLS (under everything).
+    // 1. Table cell fills (under everything).
     for (const p of result.placed) {
       if (p.kind !== 'tableCell' || p.pageIndex !== page.index) continue;
       if (!p.cell?.fill) continue;
@@ -76,10 +64,8 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
       });
     }
 
-    // 2. TABLE BORDERS — the merged boundary segments (shared inner
-    //    edges stroke ONCE; rowspan slice internals vanish — the
-    //    TableCellLayer algorithm, mirrored). The BORDER PRESET is the
-    //    table's own (all/none/outer — 'outer' strokes the frame only).
+    // 2. Table borders — merged boundary segments (shared inner
+    //    edges stroke once; rowspan slice internals vanish).
     const cellRects = result.placed.filter(
       (p) => p.kind === 'tableCell' && p.pageIndex === page.index && p.cell,
     );
@@ -106,14 +92,14 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
       }
     }
 
-    // 3. BEHIND FLOATS (under the text ink).
+    // 3. Behind floats (under the text ink).
     for (const p of result.placed) {
       if (p.kind !== 'image' || p.pageIndex !== page.index) continue;
       if (p.z !== 'behind') continue;
       page.elements.push(printImageOf(p, cb, bitmapSrc));
     }
 
-    // 4. THE LINES (doc order): block decor under text, then ink.
+    // 4. Lines (doc order): block decor under text, then ink.
     for (const line of result.lines) {
       if (line.pageIndex !== page.index) continue;
       const block = byId.get(line.blockId);
@@ -121,7 +107,7 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
       renderLine(page.elements, line, block, cb, metrics, bitmapSrc, fieldTotal, page.index, lineColumnFrame(geo, line));
     }
 
-    // 5. EQUATIONS (block atoms; DOM/KaTeX above the decor).
+    // 5. Equations (block atoms; DOM/KaTeX above the decor).
     for (const p of result.placed) {
       if (p.kind !== 'equation' || p.pageIndex !== page.index) continue;
       page.elements.push({
@@ -136,7 +122,7 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
       });
     }
 
-    // 6. BLOCK IMAGES + FRONT FLOATS (above text).
+    // 6. Block images + front floats (above text).
     for (const p of result.placed) {
       if (p.kind !== 'image' || p.pageIndex !== page.index) continue;
       if (p.z === 'behind') continue;
@@ -148,9 +134,8 @@ export function renderPrintDocument(input: PrintRenderInput): PrintPage[] {
 }
 
 /** One line → elements (the paintLines mirror, positioned not drawn).
- *  `columnFrame` (#74): the line's COLUMN frame (content-box-relative
- *  left/width) — the decor surfaces and the align container are the
- *  column's; absent ≡ the content box (single-column, bit-identical). */
+ *  `columnFrame` (#74): the line's column frame — the decor surfaces
+ *  and align container are the column's; absent ≡ the content box. */
 function renderLine(
   into: PrintElement[],
   line: LineBox,
@@ -168,8 +153,8 @@ function renderLine(
   const baselineY = cb.y + line.rect.y + line.baseline;
   const baseX = cb.x + line.rect.x + off;
 
-  // BLOCK DECOR (under the line's ink — element order IS paint order).
-  // #74 — the tints span the COLUMN, not the content box.
+  // Block decor (under the line's ink — element order = paint order).
+  // #74 — the tints span the column, not the content box.
   if (block.paint?.blockquote) {
     into.push({
       kind: 'rect',
@@ -199,8 +184,7 @@ function renderLine(
     });
   }
 
-  // REFERENCE LEADER DOTS (real document ink — resolved page numbers
-  // print; the field border does not).
+  // Reference leader dots (real document ink; the field border does not print).
   if (block.reference && block.reference.entries.length > 0 && line.segments.length > 1) {
     renderLeaderDots(into, line, block, baseX, baselineY, metrics);
   }
@@ -215,8 +199,8 @@ function renderLine(
     const decor = block.runDecor[seg.runIndex] ?? ({} as RunDecor);
 
     if (run.kind === 'inlineImage') {
-      // Inline objects: baseline-seated, the engine's clamp.
-      // #74 — the base wrap is the COLUMN's width (the engine's clamp
+      // Inline objects: baseline-seated, the engine's clamp. #74 —
+      // the base wrap is the column's width (the engine's clamp
       // input); the cell lane keeps its own width.
       const wrap = line.tableCell ? line.tableCell.width : columnWidth - (block.indentLeft ?? 0) - (block.indentRight ?? 0);
       const dims = fitDownImage(run.width, run.height, wrap, Infinity);
@@ -238,9 +222,9 @@ function renderLine(
       continue;
     }
 
-    // THE PAGE FIELD: the print DOM positions per page — the resolved
-    // string renders NATIVELY (the slot stays the placeholder's width,
-    // the shift closes the slack — the same ink ruling as the canvas).
+    // The page field: the resolved string renders natively; the slot
+    // stays the placeholder's width and the shift closes the slack
+    // (the same ink rule as the canvas).
     if (run.fieldKind) {
       const resolved =
         run.fieldKind === 'pages' ? String(fieldTotal) : String(pageIndex + 1);
@@ -288,7 +272,7 @@ function renderLine(
     });
   }
 
-  // LIST MARKER (the block's first line, in the indent gutter).
+  // List marker (the block's first line, in the indent gutter).
   const marker = block.paint?.marker;
   if (marker && line.lineIndex === 0) {
     const markerStyle = (block.runs.find((r) => r.kind !== 'inlineImage') as
@@ -316,8 +300,8 @@ function renderLine(
     });
   }
 
-  // RULE (horizontalRule): 1px across the indent-narrowed width —
-  // #74: to the COLUMN's right edge.
+  // Rule (horizontalRule): 1px across the indent-narrowed width —
+  // #74: to the column's right edge.
   if (block.paint?.rule) {
     into.push({
       kind: 'line',
@@ -375,7 +359,7 @@ function renderLeaderDots(
   });
 }
 
-/** THE MERGED BORDER SEGMENTS (the TableCellLayer algorithm). */
+/** The merged border segments (the TableCellLayer algorithm). */
 interface BorderSeg {
   at: number;
   a: number;
@@ -403,14 +387,11 @@ function mergedBorderSegments(
     if (!p.cell) continue;
     const { x, y, width, height } = p.rect;
     const multi = (groups.get(`${p.cell.row}:${p.cell.col}`) ?? 0) > 1;
-    const isLeft = x;
-    const isTop = y;
     raw.push({ vertical: true, at: x, a: y, b: y + height, internal: false });
     raw.push({ vertical: true, at: x + width, a: y, b: y + height, internal: false });
     // Multi-slice cells: only the group's outermost y edges are real
     // boundaries — the merge dedupes exact-touching segments; the
     // internal flag drops a rowspan's interior horizontal edges.
-    void isLeft; void isTop;
     raw.push({ vertical: false, at: y, a: x, b: x + width, internal: multi });
     raw.push({ vertical: false, at: y + height, a: x, b: x + width, internal: multi });
   }

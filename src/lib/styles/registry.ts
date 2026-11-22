@@ -16,24 +16,10 @@ import {
 } from './builtins';
 
 /**
- * THE STYLE REGISTRY — three layers merged by id:
- *   code builtins ← global styles.json ← per-document metadata
- * (doc overrides global; global overrides builtins). Custom ids are
- * free-form; built-in ids (types.ts BUILTIN_IDS) can be EDITED but
- * never DELETED and never re-id'd (rename changes name only).
- *
- * EDIT ROUTING (v1 ruling, documented): dialog edits, creations, and
- * deletions write the GLOBAL layer (styles.json — styles are app-wide,
- * the Word-template model); the DOC layer is what the opened file
- * carried and is written back verbatim on save (round-trip). Doc
- * overrides still win at merge, so a hand- or future-UI-authored
- * per-doc definition beats the global one.
- *
- * EPOCH: any definition mutation bumps `epoch` — the registry-epoch
- * mirror of the engine's baseStyleHash. Consumers (adapter cache,
- * paginated relayout, BlockCanvas repaint, pageless stylesheet)
- * rebuild on change; the engine decides per-block what re-breaks via
- * contentHash.
+ * Three layers merged by id: code builtins ← global styles.json ←
+ * per-doc metadata. Dialog edits write the global layer (the Word-
+ * template model); the doc layer round-trips verbatim on save. Any
+ * mutation bumps `epoch` — the signal consumers rebuild on.
  */
 
 const STYLES_FILENAME = 'styles.json';
@@ -76,12 +62,9 @@ function layersFromDefs(defs: StyleDefinition[]): Record<string, StyleDefinition
   return Object.fromEntries(defs.map((d) => [d.id, d]));
 }
 
-/** The missing-id lookup path. A styleId with no definition resolves
- * to null (→ baseline rendering) after ONE dev warning per id per
- * session — never silent, never spammy. Reserved keyboard-heading ids
- * (heading-4..6, builtins.ts) fall back SILENTLY: they are produced by
- * the Heading node kind, not referenced by user intent.
- * Pure (no store import) so the adapter can consume it. */
+/** Unknown styleId → null (baseline rendering) after one dev warning
+ *  per id per session; heading-4..6 fall back silently (Heading node
+ *  output, not user intent). Pure — no store import. */
 const warnedMissingIds = new Set<string>();
 
 export function lookupStyle(
@@ -137,9 +120,8 @@ async function stylesFilePath(): Promise<string> {
 }
 
 async function writeGlobalFile(state: StyleRegistryState): Promise<void> {
-  // Outside the Tauri webview (vitest/jsdom, plain browser) there is
-  // no appConfigDir — skip silently there; the layer stays in-session
-  // and every real failure below stays loud.
+  // Outside the Tauri webview there is no appConfigDir — skip
+  // silently; every real failure below stays loud.
   if (!('__TAURI_INTERNALS__' in globalThis)) return;
   try {
     const file: StylesFile = { version: 1, definitions: Object.values(state.global) };
@@ -173,12 +155,9 @@ export const useStyleRegistryStore = create<StyleRegistryState>((set, get) => ({
           set({ status: 'error' });
           return;
         }
-        // EPOCH BUMP REQUIRED: initial relayouts run BEFORE this
-        // async load completes, caching conversions under the
-        // builtins-only registry; swapping the definitions without a
-        // bump would serve those stale conversions forever (the
-        // adapter cache keys on the epoch — the same contract as any
-        // other definition edit).
+        // The epoch bump is required: initial relayouts cache
+        // conversions under the builtins-only registry before this
+        // async load completes — without a bump they stay stale forever.
         set((s) => ({
           global: layersFromDefs(parsed.data.definitions),
           merged: mergeLayers(layersFromDefs(parsed.data.definitions), s.doc),
@@ -187,9 +166,8 @@ export const useStyleRegistryStore = create<StyleRegistryState>((set, get) => ({
         }));
         return;
       }
-      // First run: seed the file with the stamp-era 'Hyperlink' entry
-      // as a normal custom (builtins.ts HYPERLINK_SEED receipt).
-      // Epoch bump: same stale-conversion contract as the parse path.
+        // First run: seed the file with the 'Hyperlink' entry
+        // (builtins.ts HYPERLINK_SEED).
       const seeded = { hyperlink: HYPERLINK_SEED };
       set((s) => ({
         global: seeded,

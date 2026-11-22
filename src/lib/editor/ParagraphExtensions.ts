@@ -26,21 +26,9 @@ const INDENT_STEP_PX = 32;
 const MAX_INDENT_PX = MAX_INDENT * INDENT_STEP_PX;
 
 /**
- * M-FLOW — PARAGRAPH PAGINATION FLAGS: the engine FlowPolicy's six
- * fields under their OOXML-mirrored names (w:keepNext / w:keepLines /
- * w:widowControl / w:pageBreakBefore round-trip through DOCX;
- * keepPrevious and breakAfter are the Tensor superset — the engine's
- * two extra bond/break spellings, .wpdoc-native). null = UNSET at
- * every use site (the PM JSON round-trip convention): the flag
- * inherits the STYLE tier (M-STYLES) and, for widowControl, the
- * document-level default (engine opts — on). Pagination inputs ONLY:
- * the pageless editor never renders them as CSS (no UA property
- * exists for "keep with next"); the paginated view consumes them
- * through the adapter into engine `flow`. Clipboard spelling:
- * data-keep-next / data-keep-lines / data-keep-previous /
- * data-widow-control / data-break-before / data-break-after (the
- * ImageNode data-keep-next precedent), so flags survive intra-app
- * copy/paste.
+ * Pagination flags (engine FlowPolicy, OOXML-mirrored names; keepPrevious
+ * and breakAfter are the Tensor superset). null = UNSET — inherits the
+ * style tier / doc default; the data-* spelling survives copy/paste.
  */
 export type ParagraphFlowAttrs = {
   keepNext?: boolean | null;
@@ -90,12 +78,9 @@ const flowAttributes = {
 };
 
 /**
- * M-FLOW — the TABLE-level subset: the five flags meaningful for a
- * table block (keepLines = R-ATOMIC band-wise, keepNext/keepPrevious
- * bond the table to a neighbor, the forced breaks close pages around
- * it). widowControl is EXCLUDED — the engine ignores boundary
- * minimums between a table's bands (rows break naturally), so the
- * flag is inert there and never offered.
+ * The table-level subset: the five flags meaningful for a table block.
+ * widowControl is EXCLUDED — the engine ignores boundary minimums
+ * between a table's bands, so the flag is inert there.
  */
 export const tableFlowAttributes = {
   keepNext: flowAttributes.keepNext,
@@ -119,21 +104,9 @@ export const FLOW_FLAG_KEYS = [
 export type FlowFlagKey = (typeof FLOW_FLAG_KEYS)[number];
 
 /**
- * M-FLOW — the ribbon's mixed-state reader: for each flow flag, the
- * selection's uniform EFFECTIVE state (the style tier resolved through
- * resolveFlowTier — the SAME cascade the adapter runs), or 'mixed'
- * when paragraphs in the selection disagree (the indeterminate-
- * checkbox spelling). The DEFAULT-ON / DEFAULT-OFF split mirrors
- * Word's dialog: widowControl is ON when unset (null = inherit the
- * document default, true); the keep flags and forced breaks are OFF
- * when unset. Top-level paragraphs and headings only — the same
- * targeting contract as the writer and clearFormatting (header/footer
- * band paragraphs never paginate, so flags there are inert and the UI
- * never reports them).
- *
- * `resolveStyle` supplies the STYLE TIER (the ribbon passes the
- * registry's merged definitions + the node's styleId; omitted =
- * attr-only, the cascade floor — the unit-test spelling).
+ * The ribbon's mixed-state reader: each flag's uniform EFFECTIVE state
+ * (the same cascade the adapter runs) or 'mixed'; widowControl is ON
+ * when unset, the rest OFF. Top-level paragraphs/headings only.
  */
 export function flowSelectionState(
   editor: Editor,
@@ -175,13 +148,9 @@ export function flowSelectionState(
 }
 
 /**
- * M6/M-FLOW — the ribbon's line-spacing reader: the selection's uniform
- * EFFECTIVE multiplier, or null when the selection disagrees or any
- * block carries a px spelling (a custom height is never a preset).
- * Every paragraph ALWAYS has a value (the radio group's law): direct
- * attr over the style tier over the 1.0 default — the same cascade
- * flowSelectionState resolves, read by the popover's radio group. No
- * selection targets → the default 1.0 ('Single' checks).
+ * The ribbon's line-spacing reader: the selection's uniform EFFECTIVE
+ * multiplier, or null when it disagrees or any block carries a px
+ * spelling. Cascade: direct attr over style tier over the 1.0 default.
  */
 export function lineSpacingSelectionState(
   editor: Editor,
@@ -227,13 +196,9 @@ const lineHeightAttribute = {
 };
 
 /**
- * FIRST-LINE INDENT (M6.2): px, may be NEGATIVE (hanging indent).
- * Round-trips through CSS text-indent — the pageless editor renders it
- * natively (positive text-indent = first line out; negative under a
- * padding-left = hanging), and the adapter maps it to the engine's
- * firstLineIndent (identical semantics: line 0 sits at
- * indentLeft + firstLineIndent and wraps at its own width). null =
- * unset (no text-indent style).
+ * FIRST-LINE INDENT: px, may be NEGATIVE (hanging indent). Round-trips
+ * through CSS text-indent (the pageless spelling) and the engine's
+ * firstLineIndent (identical semantics); null = unset.
  */
 const firstLineIndentAttribute = {
   firstLineIndent: {
@@ -243,8 +208,7 @@ const firstLineIndentAttribute = {
       if (!raw) return null;
       const v = parseFloat(raw);
       if (!Number.isFinite(v)) return null;
-      // pt at the data boundary like every other CSS unit here
-      // (M6-PRE: pt at the chrome, px in the core).
+      // pt at the data boundary — the chrome speaks pt, the core px.
       return raw.trim().endsWith('pt') ? Math.round(v * (96 / 72)) : v;
     },
     renderHTML: (attributes: { firstLineIndent?: number | null }) => {
@@ -255,11 +219,9 @@ const firstLineIndentAttribute = {
 };
 
 /**
- * LEGACY `indent` attr (steps of 32px): the pre-M6.2 spelling, kept
- * for .wpdoc/HTML round-trips of old files. The commands below no
- * longer write it; the adapter folds it into indentLeft (steps × 32,
- * additive), and the first indent command press MIGRATES it away (see
- * currentIndentLeft).
+ * LEGACY `indent` attr (steps of 32px): kept for round-trips of old
+ * files; the commands no longer write it. The adapter folds it into
+ * indentLeft, and the first indent press migrates it away.
  */
 const indentAttribute = {
   indent: {
@@ -275,11 +237,9 @@ const indentAttribute = {
   },
 };
 
-/** The paragraph's EFFECTIVE left indent (px): the indentLeft attr plus
- * the legacy `indent` steps folded in. One writer (indentLeft), one
- * reader (this — the indent commands AND the M-RULER projection both
- * read through it, so the legacy fold can never fork), migration on
- * the first command press. */
+/** The paragraph's EFFECTIVE left indent (px): indentLeft plus the
+ *  legacy `indent` steps folded in — the ONE reader (commands and the
+ *  ruler projection), so the legacy fold can never fork. */
 export function currentIndentLeft(node: { attrs?: Record<string, unknown> }): number {
   const left = typeof node.attrs?.indentLeft === 'number' && Number.isFinite(node.attrs.indentLeft)
     ? node.attrs.indentLeft
@@ -329,15 +289,9 @@ const spacingAttributes = {
 };
 
 /**
- * TAB STOPS (M-RULER Phase 3/3.5): the engine's TabStop objects — px
- * from the CONTENT-BOX LEFT EDGE (margin-relative: indent edits never
- * move tab stops), each with an alignment kind (left/center/right —
- * the context menu's choice). Sorted ascending by position, deduped,
- * null = none. Round-trips through `data-tab-stops="96:left,192:right"`
- * (bare numbers parse as left stops, for tolerance); .wpdoc rides the
- * docJSON free. The breaker advance rule (and with it the Tab keymap's
- * mid-line branch) lands in Phase 4 — until then the attr is
- * ruler-visible data only.
+ * TAB STOPS: the engine's TabStop objects — px from the CONTENT-BOX
+ * LEFT EDGE (indent edits never move stops), sorted/deduped, null =
+ * none. Round-trips via data-tab-stops; .wpdoc rides the docJSON.
  */
 export function normalizeTabStops(stops: unknown): TabStop[] | null {
   if (!Array.isArray(stops)) return null;
@@ -396,14 +350,9 @@ const tabStopsAttribute = {
 };
 
 /**
- * M-STYLES: the paragraph's STYLE IDENTITY — a reference into the
- * style registry, never a bundle of stamped attrs. Non-optional
- * INVARIANT: every paragraph carries a styleId; old documents get it
- * via the attr default ('normal') on load — no migration pass. The
- * pageless render path consumes the class (wp-style-{id}) through the
- * registry-generated stylesheet; direct attrs (inline styles from the
- * attribute renderers above) beat the class by CSS construction,
- * which is the pageless spelling of the cascade (direct > style).
+ * The paragraph's STYLE IDENTITY — a registry reference, not stamped
+ * attrs; every paragraph carries one (default 'normal' — no migration
+ * pass). Direct attrs beat the class: the cascade (direct > style).
  */
 const styleIdAttribute = (fallback: string) => ({
   styleId: {
@@ -417,13 +366,9 @@ const styleIdAttribute = (fallback: string) => ({
 });
 
 /**
- * M-REFS — the ENTRY ID: a paragraph inside a referenceTable container
- * carries its scan entry's reconciliation key (the target's stable
- * blockId; the term itself for index entries; null = the placeholder).
- * The generator (lib/references/generator.ts) matches children by it —
- * an unchanged key is NEVER rewritten, so the user's formatting on the
- * entry survives every refresh. Pure model identity: no renderHTML,
- * never DOM ink, never clipboard noise (the attr round-trips null).
+ * The ENTRY ID: a referenceTable paragraph carries its scan entry's
+ * reconciliation key — an unchanged key is never rewritten, so the
+ * user's formatting survives refresh. Round-trips null, never DOM ink.
  */
 const refIdAttribute = {
   refId: {
@@ -449,11 +394,9 @@ export const ParagraphWithExtras = Paragraph.extend({
   },
 });
 
-/** The heading tier carries `heading-{level}` as its style identity
- * (attr default per the M-STYLES ruling; HeadingSync maintains the
- * alignment reactively). The adapter resolves headings through
- * `heading-{level}` — the attr's guaranteed twin — so a pre-sync node
- * can never render under the wrong tier. */
+/** Headings carry `heading-{level}` as their style identity (attr
+ *  default; HeadingSync maintains it reactively) — the adapter resolves
+ *  through the same tier, so a pre-sync node never renders wrong. */
 export const HeadingWithExtras = Heading.extend({
   addAttributes() {
     return {
@@ -466,14 +409,9 @@ export const HeadingWithExtras = Heading.extend({
 });
 
 /**
- * M-HEADER-FOOTER-3 — the caret's RULER-EDITABLE PARAGRAPH: the block
- * whose attrs the ruler's tab-stop/indent writers target. Top-level
- * paragraphs (body) and BAND-container children (headerBlock/footerBlock
- * — M-3: `$from.before(1)` is the CONTAINER there, so the old spelling
- * no-oped) qualify; list-item and blockquote paragraphs do NOT (Word:
- * the ruler is margins-only there). Shared by the commands below and
- * the ruler's model derivation (lib/paginated/ruler.ts) — one
- * acceptance rule, no fork.
+ * The caret's RULER-EDITABLE PARAGRAPH: top-level paragraphs and band
+ * children qualify; list-item/blockquote paragraphs do NOT (ruler is
+ * margins-only there). One acceptance rule, shared commands + ruler.
  */
 export function caretEditableParagraph(
   $from: { depth: number; node(d: number): { type: { name: string } } | null },
@@ -508,14 +446,9 @@ export const ParagraphExtraCommands = Extension.create({
           commands.focus() &&
           ['paragraph', 'heading'].every((type: string) => commands.resetAttributes(type, 'lineHeight')),
 
-      // TAB STOPS (M-RULER Phase 3): ONE writer — the tabStops attr, px
-      // content-box-relative, normalized (sorted, deduped, null when
-      // empty) on the way in. Targets the CARET's block for an empty
-      // selection and every top-level paragraph overlapped by a range
-      // selection (Word semantics: a selection applies to all of them).
-      // Skips writes that wouldn't change anything, so the ruler's
-      // release commit stays idempotent and undo stays one-step-per-
-      // gesture.
+      // TAB STOPS: ONE writer — the tabStops attr, normalized on the way
+      // in. Caret's block (empty selection) or every overlapped top-level
+      // paragraph (range); no-change writes skipped (one undo per gesture).
       setTabStops:
         (stops: TabStop[]) =>
         ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
@@ -523,10 +456,8 @@ export const ParagraphExtraCommands = Extension.create({
           const { empty, from, to, $from } = tr.selection;
           const targets: Array<{ pos: number; node: any }> = [];
           if (empty) {
-            // M-HEADER-FOOTER-3: the caret's RULER-EDITABLE paragraph —
-            // `$from.before(1)` is the BAND CONTAINER for header/footer
-            // paragraphs, so the old spelling no-oped there (the
-            // "clicking the ruler never inserts" bug).
+            // `$from.before(1)` is the BAND CONTAINER here, not the
+            // paragraph — resolve through caretEditableParagraph.
             const hit = caretEditableParagraph($from);
             if (hit) targets.push({ pos: hit.pos, node: hit.node });
           } else {
@@ -552,19 +483,16 @@ export const ParagraphExtraCommands = Extension.create({
           return changed;
         },
 
-      // INDENT DRAG WRITER (M-RULER: the indent markers' handles): the
-      // same targeting contract as setTabStops — the CARET's block for
-      // an empty selection, every top-level paragraph overlapped by a
-      // range selection (Word semantics). Absolute px values (the
-      // dragged marker's final position), skipped when nothing changes
-      // so gestures stay idempotent and one-undo-step-per-gesture.
+      // INDENT DRAG WRITER: same targeting as setTabStops; absolute px
+      // values, no-change writes skipped (idempotent, one undo step per
+      // gesture).
       setIndents:
         (indents: { indentLeft?: number; indentRight?: number; firstLineIndent?: number }) =>
         ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
           const { empty, from, to, $from } = tr.selection;
           const targets: Array<{ pos: number; node: any }> = [];
           if (empty) {
-            // M-HEADER-FOOTER-3: band-aware (see setTabStops).
+            // Band-aware (see setTabStops).
             const hit = caretEditableParagraph($from);
             if (hit) targets.push({ pos: hit.pos, node: hit.node });
           } else {
@@ -589,14 +517,9 @@ export const ParagraphExtraCommands = Extension.create({
           return changed;
         },
 
-      // M-FLOW — the pagination flags writer: the SAME targeting
-      // contract as clearFormatting (every top-level paragraph/heading
-      // overlapped by the selection; the caret's own block for an
-      // empty selection — Word's dialog semantics: a toggle applies to
-      // all of them). Partial writes merge over the current attrs, so
-      // the popover's checkboxes are independent; null = unset
-      // (inherit the style tier / the document default). No-op writes
-      // are skipped (idempotent gestures, one undo step per toggle).
+      // The pagination flags writer: same targeting as clearFormatting;
+      // partial writes merge over current attrs (checkboxes are
+      // independent); null = unset; no-change writes skipped.
       setFlowAttrs:
         (flow: ParagraphFlowAttrs) =>
         ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
@@ -622,11 +545,9 @@ export const ParagraphExtraCommands = Extension.create({
           return changed;
         },
 
-      // INDENT COMMANDS (M6.2): ONE writer — the indentLeft attr, in
-      // px, stepped by INDENT_STEP_PX (32, the historical step, now in
-      // px on the px attr the ribbon input shows). The legacy `indent`
-      // attr is folded in and cleared on the first press (migration),
-      // so command, ribbon, engine field, and adapter all agree.
+      // INDENT COMMANDS: ONE writer — the indentLeft attr, px, stepped
+      // 32. The legacy `indent` attr is folded in and cleared on the
+      // first press (migration).
       increaseIndent:
         () =>
         ({ tr, state, dispatch }: { tr: any; state: any; dispatch: any }) => {
@@ -668,16 +589,9 @@ export const ParagraphExtraCommands = Extension.create({
       clearFormatting:
         () =>
         ({ editor, tr, state, dispatch }: { editor: any; tr: any; state: any; dispatch: any }) => {
-          // Word semantics: Clear Formatting resets the STYLE, not
-          // just the direct props — headings convert to paragraphs
-          // under styleId 'normal' (M-STYLES; the dropdown's apply
-          // path shares the rule).
-          //
-          // Direct tr manipulation, NOT a nested editor.chain(): a
-          // nested chain dispatches a second transaction while this
-          // command's tr is pending ("applying a mismatched
-          // transaction"), and the node-type conversion below makes
-          // that combination throw — pinned by the styles-model suite.
+          // Word semantics: resets the STYLE — headings become
+          // paragraphs under styleId 'normal'. Direct tr, NOT a nested
+          // chain: a second dispatch against the pending tr throws.
           const { empty, ranges } = tr.selection;
           if (!empty) {
             const clearable = Object.values(editor.schema.marks).filter(
@@ -707,8 +621,7 @@ export const ParagraphExtraCommands = Extension.create({
                 indent: 0,
                 textAlign: null,
                 styleId: 'normal',
-                // M-FLOW: pagination flags are paragraph formatting —
-                // Clear Formatting resets them too (Word's rule).
+                // Pagination flags are paragraph formatting — reset too (Word's rule).
                 keepNext: null,
                 keepLines: null,
                 keepPrevious: null,
@@ -726,27 +639,9 @@ export const ParagraphExtraCommands = Extension.create({
 
   addKeyboardShortcuts() {
     /**
-     * TAB KEYMAPS (P1 semantics — receipts first, wiring second):
-     *  - LIST (receipt: ListItem's Tab→sinkListItem / Shift-Tab→
-     *    liftListItem are alive, verified empirically): the list
-     *    extensions register before this one, so inside a list their
-     *    handlers win. The guard below covers the first-item case
-     *    where their sink declines and the event falls through: Tab
-     *    there does NOTHING (today's behavior).
-     *  - codeBlock (receipt: enableTabIndentation defaults FALSE): a
-     *    literal '\t' character (the stock option inserts SPACES —
-     *    rejected deliberately).
-     *  - paragraph AT BLOCK START (empty selection, pos 0): the GDocs
-     *    convention — firstLineIndent += 32. Shift+Tab: −= 32, floored
-     *    at 0.
-     *  - paragraph MID-LINE: NO-OP v1 (returning true swallows the
-     *    keypress so the browser's focus traversal cannot steal focus).
-     *    DEFERRED: a tab CHARACTER in prose needs engine tab stops —
-     *    issue tree, separate session; do not bolt it on here.
-     *  - headings carry no indent attrs (receipt: HeadingWithExtras
-     *    adds only lineHeight) → Tab does nothing there.
-     *  - ctrl+]/ctrl+[ remain the paragraph indentLeft ±32 commands
-     *    (registered, rebindable — see shortcuts.ts).
+     * Tab semantics: list extensions' handlers win inside lists (registered
+     * earlier). codeBlock inserts a literal '\t'; block start indents ±32
+     * (GDocs); mid-line inserts a tab character.
      */
     const inListItem = ($from: any): boolean => {
       for (let i = $from.depth; i > 0; i--) {
@@ -764,26 +659,19 @@ export const ParagraphExtraCommands = Extension.create({
 
     return {
       /**
-       * ENTER (M-RULER ruling — the user's deliberate call): paragraph
-       * tab stops do NOT continue across Enter — the split's NEW block
-       * strips them, so every new line starts with no stops (Word/GDocs
-       * continue them; Tensor diverges deliberately). ONE transaction:
-       * the chain shares a single tr, so undo collapses Enter to one
-       * step. Lists/codeBlock/headings fall through to their own Enter
-       * (tabStops only live on top-level paragraphs).
+       * Paragraph tab stops do NOT continue across Enter — the split's
+       * NEW block strips them (Word/GDocs continue them; deliberate
+       * divergence). One tr: undo collapses Enter to one step.
        */
       Enter: () => {
         const { $from, empty } = this.editor.state.selection;
         if ($from.depth !== 1 || $from.parent.type.name !== 'paragraph') return false;
-        // ONE transaction: split + strip — one history step, so undo
-        // collapses Enter (no stop-resurrection half-step).
         const tr = this.editor.state.tr;
         if (!empty) tr.deleteSelection();
         const pos = tr.selection.$from.pos;
         tr.split(pos, 1);
-        // The depth-1 split inserts close+open tokens at `pos` — the
-        // NEW paragraph starts at pos + 1. Strip its tab stops (the
-        // ruling: stops do not continue across Enter).
+        // The depth-1 split's NEW paragraph starts at pos + 1 — strip
+        // its tab stops (stops do not continue across Enter).
         const newBlockPos = pos + 1;
         const node = tr.doc.nodeAt(newBlockPos);
         if (node?.type.name === 'paragraph' && Array.isArray(node.attrs.tabStops)) {
@@ -813,11 +701,9 @@ export const ParagraphExtraCommands = Extension.create({
           });
         }
 
-        // M-RULER Phase 4: the deferred tab-CHAR branch lands — the
-        // engine's \t advance rule jumps the pen to the next stop (the
-        // block's custom stops or the 0.5" default grid), so the cursor
-        // lands exactly ON the stop instead of a fixed-width gap. A
-        // non-empty selection is replaced by the tab (Word behavior).
+        // MID-LINE: a tab character — the engine's \t advance jumps to
+        // the next stop (custom stops or the 0.5" grid). A non-empty
+        // selection is replaced by the tab (Word behavior).
         return this.editor.commands.insertContent('\t');
       },
 
@@ -828,12 +714,9 @@ export const ParagraphExtraCommands = Extension.create({
         if (name !== 'paragraph') return false;
         if (inListItem($from)) return false;
 
-        // M-RULER Phase 4: mid-line CARET — backtrack to the current
-        // tab section's start (just after the nearest preceding \t;
-        // already at a section start → chain back one more stop, one
-        // stop per press). Non-destructive: the caret MOVE is the
-        // backtrack (the destructive un-tab is Backspace's job). No
-        // tab behind → the legacy mid-line no-op.
+        // Mid-line CARET: backtrack to the current tab section's start
+        // (non-destructive — the un-tab is Backspace's job); no tab
+        // behind → the legacy no-op.
         if (empty && $from.parentOffset > 0) {
           const text = $from.parent.textContent;
           const off = $from.parentOffset;
@@ -851,9 +734,7 @@ export const ParagraphExtraCommands = Extension.create({
         }
         if (!empty) return true; // non-empty selections: the legacy no-op
 
-        // BLOCK START (offset 0): out-dent, floored at 0 (below that
-        // there is nothing to un-indent via Shift+Tab — ctrl+[ owns
-        // paragraph indentLeft).
+        // BLOCK START: out-dent, floored at 0 (ctrl+[ owns indentLeft below that).
         const node = $from.parent;
         const fli = firstLineIndentOf(node);
         if (fli <= 0) return false;
@@ -862,11 +743,9 @@ export const ParagraphExtraCommands = Extension.create({
         });
       },
 
-      // BACKSPACE STEP (Word/GDocs, P1 ordering): at an indented
-      // paragraph's start (empty selection, offset 0), step the
-      // FIRST-LINE indent out first; only when that is already 0 does
-      // the paragraph indentLeft step (the M6.2 rule). Everything
-      // else — normal backspace.
+      // BACKSPACE STEP (Word/GDocs): at an indented paragraph's start,
+      // step the FIRST-LINE indent out first; only when that is 0 does
+      // the paragraph indentLeft step.
       Backspace: () => {
         const { state } = this.editor;
         const { $from, empty } = state.selection;

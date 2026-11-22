@@ -20,17 +20,11 @@ interface RibbonIconInputProps {
   /** The input's own accessible name (defaults to the tooltip's label —
    *  the icon alone isn't announced). */
   ariaLabel?: string;
-  /** #58 — a unit readout INSIDE the box (right edge, before the
-   *  steppers when they show): "0.5 in" reads without leaving the
-   *  field. */
+  /** #58 — a unit readout inside the box (right edge, before the steppers). */
   suffix?: string;
-  /** #58 — suppress this field's OWN tooltip (a tooltip GROUP wraps
-   *  the row instead: one hover, one delay, carried across the
-   *  fields). */
+  /** #58 — suppress this field's own tooltip (a group tooltip wraps the row instead). */
   hideTooltip?: boolean;
-  /** #101 — the shortcut ids whose LIVE bindings ride the tooltip
-   *  (the user's keybindings, never a hardcoded spelling). Absent =
-   *  the field has none. */
+  /** #101 — shortcut ids whose live user bindings ride the tooltip. */
   shortcutIds?: string[];
 }
 
@@ -50,7 +44,7 @@ export function RibbonIconInput({
   shortcutIds,
 }: RibbonIconInputProps) {
   const [localValue, setLocalValue] = useState(String(value));
-  // The bindings read ONCE (the hook law: never inside the map below).
+  // Read the bindings once, not inside the map below (hook rules).
   const keybindings = useConfigStore((s) => s.config.keybindings);
 
   useEffect(() => {

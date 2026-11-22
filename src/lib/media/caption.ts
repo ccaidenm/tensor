@@ -2,23 +2,10 @@ import type { Editor } from '@tiptap/core';
 import { convertInlineToBlock } from './wrap';
 
 /**
- * M-IMAGES-1 — the caption bond: "Add Caption" inserts a paragraph
- * with styleId 'caption' (the built-in, editable like all built-ins —
- * the ToF #31 hook reads captions regardless of the display toggle)
- * directly after the selected image, and sets keepNext ON THE IMAGE —
- * the E-IMG-1 bond spelling (FlowPolicy.keepNext: the image's
- * placement and the caption's first line share a page, engine-pinned;
- * the shell never re-implements the bond, only writes the flag).
- * The new paragraph is focused immediately — type right away (Word
- * behavior).
- *
- * M-IMAGES-2.1 — the INLINE policy (extract-then-caption): a caption
- * bonds a BLOCK image to the paragraph BELOW it; an in-flow object
- * cannot hold the bond (the adapter refuses float+keepNext's shape —
- * the loud-validation seam). So an inline selection first runs the
- * EXACT conversion the Wrap menu uses (convertInlineToBlock — which
- * selects the new block node), then the block path proceeds
- * unchanged. One policy, one conversion primitive, no forks.
+ * "Add Caption": insert a 'caption' paragraph after the image with
+ * keepNext on the image (image + caption's first line share a page),
+ * focused immediately. An inline image converts to a block first —
+ * an in-flow object can't hold the bond.
  */
 export function insertCaptionForImage(editor: Editor): void {
   const readSel = () =>
@@ -27,8 +14,8 @@ export function insertCaptionForImage(editor: Editor): void {
       from?: number;
     };
   let selection = readSel();
-  // INLINE → EXTRACT first (the new block image is selected by the
-  // conversion; everything below then rides the block path).
+  // Inline → extract first (the conversion selects the new block; the
+  // rest rides the block path).
   if (selection.node?.type?.name === 'inlineImage') {
     convertInlineToBlock(editor);
     selection = readSel();
@@ -42,13 +29,12 @@ export function insertCaptionForImage(editor: Editor): void {
   editor
     .chain()
     .focus()
-    // The bond (the model fact):
+    // The bond:
     .command(({ tr, dispatch }) => {
       if (dispatch) tr.setNodeAttribute(imagePos, 'keepNext', true);
       return true;
     })
-    // The caption paragraph (BlockIdExtension mints its blockId via
-    // appendTransaction — styleId 'caption' is the style identity):
+    // The caption paragraph (blockId minted via appendTransaction):
     .insertContentAt(after, { type: 'paragraph', attrs: { styleId: 'caption' } })
     .run();
 

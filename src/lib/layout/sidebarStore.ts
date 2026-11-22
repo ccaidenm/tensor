@@ -10,10 +10,9 @@ interface ActiveSidebar {
 interface SidebarStore {
   active: ActiveSidebar | null;
   /**
-   * #101 — DRAG-TO-REDOCK: the per-sidebar anchor memory. The hosts
-   * derive their dock side from here (their `anchor` PROP is only the
-   * seed), so a panel redocked by drag renders on the new edge — and
-   * the memory survives close/reopen within the session.
+   * #101 — the per-sidebar anchor memory. The hosts derive their dock
+   * side from here (the `anchor` prop is only the seed), so a redocked
+   * panel renders on the new edge; survives close/reopen in-session.
    */
   anchors: Record<string, SidebarAnchor>;
   open: (id: string, anchor: SidebarAnchor) => void;
@@ -23,10 +22,9 @@ interface SidebarStore {
 }
 
 /**
- * Generic docked-panel state. Deliberately minimal: only one sidebar can be
- * open at a time, across the whole app, for now. This is the seed of a
- * future multi-panel/draggable/snapping system — #101's drag-to-redock is
- * the first step (per-sidebar anchor memory + the grip drag).
+ * Generic docked-panel state. Deliberately minimal: only one sidebar
+ * open at a time, app-wide, for now. #101's drag-to-redock rides the
+ * per-sidebar anchor memory.
  */
 export const useSidebarStore = create<SidebarStore>((set) => ({
   active: null,

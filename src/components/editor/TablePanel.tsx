@@ -32,24 +32,13 @@ import { ColorPickerButton } from '@/components/layout/ribbon/ColorPickerButton'
 import { cn } from 'cn';
 
 /**
- * M-T3c — the TABLE side panel: the power-user surface over the
- * table's dimensions and flow (the user's spec: "a dedicated side panel
- * (like the Find/Replace panel) for power users to fine tune the
- * dimensions of cells and the table flow"). Docked through the SAME
- * SidebarHost/sidebarStore infrastructure as Find/Replace — the
- * multi-panel/draggable future upgrades once, and every panel rides.
- *
- * DIMENSIONS-PRIMARY, alternate-route-complete: the floating toolbar
- * can be turned off entirely, so the panel also carries the essential
- * table ops (structure, merge⇄split, header pin, shading via the SAME
- * ColorPickerButton, border presets). Everything dispatches through
- * editor commands/attrs — no second source of truth.
- *
- * The panel derives wholly from PM state (useEditorState — the
- * FloatingToolbar precedent): the table under the SELECTION is the
- * panel's subject; no table → the empty hint. Widths read the cells'
- * colwidth attrs (null = AUTO — the engine's flexible share); row
- * heights read the M-T3c minHeight attr (Word's "at least").
+ * The TABLE side panel: the power-user surface over the table's
+ * dimensions and flow, docked through SidebarHost. The floating
+ * toolbar can be turned off entirely, so the panel also carries the
+ * essential table ops — everything dispatches through editor
+ * commands/attrs, no second source of truth. The table under the
+ * SELECTION is the subject; widths read colwidth attrs (null = AUTO,
+ * the flexible share); heights read the minHeight attr ("at least").
  */
 
 /** The table under the selection, parsed for the panel. */
@@ -61,21 +50,19 @@ interface TablePanelModel {
   /** Per-column fixed px widths (null = auto/flexible). */
   colWidths: (number | null)[];
   /** Per-row minimum heights (null = auto), header flag, and the
-   * M-FLOW split control (cantSplit: true = atomic; null = may split,
-   * the Word/GDocs default). */
+   * split control (cantSplit: true = atomic; null = may split). */
   rows: { minHeight: number | null; isHeader: boolean; cantSplit: boolean }[];
   border: TableBorderPreset;
   align: 'left' | 'center' | 'right';
   headerPinned: boolean;
   hasMerged: boolean;
-  /** M-FLOW — the table-level pagination flags (the five-flag schema
-   * subset's panel-relevant pair). */
+  /** The table-level pagination flags (keepNext/keepLines). */
   flow: { keepNext: boolean; keepLines: boolean };
-  /** M-T4 — the table's outer margins attr (null = never set → 0). */
+  /** The table's outer margins attr (null = never set → 0). */
   margin: { top: number | null; right: number | null; bottom: number | null; left: number | null } | null;
-  /** M-T4 — the table's default cell padding attr (null = engine constants). */
+  /** The table's default cell padding attr (null = engine constants). */
   cellPadding: { top: number | null; right: number | null; bottom: number | null; left: number | null } | null;
-  /** M-T4 — the current cell's OWN padding override (null sides inherit). */
+  /** The current cell's OWN padding override (null sides inherit). */
   cellPaddingOverride: { top: number | null; right: number | null; bottom: number | null; left: number | null } | null;
 }
 
@@ -109,9 +96,8 @@ function tablePanelModel(editor: Editor): TablePanelModel | null {
       cantSplit: row.attrs?.cantSplit === true,
     });
   });
-  // The row the selection is in — toggleHeaderRow's subject (the same
-  // command the FloatingToolbar runs; the panel's active state reads
-  // THIS row, not row 0).
+  // The row the selection is in — the panel's active state reads THIS
+  // row, not row 0.
   const { $from } = editor.state.selection;
   let currentRowIndex = 0;
   let rowCursor = pos + 1;
@@ -119,8 +105,8 @@ function tablePanelModel(editor: Editor): TablePanelModel | null {
     if ($from.pos >= rowCursor && $from.pos < rowCursor + row.nodeSize) currentRowIndex = i;
     rowCursor += row.nodeSize;
   });
-  // M-T4 — the current cell's OWN padding override (a bare caret's
-  // cell; a CellSelection's anchor cell — Word's selection semantics).
+  // The current cell's OWN padding override (a bare caret's cell; a
+  // CellSelection's anchor cell).
   const selection = editor.state.selection;
   const cellPos = selection instanceof CellSelection ? selection.$anchorCell.pos : $from.pos;
   const cellNode = editor.state.doc.nodeAt(Math.max(cellPos, 0));
@@ -222,7 +208,7 @@ function SectionHeader({ label, action }: { label: string; action?: React.ReactN
   );
 }
 
-/** M-T4 — one T/R/B/L edges row (margins or padding). */
+/** One T/R/B/L edges row (margins or padding). */
 function EdgesRow({
   label,
   testPrefix,
@@ -300,7 +286,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto pb-4">
-            {/* ── Structure ── */}
             <SectionHeader label={`Table — ${model.rowCount} rows × ${model.colCount} columns`} />
             <div className="flex flex-wrap items-center gap-1 px-3">
               <Button
@@ -341,7 +326,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               </Button>
             </div>
 
-            {/* ── Flow: alignment + borders + header ── */}
             <SectionHeader label="Table flow" />
             <div className="flex flex-wrap items-center gap-3 px-3">
               <div className="flex items-center gap-0.5">
@@ -388,7 +372,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               />
             </div>
 
-            {/* ── Columns ── */}
             <SectionHeader
               label="Columns"
               action={
@@ -421,7 +404,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               ))}
             </div>
 
-            {/* ── Rows ── */}
             <SectionHeader label="Rows — height & page breaking" />
             <div className="flex flex-col gap-1 px-3">
               {model.rows.map((row, i) => (
@@ -441,11 +423,10 @@ function TablePanelInner({ editor }: { editor: Editor }) {
                       />
                       <span className="w-4 text-xs text-muted-foreground">px</span>
                     </div>
-                    {/* M-FLOW — Word's per-row "Allow row to break across
-                     * pages": ON = the row may split at the cell line
-                     * grid (the default); OFF = cantSplit, the row moves
-                     * wholly. Written through setRowCantSplit (null|true
-                     * — a `false` normalizes to null). */}
+                    {/* "Allow row to break across pages": ON = the row may
+                     * split at the cell line grid (default); OFF = cantSplit,
+                     * the row moves wholly. setRowCantSplit takes null|true
+                     * (a `false` normalizes to null). */}
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -471,7 +452,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               ))}
             </div>
 
-            {/* ── M-FLOW: Pagination (table-level keep flags) ── */}
             <SectionHeader label="Pagination" />
             <div className="flex flex-col gap-1 px-3 text-sm">
               <label className="flex items-center justify-between gap-2">
@@ -506,7 +486,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               </label>
             </div>
 
-            {/* ── M-T4: Spacing (margins + padding) ── */}
             <SectionHeader label="Spacing" />
             <div className="flex flex-col gap-0.5">
               <EdgesRow
@@ -547,7 +526,6 @@ function TablePanelInner({ editor }: { editor: Editor }) {
               />
             </div>
 
-            {/* ── Cells (the floating-toolbar alternate route) ── */}
             <SectionHeader label="Cells" />
             <div className="flex flex-wrap items-center gap-2 px-3">
               <IconButton

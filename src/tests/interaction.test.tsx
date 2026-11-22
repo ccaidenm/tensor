@@ -21,12 +21,10 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
 }));
 
 /**
- * Interactions, all through the REAL production Editor: the selection
- * overlay, mouse selection, the legacy dead-zone fixtures (ported from
- * docs/legacy/pagination-v1.md, preserved in git history), toolbar,
- * search paint, clipboard, and IME preview. jsdom geometry:
- * getBoundingClientRect is zero by default (stack-local == client
- * coords); tests needing real numbers pin it via mockRects.
+ * Interactions through the REAL production Editor: selection overlay,
+ * mouse selection, dead-zone fixtures, toolbar, search paint, clipboard,
+ * IME preview. jsdom: getBoundingClientRect is 0 by default; tests
+ * needing real numbers pin it via mockRects.
  */
 
 const CB = GEOMETRY.contentX; // 96
@@ -78,10 +76,9 @@ describe('selection overlay (projection of PM selection)', () => {
     const { editor } = renderTensorInScrollContainer('<p>Hello world</p>');
     await settle();
     const dom = editor.view.dom as HTMLElement;
-    // jsdom has no native caret motion, so the selection a real browser's
-    // Shift+Arrow produces is issued through PM directly; what this
-    // asserts is that the OVERLAY projects it (the real gesture is
-    // verified in the live app).
+    // jsdom has no native caret motion — the Shift+Arrow selection is
+    // issued through PM directly; what this asserts is that the OVERLAY
+    // projects it.
     dom.focus();
     act(() => {
       dom.dispatchEvent(
@@ -259,9 +256,8 @@ describe('floating toolbar at engine coords', () => {
     // bounds left 96, top 96, right 146, bottom 112; z=1, stack top 100
     // (the shared mock pins the stack's LEFT at 0).
     expect(bar.style.left).toBe('96px'); // 0 + 96
-    // M-IMAGES-1.5.5: ONE clearance now — the top is the anchor top
-    // (no EDGE_PAD subtraction), and the visual gap rides the
-    // toolbar's translateY(gap) alone (was: −8 here AND −8 there).
+    // ONE clearance: the top is the anchor top (no EDGE_PAD subtraction);
+    // the visual gap rides the toolbar's translateY(gap) alone.
     expect(bar.style.top).toBe('196px'); // 100 + 96 (gap in translateY)
   });
 });
@@ -357,10 +353,9 @@ describe('clipboard (PM\u2019s own handlers)', () => {
   });
 
   it('middle-click pastes at the click point when enabled, is a no-op when disabled', async () => {
-    // Disabled (default): the caret/selection and the document are untouched.
-    // The press AND release defaults must die — Linux webviews paste the
-    // X11 primary selection into the focused editable natively (press),
-    // and Firefox pastes on release/auxclick.
+    // Disabled (default): the caret/selection and the document are
+    // untouched. The press AND release defaults are suppressed — Linux
+    // webviews paste the X11 primary selection natively on both.
     const disabled = renderTensorInScrollContainer('<p>Hello world</p>');
     await settle();
     act(() => {
@@ -522,10 +517,9 @@ describe('alignment symmetry + selection color + cursor', () => {
     const overlay = document.querySelector('[data-slot="dialog-overlay"]') as HTMLElement | null;
     expect(overlay).not.toBeNull();
     const classes = overlay!.className;
-    // The caller's treatment OWNS the overlay: the heavy frost applies,
-    // and the base's variant-qualified xs blur is ABSENT — it would win
-    // the CSS cascade over a plain backdrop-blur (variant rules emit
-    // after base ones) and render ~no blur.
+    // The caller's treatment OWNS the overlay: the heavy frost applies;
+    // the base's variant-qualified xs blur is ABSENT (it would win the
+    // CSS cascade and render ~no blur).
     expect(classes).toContain('backdrop-blur-lg');
     expect(classes).not.toContain('backdrop-blur-xs');
     expect(classes).toContain('z-[100]');
@@ -533,7 +527,6 @@ describe('alignment symmetry + selection color + cursor', () => {
     // never the card.
     const popup = document.querySelector('[data-slot="dialog-content"]') as HTMLElement;
     expect(popup.className).toContain('z-[110]');
-    // Accepting flips the flag; the overlay unmounts.
     act(() => {
       (document.querySelector('[data-testid="developer-mode-accept"]') as HTMLElement).click();
     });

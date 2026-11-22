@@ -13,15 +13,9 @@ import { create } from 'zustand';
 import { useDocumentStore } from '@/lib/document/store';
 import { insertReferenceTableAtSelection } from '@/lib/editor/ReferenceTableNode';
 
-/**
- * M-REFS — the "Insert Table of Contents" dialog (the
- * InsertTableDialog pattern — the ruling locked with the user): the
- * ToC's one option at insert time is the heading DEPTH (1–6, default
- * 3 = H1–H3, the issue's minimum). Table of Figures and Index insert
- * DIRECTLY (no dialog — they have no options), so this dialog is
- * ToC-only by design. The depth rides the node attr: re-inserting with
- * another depth is the M3 "options" affordance — never a migration.
- */
+// The "Insert Table of Contents" dialog. Depth (1–6, default 3 = H1–H3) is
+// the ToC's only insert-time option; Table of Figures and Index insert
+// directly (they have no options), so this dialog is ToC-only.
 
 interface InsertReferenceTableStore {
   isOpen: boolean;

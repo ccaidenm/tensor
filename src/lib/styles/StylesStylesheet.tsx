@@ -4,16 +4,10 @@ import { cssDeclarations } from '@/lib/styles/resolve';
 import type { StyleDefinition } from '@/lib/styles/types';
 
 /**
- * THE PAGELESS RENDER PATH (M-STYLES STEP 3): a generated <style>
- * sheet is the registry's single source of truth for pageless
- * styling — paragraphs carry `wp-style-{id}` classes (the styleId
- * attr's renderHTML), charStyle spans carry `wp-charstyle-{id}`.
- * Precedence is CSS by construction:
- *   base (container font) < paragraph class < char class < direct
- * because paragraph rules precede character rules in the sheet
- * (source order breaks equal-class specificity ties) and direct
- * formatting renders as inline styles from the attr/mark renderers,
- * which beat any class. Regenerated on every registry epoch bump.
+ * The pageless render path: a generated <style> sheet applies the
+ * registry (paragraphs carry `wp-style-{id}`, spans `wp-charstyle-{id}`).
+ * Precedence is CSS by construction — base < paragraph class < char
+ * class < direct (source order; inline beats class).
  */
 
 function buildSheet(definitions: Record<string, StyleDefinition>): string {

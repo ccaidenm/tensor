@@ -3,24 +3,13 @@ import { useMediaStore } from '@/lib/media/store';
 import { decodeImageSize } from '@/lib/media/insert';
 
 /**
- * M-IMAGES-1 — the legacy-image backfill. A document opening with an
- * image node LACKING dims is the pending state: the adapter throws the
- * sentinel, the view runs the pageless fallback (which renders the
- * node view's natural-size <img>), and THIS pass writes the missing
- * attrs — load bytes from the store → measure → write width/height.
- *
- * RELAYOUT LINEAGE (the third use of the pattern): the font epoch and
- * the style epoch exist because their changes BYPASS PM — they needed
- * a store-driven reflow subscription. Attr writes DON'T bypass PM: the
- * dispatched transaction fires onUpdate, the standard
- * PM-update→adapter→engine→paint path relayouts, and the adapter
- * sentinel clears (the fallback resets on every successful layout —
- * PaginatedView's relayout receipt). So NO epoch is re-spun here; the
- * standard PM path IS the trigger.
+ * The legacy-image backfill: an image node opening without dims is
+ * pending — load bytes, measure, write width/height. No epoch is
+ * re-spun: attr writes go through PM, whose update path relayouts.
  */
 export async function backfillImageDims(editor: Editor | null): Promise<number> {
   if (!editor) return 0;
-  // Collect pending refs (sync scan over the CURRENT doc).
+  // Collect pending refs (sync scan over the current doc).
   const pending: string[] = [];
   editor.state.doc.descendants((node) => {
     if (
@@ -38,7 +27,7 @@ export async function backfillImageDims(editor: Editor | null): Promise<number> 
   let fixed = 0;
   for (const src of pending) {
     const entry = useMediaStore.getState().entries.get(src.slice('media://'.length));
-    if (!entry) continue; // unresolved: nothing to measure YET
+    if (!entry) continue; // unresolved: nothing to measure yet
     try {
       const { width, height } = await decodeImageSize(entry.bytes, entry.ext);
       if (editor.isDestroyed) break;

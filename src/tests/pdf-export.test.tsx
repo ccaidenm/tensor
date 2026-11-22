@@ -8,13 +8,10 @@ import { useDocumentStore } from '@/lib/document/store';
 import type { PrintPage } from '@/lib/print/types';
 
 /**
- * M-PRINT (#39, Mark 4) — the PDF synthesis suite. The structural
- * contract: the output re-parses (PDFDocument.load) with the right
- * page count and PT sizes (px → pt at 0.75); the walk's geometry IS
- * the PDF's geometry by construction (same source as the preview).
- * The font book's jsdom path exercises the standard-14 fallback (the
- * bundled ?url fetch fails in the test env — the designed quiet
- * degradation, reported in substitutedFonts).
+ * #39 — the PDF synthesis suite: the output re-parses (PDFDocument.load)
+ * with the right page count and PT sizes; the walk's geometry IS the
+ * PDF's by construction. jsdom exercises the standard-14 font fallback
+ * (the bundled ?url fetch fails — reported in substitutedFonts).
  */
 
 /** A tiny valid PNG (1×1) — the embed path's real bytes. */

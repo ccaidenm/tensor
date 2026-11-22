@@ -7,12 +7,11 @@ import { useDocumentStore } from '@/lib/document/store';
 import { useDocumentPropertiesStore } from '@/lib/document/propertiesStore';
 
 /**
- * M-PRINT (#43, the beast) — THE DESTINATION contract: the segmented
- * control [Printer | PDF] backed by print.lastDestination (memory),
- * the FULLY-RESOLVED PDF body (filename, folder, metadata
- * write-through), the commit button labeled with the resolved path,
- * and the keyboard law (Enter commits, the configured trigger held
- * force-prompts). One modal — never two.
+ * #43 — the destination contract: the segmented [Printer | PDF]
+ * control backed by print.lastDestination (memory), the resolved PDF
+ * body (filename, folder, metadata write-through), the commit button
+ * labeled with the path, and the keyboard arm (Enter commits, the
+ * configured trigger held force-prompts). One modal — never two.
  */
 
 describe('the destination segmented control', () => {
@@ -122,7 +121,7 @@ describe('the fully-resolved PDF destination', () => {
       fireEvent.change(title, { target: { value: 'The Paper' } });
     });
     expect(useDocumentStore.getState().coreProperties.title).toBe('The Paper');
-    // cleared → omitted (the normalize law: absent means never set)
+    // cleared → omitted (absent means never set)
     act(() => {
       fireEvent.change(title, { target: { value: '   ' } });
     });
@@ -180,11 +179,9 @@ describe('the fully-resolved PDF destination', () => {
   });
 });
 
-/** THE TENSOR-NATIVE PRINTER PICKER — the system dialog's
- *  replacement. The nativePrint seam is mocked (the Rust commands
- *  are the native suite's); the CONTRACTS here: the default printer
- *  preselects, the trigger-modifier owns the system dialog, and the
- *  commit runs the native pipeline (walk → PDF → job → close). */
+/** The tensor-native printer picker (replaces the system dialog). The
+ *  nativePrint seam is mocked: the default preselects, the trigger-
+ *  modifier owns the system dialog, the commit runs the pipeline. */
 // The destination suite's own dialog/fs mocks (the PDF commit path's
 // seams — save/exists/writeFile must not touch the OS in tests).
 const pdfIo = vi.hoisted(() => ({
@@ -250,8 +247,7 @@ describe('the Tensor-native printer destination (the OS dialog\'s replacement)',
     const body = utils.getByTestId('print-preview-printer-body');
     expect((body.querySelector('[data-testid="print-preview-printer-select"] button, [role=combobox]') as HTMLElement)?.textContent).toContain('TestJet');
     // NO system-dialog entry: opening the picker lists exactly the
-    // enumerated printers (the trigger modifier owns the OS dialog
-    // path now).
+    // enumerated printers (the trigger modifier owns the OS dialog path).
     const trigger = utils.getByTestId('print-preview-printer-select') as HTMLElement;
     act(() => {
       fireEvent.click(trigger);

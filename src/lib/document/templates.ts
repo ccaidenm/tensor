@@ -1,14 +1,8 @@
 /**
- * #103 — THE TEMPLATE CATALOG: the start screen's document sources.
- * TWO ROWS (the user's structure): the CORE pair — the explicit
- * view-mode blanks (Tensor's two identities; the Open card joins them
- * as the row's third, UI-side) — then the STARTERS (hand-authored
- * HTML the editor's setContent consumes; four genres, deliberately
- * simple, deliberately few).
- *
- * DATA-ONLY (no imports of React/lucide — the icons/colors live in
- * the StartScreen's visual map, keyed by id): this file is the
- * document source, the component is the presentation.
+ * #103 — the template catalog: the start screen's document sources.
+ * The blanks pick their view mode explicitly; the starters are
+ * hand-authored editor HTML. Data-only — icons/colors live in the
+ * StartScreen's visual map, keyed by id.
  */
 
 export interface DocTemplate {
@@ -16,8 +10,8 @@ export interface DocTemplate {
   title: string;
   description: string;
   kind: 'blank' | 'starter';
-  /** The blanks pick their surface explicitly (the config default
-   *  never decides — the two cards ARE the choice). */
+  /** The blanks pick their surface explicitly (never the config
+   *  default — the two cards are the choice). */
   viewMode: 'pages' | 'pageless';
   /** Starter content (editor HTML). Blanks carry none. */
   content?: string;

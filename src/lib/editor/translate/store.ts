@@ -10,18 +10,9 @@ import { makeCancelToken, runTranslation } from './run';
 import { applyTranslation } from './apply';
 
 /**
- * Translate UI state — the search-store shape: everything EXCEPT the
- * document content itself (the pipeline reads/writes the editor; this
- * store holds chrome). One panel, one run at a time.
- *
- * PHASES: idle → translating → preview → (apply | cancel | reset) →
- * idle. `capturedDoc` pins the run's staleness law: the doc reference
- * at run start is what apply refuses to be stale against.
- *
- * LOCAL MODE adds catalog/installed/modelDownload: the catalog is
- * Mozilla's pair list (fetched when local mode opens), `installed` is
- * disk truth via Rust, and modelDownload carries the per-file progress
- * events the panel listens for while a pair downloads.
+ * Translate UI state — everything EXCEPT the document content. Phases:
+ * idle → translating → preview → apply/cancel/reset → idle; LOCAL MODE
+ * adds catalog/installed/modelDownload.
  */
 interface TranslateUIState {
   scope: TranslateScope;

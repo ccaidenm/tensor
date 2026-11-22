@@ -3,6 +3,7 @@ import { ConfigSchema, DEFAULT_CONFIG, type Config } from "./schema";
 import { SHORTCUTS } from "../shortcuts";
 import { ACCENTS_BY_ID, DEFAULT_ACCENT_ID, accentLogoPath } from "../branding/accents";
 import { inTauriWindow } from "../window/tauriEnv";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export const ZOOM_MIN = 50;
 export const ZOOM_MAX = 200;
@@ -28,7 +29,7 @@ interface ConfigStore {
   addCustomColor: (color: string) => void;
   removeCustomColor: (color: string) => void;
   setUseFloatingToolbar: (value: boolean) => void;
-  /** M-T4: Developer Mode — gates Reload/Inspect Element in the context
+  /** Developer Mode — gates Reload/Inspect Element in the context
    *  menu; the General panel requires accepting a warning to enable. */
   setDeveloperMode: (value: boolean) => void;
   setReduceMotion: (value: Config["accessibility"]["reduceMotion"]) => void;
@@ -41,9 +42,8 @@ interface ConfigStore {
   setShowCaptions: (value: boolean) => void;
   setShowHeadersFooters: (value: boolean) => void;
   setShowWatermark: (value: boolean) => void;
-  /** #COMMENTS — the boundary-content toggle (the rewired "Show
-   *  Margins" stub): the outside space around the sheets (the comments
-   *  gutter today). Persisted like the other show-* view settings. */
+  /** The boundary-content toggle: the outside space around the
+   *  sheets (the comments gutter today). */
   setShowBoundaryContent: (value: boolean) => void;
   setShowHorizontalRuler: (value: boolean) => void;
   setShowVerticalRuler: (value: boolean) => void;
@@ -65,7 +65,7 @@ interface ConfigStore {
   /** THE SYMBOL PICKER'S CHIP ROW: the recently used character groups
    *  (MRU, capped by the picker's row limit). */
   setRecentSymbolGroups: (groups: string[]) => void;
-  /** M-META: the user identity (the default author for new docs). */
+  /** The user identity (the default author for new docs). */
   setIdentityAuthor: (value: string) => void;
   /** #103 — THE FIRST-RUN GATE's writer (completed or skipped). */
   setFirstRunCompleted: () => void;
@@ -87,23 +87,21 @@ interface ConfigStore {
   /** Accessibility: grammar flags as a double line in addition to
    *  color (the color-blind aid). */
   setGrammarDoubleLine: (value: boolean) => void;
-  /** TRANSLATE: the consent write (the setup flow's commit —
-   *  provider + endpoint + optional key land with it, one write like
-   *  the spell provider choice). */
+  /** The translation consent write — the setup flow's commit
+   *  (provider + endpoint + optional key land together). */
   setTranslationConfigured: () => void;
   setTranslationProvider: (value: Config["translation"]["provider"]) => void;
   setTranslationEndpoint: (value: string) => void;
   setTranslationApiKey: (value: string) => void;
   setTranslationLastTargetLang: (value: string) => void;
-  /** M-PRINT: the default folder for PDF/file exports ('' = the OS
-   *  save dialog's own default). */
+  /** The default folder for PDF/file exports ('' = the OS save
+   *  dialog's own default). */
   setDownloadsDir: (value: string) => void;
-  /** M-PRINT: the modifier-click that forces Save-as-PDF to prompt. */
+  /** The modifier-click that forces Save-as-PDF to prompt. */
   setPdfAlwaysAskTrigger: (value: 'shift' | 'ctrl') => void;
-  /** M-PRINT: the preview modal's last destination (the segmented
-   *  control's memory). */
+  /** The preview modal's last destination. */
   setPrintLastDestination: (value: 'printer' | 'pdf') => void;
-  /** M-PRINT: the last-used duplex setting (the picker's seed). */
+  /** The last-used duplex setting (the picker's seed). */
   setPrintLastDuplex: (
     value: 'one-sided' | 'two-sided-long-edge' | 'two-sided-short-edge',
   ) => void;
@@ -295,7 +293,7 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       },
     })),
 
-  // M-HEADER-FOOTER: the band display toggle (the captions NPC precedent).
+  // The band display toggle (the captions NPC precedent).
   setShowHeadersFooters: (value) =>
     set((state) => ({
       config: {
@@ -569,13 +567,13 @@ setShowHorizontalRuler: (value) =>
     })),
 }));
 
-// M-RULER THEME SYNC: the `dark` class is applied SYNCHRONOUSLY with
+// THEME SYNC: the `dark` class is applied SYNCHRONOUSLY with
 // every theme value, including the very first, from this module — one
 // writer, registered before any component subscribes (zustand listeners
 // fire in registration order, so the class is always current BEFORE
 // React re-renders). App's passive useEffect used to own this, but
 // layout-effect painters read computed styles BEFORE passive effects
-// run: chrome that paints from computed styles (the M-RULER canvas)
+// run: chrome that paints from computed styles (the ruler canvas)
 // mounted after a persisted dark config loaded would take its FIRST
 // paint against the stale (light) class — white knockouts on a dark
 // bar — and, with no later theme change firing, never repaint.
@@ -642,7 +640,6 @@ async function followAccentWindowIcon(accentId: Config["accent"]): Promise<void>
     const res = await fetch(accentLogoPath(accentId));
     if (!res.ok) return;
     const bytes = new Uint8Array(await res.arrayBuffer());
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().setIcon(bytes);
   } catch {
     // Best-effort: a failed fetch/permission never breaks the accent.

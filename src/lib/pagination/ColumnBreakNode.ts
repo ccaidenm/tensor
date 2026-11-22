@@ -10,16 +10,9 @@ declare module '@tiptap/core' {
 }
 
 /**
- * #74 COLUMNS — the manual column break (the pageBreak node's twin:
- * "THE ADAPTER TRANSLATES — the node is NOT part of the IR"). The atom
- * forces the FOLLOWING block to open the next flow slot (the next
- * column, else the next page — Word's newsletter-flow early wrap).
- * Same split-dance, same following-paragraph guard, same selection
- * landing as insertPageBreak; the adapter stamps
- * `flow.breakBefore: 'column'` on the following block and emits the
- * columnBreak NPC fact (the BreakMarks badge at the anchor line's
- * column). Deletion is plain (the pageBreak posture — the
- * merge-on-delete law is sectionBreak-only).
+ * #74 — the manual column break: forces the following block to open the
+ * next flow slot (next column, else next page — Word's newsletter wrap).
+ * The adapter stamps `flow.breakBefore: 'column'`; deletion is plain.
  */
 export const ColumnBreakNode = Node.create({
   name: 'columnBreak',

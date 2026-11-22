@@ -6,29 +6,14 @@ import { useConfigStore } from '@/lib/config/store';
 import { setColumnWidthWord, setTableTracks } from '@/lib/editor/tableResize';
 
 /**
- * M-TABLES — the column drag handles (Pages mode). The PM DOM is
- * hidden (law L3), so the stock columnResizing handles are unusable
- * here; the shell renders its own at each column boundary, derived
- * from the engine's placed cell rects (the boundary EDGES of the
- * page's rects — every column boundary is some cell's edge in a
- * well-formed grid, so the sorted distinct edges ARE the track edges;
- * the widths are their diffs).
- *
- * M-T4 — WORD DRAG SEMANTICS:
- *  - An INTERIOR boundary keeps the table's total width constant: the
- *    dragged column takes the new width, its right neighbor pays the
- *    delta (a fixed neighbor is written back, clamped at the track
- *    floor; a flexible neighbor re-absorbs engine-side).
- *  - The RIGHTMOST edge is the TABLE border, not a column boundary:
- *    dragging it scales EVERY track proportionally (setTableTracks),
- *    clamped to [cols × CELL_MIN_TRACK, the table box]. The old
- *    behavior set only the last column's width — the still-flexible
- *    columns re-inflated to fill the content box, so the table could
- *    never shrink ("backwards spacing").
- *
- * The slice height = the table's span on THIS page (a page-split
- * table's handles ride each page's slice). Stack-local px inside the
- * zoom transform; the drag math divides the client delta by zoom.
+ * Column drag handles (Pages mode) — the PM DOM is hidden, so the shell
+ * renders its own at each column boundary, derived from the engine's
+ * placed cell rects (sorted distinct edges ARE the track edges).
+ * INTERIOR drag: the right neighbor pays the delta — total constant.
+ * RIGHTMOST edge = the TABLE border: dragging scales EVERY track
+ * proportionally, clamped to [cols × CELL_MIN_TRACK, the table box] —
+ * otherwise flexible columns re-inflate and the table can never shrink.
+ * Slice height = the table's span on THIS page; drag deltas divide by zoom.
  */
 
 interface TableResizeHandlesProps {
@@ -85,10 +70,8 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       if (sorted.length < 2) continue;
       const widths = sorted.slice(1).map((x, i) => x - sorted[i]!);
       const total = sorted[sorted.length - 1]! - sorted[0]!;
-      // Skip the table's LEFT edge (the first): the table's own left
-      // boundary is not a column handle. Each remaining edge is the
-      // RIGHT edge of the column whose index = its position among the
-      // track edges.
+      // Skip the LEFT edge (the table's own boundary, not a handle);
+      // each remaining edge is some column's RIGHT edge.
       for (let i = 1; i < sorted.length; i++) {
         out.push({
           blockId,
@@ -120,8 +103,7 @@ export function TableResizeHandles({ geometry, cells, editor, tablePosOf }: Tabl
       const dx = (ev.clientX - startX) / z;
       if (h.rightmost) {
         // The TABLE border: scale every track to the new total. #74 —
-        // the max is the table's COLUMN's width under columns (the
-        // engine's track derivation runs against the slot).
+        // the max is the table's COLUMN's width under columns.
         const min = h.widths.length * CELL_MIN_TRACK;
         const slot = h.column != null ? geometry.columns?.[h.column] : undefined;
         const max = slot ? slot.width : geometry.contentBox.width;

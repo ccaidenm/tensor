@@ -24,15 +24,12 @@ import { renderTensor, settleLayout, GEOMETRY } from './harness';
 import { FakeMetrics } from './fakeMetrics';
 
 /**
- * M-IMAGES-1 — the linear image suite: insert, render, resize, align,
- * caption, alt, round-trip. jsdom notes: the paginated paint surface
- * is the recorded-canvas stub (drawImage/fillRect ops carry the
- * PLACED rects — asserted, not eyeballed); the pageless surface is
- * the node view DOM; the a11y surface is the hidden PM view's real
- * <img alt> (the M5 Orca mirror).
+ * The image suite: insert, resize, align, caption, alt, round-trip.
+ * jsdom: paginated paint rides the recorded-canvas stub's ops; pageless
+ * rides the node view DOM; a11y the hidden PM view's <img alt>.
  */
 
-// M-IMAGES-0 container simulator (same wire contract as wpdoc.test).
+// Container simulator (same wire contract as wpdoc.test).
 const wpdocFiles = vi.hoisted(() => new Map<string, { kind: 'v2'; document: string; media: { id: string; ext: string; bytesB64: string }[] }>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -104,7 +101,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. Insert: all paths → one pipeline ────────────────────────────────
+// Insert: all paths → one pipeline
 
 describe('insertion', () => {
   it('picker path bytes → sha-named MediaStore entry + node with EXACT natural dims + media:// src', async () => {
@@ -147,8 +144,6 @@ describe('insertion', () => {
   });
 });
 
-// ─── 2. Fit-down + 4. Align: the engine's placed math, asserted ────────
-
 describe('placement (engine math, asserted)', () => {
   it('fit-down: an oversized image places at the content width (placed[], not eyeballed)', async () => {
     const { editor } = renderTensor('<p>before</p>');
@@ -180,7 +175,7 @@ describe('placement (engine math, asserted)', () => {
   });
 });
 
-// ─── 5. Adapter: the seam list flips ────────────────────────────────────
+// Adapter: the seam list flips
 
 describe('adapter seam (the M5 fallback test flipped)', () => {
   it('an image doc LAYS OUT PAGINATED — no pageless fallback, no throw', async () => {
@@ -190,8 +185,7 @@ describe('adapter seam (the M5 fallback test flipped)', () => {
     await settleLayout();
     expect(document.querySelector('[data-testid="paginated-fallback"]')).toBeNull();
     expect(document.querySelectorAll('[data-testid="page-sheet"]').length).toBeGreaterThan(0);
-    // The adapter's remaining seam list (BEFORE this milestone:
-    // '(table, image, drawing)'; after: image is GONE):
+    // The adapter must no longer throw on image docs (image is off the seam list):
     expect(() => pmDocToSemantic(editor.state.doc, BASE)).not.toThrow();
   });
 
@@ -207,7 +201,7 @@ describe('adapter seam (the M5 fallback test flipped)', () => {
   });
 });
 
-// ─── 3. Resize: aspect-locked math, attrs written, engine refits ────────
+// Resize: aspect-locked math, attrs written, engine refits
 
 describe('resize', () => {
   it('aspect-locked: 50% drag on width → height follows; attrs written; placed[] changes', async () => {
@@ -215,7 +209,6 @@ describe('resize', () => {
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
     await settleLayout();
-    // Select the image node:
     let imagePos = 0;
     editor.state.doc.descendants((n, p) => {
       if (n.type.name === 'image') { imagePos = p; return false; }
@@ -228,9 +221,8 @@ describe('resize', () => {
     const selectionEl = document.querySelector('[data-testid="image-selection"]') as HTMLElement;
     expect(selectionEl).not.toBeNull();
 
-    // Simulate the commit path (the component's drag math is
-    // exercised through the same contract: ratio-scaled attrs):
-    // 50% on width → height follows (aspect 200:100).
+    // Simulate the commit contract: 50% on width → height follows
+    // (aspect 200:100), ratio-scaled attrs.
     const before = directLayout(editor).result.placed[0]!.rect;
     act(() => {
       editor
@@ -260,7 +252,7 @@ describe('resize', () => {
     });
   });
 
-  it('M-IMAGES-2 R1: SE drag → dims exact, the NW corner (its anchor) UNMOVED', async () => {
+  it('SE drag → dims exact, the NW corner (its anchor) UNMOVED', async () => {
     const { editor } = renderTensor('<p>before</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
@@ -294,8 +286,7 @@ describe('resize', () => {
     await settleLayout();
     editor.state.doc.descendants((n) => {
       if (n.type.name === 'image') {
-        // DEFAULT = FREE (the hands ruling): dx-only → width grows,
-        // height untouched.
+        // Default is free: dx-only → width grows, height untouched.
         expect(n.attrs.width).toBe(240);
         expect(n.attrs.height).toBe(100);
         return false;
@@ -333,7 +324,7 @@ describe('resize', () => {
     expect(after.rect.y).toBe(before.rect.y);
   });
 
-  it('M-IMAGES-2 R1: NW drag → dims exact, the SE corner (its anchor) UNMOVED', async () => {
+  it('NW drag → dims exact, the SE corner (its anchor) UNMOVED', async () => {
     const { editor } = renderTensor('<p>before</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
@@ -355,11 +346,9 @@ describe('resize', () => {
     act(() => {
       fireEvent.pointerMove(handle, { pointerId: 1, clientX: -40, clientY: 0 });
     });
-    // ANCHOR RECEIPT (drag time — the preview frame): NW's anchor is
-    // the SE corner: (left + width) stays at the placed rect's right
-    // edge DURING the drag. The OLD top-left-everywhere math pinned
-    // the LEFT edge instead — the top handles moved inverted; this
-    // is the receipt that they no longer do.
+    // NW's anchor is the SE corner: (left + width) stays at the placed
+    // rect's right edge during the drag (the OLD math pinned the LEFT
+    // edge — the top handles moved inverted).
     const selEl = document.querySelector('[data-testid="image-selection"]') as HTMLElement;
     const previewLeft = parseFloat(selEl.style.left);
     const previewWidth = parseFloat(selEl.style.width);
@@ -383,7 +372,7 @@ describe('resize', () => {
     // the ANCHOR was the drag contract; the dims are the commit.
   });
 
-  it('M-IMAGES-2 R1: NE + SW corners — each anchors its opposite', async () => {
+  it('NE + SW corners — each anchors its opposite', async () => {
     const { editor } = renderTensor('<p>before</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
@@ -435,7 +424,7 @@ describe('resize', () => {
     expect(after.rect.y).toBe(before2.rect.y); // NE y fixed
   });
 
-  it('M-IMAGES-2 R2: per-corner CSS cursors (the diagonal receipt)', async () => {
+  it('per-corner CSS cursors (the diagonal receipt)', async () => {
     const { editor } = renderTensor('<p>before</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
@@ -541,7 +530,7 @@ describe('resize', () => {
   });
 });
 
-// ─── 6. Caption: the bond + the display toggle ─────────────────────────
+// Caption: the bond + the display toggle
 
 describe('caption', () => {
   it('Add Caption (TOOLBAR → registry → command): styleId caption + keepNext bond + immediate focus', async () => {
@@ -557,8 +546,7 @@ describe('caption', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // REACHABILITY (STEP 2): the document context menu — the
-    // M-T4 surface — is the instrument; it dispatches through the
+    // Reachability: the document context menu dispatches through the
     // registry (right-click anywhere on the painted surface).
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
@@ -570,11 +558,11 @@ describe('caption', () => {
     });
     const after = editor.state.doc;
     const image = after.nodeAt(imagePos)!;
-    expect(image.attrs.keepNext).toBe(true); // THE BOND
+    expect(image.attrs.keepNext).toBe(true); // the bond
     const caption = after.nodeAt(imagePos + image.nodeSize);
     expect(caption?.type.name).toBe('paragraph');
     expect(caption?.attrs.styleId).toBe('caption');
-    // Focused immediately — the caret is INSIDE the caption:
+    // Focused immediately — the caret is inside the caption:
     expect(editor.state.selection.from).toBe(imagePos + image.nodeSize + 1);
   });
 
@@ -606,8 +594,7 @@ describe('caption', () => {
     const semantic = pmDocToSemantic(editor.state.doc, BASE);
     const imageBlock = semantic.doc.blocks.find((b) => b.kind === 'image') as { flow?: { keepNext?: boolean } };
     expect(imageBlock.flow?.keepNext).toBe(true);
-    // E-IMG-1's engine-side pin: with the flag set, image end + caption
-    // start share a page in THIS layout:
+    // With the flag set, image end + caption start share a page in this layout:
     expect(captionLine).toBeDefined();
     expect(captionLine!.pageIndex).toBe(placed.pageIndex);
   });
@@ -655,7 +642,7 @@ describe('caption', () => {
   });
 });
 
-// ─── 7. Alt text + the a11y receipt ─────────────────────────────────────
+// Alt text + the a11y receipt
 
 describe('alt text', () => {
   it('TOOLBAR → Alt Text dialog → attr written (the a11y receipt stands)', async () => {
@@ -673,8 +660,8 @@ describe('alt text', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // REACHABILITY: the document context menu's Alt Text item (the
-    // M-T4 surface) dispatches through the command registry.
+    // Reachability: the document context menu's Alt Text item dispatches
+    // through the command registry.
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
@@ -696,10 +683,9 @@ describe('alt text', () => {
       fireEvent.click(document.querySelector('[data-testid="alt-text-save"]')!);
     });
     expect(editor.state.doc.nodeAt(imagePos)?.attrs.alt).toBe('A chart of receipts');
-    // THE A11Y RECEIPT: the hidden PM view (opacity-0, in the a11y
-    // tree — the M5 law) renders a REAL <img alt> — what AT-SPI/Orca
-    // reports on the live app. (Node views re-render on the PM
-    // update flush — settle first.)
+    // The a11y receipt: the hidden PM view (opacity-0, in the a11y
+    // tree) renders a real <img alt> — what AT-SPI/Orca reports on
+    // the live app. Node views re-render on the PM flush — settle first.
     await settleLayout();
     const img = document.querySelector('.pm-input-only img') as HTMLImageElement;
     expect(img).not.toBeNull();
@@ -707,8 +693,8 @@ describe('alt text', () => {
   });
 });
 
-/** M-T4 — hover-opens the context menu's Corner Radius submenu (its
- *  items mount on open; base-ui's hover detection wants BOTH the
+/** Hover-opens the context menu's Corner Radius submenu (its items
+ *  mount on open; base-ui's hover detection wants BOTH the
  *  pointer and mouse event pairs, then a rest beat). */
 async function openRadiusSubmenu() {
   const trigger = document.querySelector('[data-testid="ctx-radius-menu"]') as HTMLElement | null;
@@ -722,10 +708,10 @@ async function openRadiusSubmenu() {
   });
 }
 
-// ─── M-IMAGES-1.5: corner radius (paint-only) ──────────────────────────
+// Corner radius (paint-only)
 
 describe('corner radius', () => {
-  it('M-T4: the context menu radius presets → attr written; BOTH render paths receive it (canvas clip / CSS)', async () => {
+  it('the context menu radius presets → attr written; BOTH render paths receive it (canvas clip / CSS)', async () => {
     const { editor } = renderTensor('<p>r</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 120), 'png');
@@ -738,9 +724,8 @@ describe('corner radius', () => {
       editor.commands.setNodeSelection(imagePos);
     });
     await settleLayout();
-    // M-T4: the radius surface is the document context menu's presets
-    // (the toolbar's RibbonIconInput moved out with the image strip).
-    // Submenu items mount on hover — open the submenu first.
+    // The radius surface is the document context menu's presets; submenu
+    // items mount on hover — open the submenu first.
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
@@ -804,9 +789,9 @@ describe('corner radius', () => {
 });
 
 
-// ─── 8. Round-trip + the deletion receipt ───────────────────────────────
+// Round-trip + the deletion receipt
 
-describe('round-trip (M-IMAGES-0 container)', () => {
+describe('round-trip (the container)', () => {
   it('save → reopen: images render BOTH modes; the media sha list is identical', async () => {
     const { editor } = renderTensor('<p>rt</p>');
     await settleLayout();
@@ -875,21 +860,19 @@ describe('round-trip (M-IMAGES-0 container)', () => {
     });
     expect([...collectReferencedMediaIds(editor.getJSON())]).toEqual([]);
     await saveWpdoc('/x/del.wpdoc', { version: 1, docJSON: editor.getJSON(), metadata: {} });
-    // The packaged media list AT THE WIRE BOUNDARY: nothing orphaned,
-    // nothing phantom — the deleted image's sha is GONE.
+    // The packaged media list at the wire boundary: the deleted
+    // image's sha is gone — nothing orphaned, nothing phantom.
     const packaged = wpdocFiles.get('/x/del.wpdoc')!;
     expect(packaged.kind).toBe('v2');
     expect(packaged.media.map((m) => m.id)).not.toContain(sha);
-    // And while the image existed, the SAME flow packaged it:
+    // And while the image existed, the same flow packaged it:
     await saveWpdoc('/x/with.wpdoc', { version: 1, docJSON: withImage.docJSON, metadata: {} });
     expect((wpdocFiles.get('/x/with.wpdoc')! as { media: { id: string }[] }).media.map((m) => m.id)).toEqual([sha]);
   });
 });
 
-// ─── 9. Zero-fetch: external URL + cancelled dialog ─────────────────────
-
 describe('external images (the refusal gate)', () => {
-  it('M-IMAGES-1.5: an external URL paste is REFUSED with a toast — zero network calls, no download arm', async () => {
+  it('an external URL paste is REFUSED with a toast — zero network calls, no download arm', async () => {
     expect(isExternalImageUrl('https://example.com/pic.png')).toBe(true);
     expect(isExternalImageUrl('media://abc123')).toBe(false);
     // The Editor's paste handler fires the toast and never invokes:
@@ -922,7 +905,7 @@ describe('external images (the refusal gate)', () => {
       });
       expect(handled).toBe(true); // the paste was intercepted
       expect(addSpy).toHaveBeenCalledTimes(1); // the refusal toast
-      // ZERO network calls — the download arm is deleted:
+      // Zero network calls — no fetch_url:
       const invokeMock = (await import('@tauri-apps/api/core')).invoke as unknown as ReturnType<typeof vi.fn>;
       expect(invokeMock.mock.calls.filter(([cmd]) => cmd === 'fetch_url')).toHaveLength(0);
     } finally {
@@ -931,7 +914,7 @@ describe('external images (the refusal gate)', () => {
   });
 });
 
-// ─── 10. Backfill: dim-less legacy node ─────────────────────────────────
+// Backfill: dim-less legacy node
 
 describe('backfill', () => {
   it('a dim-less node gets dims written from the store → the sentinel clears (paginated re-engages)', async () => {

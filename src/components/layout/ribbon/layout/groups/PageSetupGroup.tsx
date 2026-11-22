@@ -11,24 +11,9 @@ import { PAGE_SIZES } from '@/lib/document/pageSetup';
 import { applyPageSetup } from '@/lib/editor/sections';
 
 /**
- * Layout tab > Page Setup: the ONE dialog entrance (paper/orientation/
- * margins with an Apply-to scope — #58), plus the DOCUMENT-WIDE quick
- * controls (orientation toggle, paper size) and the document-level page
- * background.
- *
- * #58 THE RIBBON'S SCOPE: the quick controls are DOCUMENT-WIDE — a
- * size dropdown at the top of the Layout tab reads as "the paper this
- * document prints on", and predictability beats cleverness (the dialog
- * is the scoped surface: this section / this point forward). The write
- * merges a PARTIAL into every section's setup + the store in ONE
- * commit (applyPageSetup('document', …)).
- *
- * PAGELESS MODE: the Page Setup button stays LIVE — the dialog grows a
- * Paginated/Pageless toggle and shows the strip's fields (margins
- * incl. Full, page background) in pageless mode. The ORIENTATION and
- * PAPER SIZE quick controls remain disabled — they are paginated
- * facts with no pageless meaning. Page Background stays LIVE in both
- * modes (one setting, two surfaces).
+ * #58 — the scoped Page Setup dialog entrance plus document-wide quick
+ * controls; writes merge into every section + the store in one commit.
+ * In pageless mode only the paginated quick controls disable.
  */
 export function PageSetupGroup() {
   const pageSetup = useDocumentStore((s) => s.pageSetup);
@@ -53,9 +38,7 @@ export function PageSetupGroup() {
 
   return (
     <RibbonGroup>
-      {/* THE ONE Page Setup entrance (#58): paper, orientation, and
-          margins with an Apply-to scope (whole document / this section
-          / this point forward) — the commit-gated dialog. */}
+      {/* #58 — the Page Setup entrance: paper, orientation, margins with an Apply-to scope. */}
       <IconButton
         label="Page Setup"
         icon={<Proportions size={16} />}
@@ -82,9 +65,8 @@ export function PageSetupGroup() {
             >
               <SelectTrigger aria-label="Paper Size (whole document)" className="mx-1.5 h-8 w-32 gap-1.5 text-sm">
                 <Proportions size={14} className="shrink-0 text-muted-foreground" />
-                {/* The label renders from the store's value (the
-                    base-ui Select.Value re-resolution quirk — the
-                    dialog's lesson). */}
+                {/* The label renders from the store's value (base-ui's
+                    Select.Value re-resolution quirk). */}
                 <SelectValue>
                   {pageSetup.pageSize === 'custom'
                     ? 'Custom…'
@@ -108,9 +90,8 @@ export function PageSetupGroup() {
         <TooltipContent>Paper Size (whole document)</TooltipContent>
       </Tooltip>
 
-      {/* #58 — DOCUMENT-WIDE (the quick-controls law): the color merges
-          into every section + the store. Per-section colors live in the
-          Page Setup dialog (the scope decides where they land). */}
+      {/* #58 — document-wide: the color merges into every section +
+          the store; per-section colors live in the dialog. */}
       <ColorPickerButton
         label="Page Background (whole document)"
         icon={<PaintBucket size={16} />}

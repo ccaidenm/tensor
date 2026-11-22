@@ -7,10 +7,9 @@ import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
 import { insertTableAtSelection } from '@/lib/editor/tableInsert';
 
 /**
- * M-TABLES — the Word-style insertion grid: hover to size (cells light
- * up as an rows×cols preview), click to insert. "Insert Table…" hands
- * off to the exact-dimension dialog. All three entry points (grid,
- * dialog, palette) converge on editor.commands.insertTable.
+ * The Word-style insertion grid: hover to size, click to insert;
+ * "Insert Table…" opens the exact-dimension dialog. All entry points
+ * (grid, dialog, palette) converge on the same insert path.
  */
 
 const MAX_GRID = 8;

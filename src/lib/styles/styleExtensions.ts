@@ -6,13 +6,13 @@ import { headingStyleId, isHeadingStyleId } from '@/lib/styles/types';
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     styleCommands: {
-      /** Apply a paragraph-kind style: set styleId, CONVERT the node
-       * for heading entries, convert a heading back to a paragraph for
-       * every other entry (M-STYLES amendment 4). */
+      /** Apply a paragraph-kind style: set styleId; heading entries
+       *  convert the node, any other entry converts a heading back
+       *  to a paragraph. */
       applyParagraphStyle: (styleId: string) => ReturnType;
       /** Apply a character-kind style as the charStyle mark. Replaces
-       * any existing charStyle mark on the span (one per span,
-       * amendment 5) and stacks with bold/italic/textStyle. */
+       *  any existing charStyle on the span and stacks with
+       *  bold/italic/textStyle. */
       applyCharStyle: (styleId: string) => ReturnType;
       removeCharStyle: () => ReturnType;
     };
@@ -21,12 +21,9 @@ declare module '@tiptap/core' {
 
 /**
  * The charStyle mark — a reference into the style registry, never
- * stamped props. ONE CHAR STYLE PER SPAN (amendment 5): the mark's
- * default `excludes` is its own name, so applying charStyle{b} over
- * charStyle{a} REPLACES it (Word-like) — while remaining stackable
- * with bold/italic/textStyle, which are not in the exclude set.
- * "Non-exclusive" in the M-STYLES model means stacks with FORMATTING
- * marks, never with itself.
+ * stamped props. One char style per span: `excludes` is its own
+ * name, so applying charStyle{b} over charStyle{a} replaces it,
+ * while bold/italic/textStyle still stack.
  */
 export const CharStyleMark = Mark.create({
   name: 'charStyle',
@@ -52,12 +49,9 @@ export const CharStyleMark = Mark.create({
 });
 
 /**
- * HEADING SYNC (amendment 4, mint pattern, reactive): a heading node's
- * style identity is ALWAYS `heading-{level}`. Any doc-changing
- * transaction re-aligns mismatches — Ctrl+Alt+2 on a level-1 head
- * restyles to heading-2, a heading typed over a custom-styled
- * paragraph takes the heading tier's style (Word: applying a heading
- * replaces the style). Runs alongside BlockIdExtension's mint pass.
+ * Heading sync: a heading's style identity is always
+ * `heading-{level}` — any doc-changing transaction re-aligns
+ * mismatches (a heading typed over a custom paragraph takes it too).
  */
 function syncHeadingStyleIds(doc: PMNode, tr: Transaction): boolean {
   let modified = false;
@@ -72,9 +66,8 @@ function syncHeadingStyleIds(doc: PMNode, tr: Transaction): boolean {
   return modified;
 }
 
-/** Load-path twin of the appendTransaction sync (setContent dispatches
- * a doc-changed transaction, so the sync fires; this covers creation
- * paths that never dispatch — mirroring ensureBlockIds). */
+/** Load-path twin of the appendTransaction sync — covers creation
+ *  paths that never dispatch a doc-changed transaction. */
 export function ensureStyleSync(editor: Editor): void {
   const { state, view } = editor;
   const tr = state.tr;
@@ -96,14 +89,14 @@ export const StyleCommandsExtension = Extension.create({
           if (parentName !== 'paragraph' && parentName !== 'heading') return false;
 
           if (isHeadingStyleId(styleId)) {
-            // Heading entries CONVERT the node (Word: heading styles are
-            // node-kind + level); the sync plugin aligns styleId.
+            // Heading entries convert the node (Word: heading styles
+            // are node-kind + level); the sync plugin aligns styleId.
             const level = parseInt(styleId.slice('heading-'.length), 10);
             return chain().focus().setHeading({ level }).run();
           }
           if (parentName === 'heading') {
-            // Every non-heading paragraph style CONVERTS the heading
-            // back to a paragraph carrying the styleId (amendment 4).
+            // Every non-heading paragraph style converts the heading
+            // back to a paragraph carrying the styleId.
             return chain()
               .focus()
               .setParagraph()

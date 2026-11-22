@@ -7,7 +7,7 @@ import { useConfigStore } from '@/lib/config/store';
 import { zoneForPointer } from '@/lib/layout/sidebar/SidebarHost';
 
 /**
- * #101 — DRAGGABLE SIDEBARS: the dock-edge resize handle — the drag
+ * #101 — draggable sidebars: the dock-edge resize handle — the drag
  * math (directional per anchor), the clamps, the width memory (per
  * sidebar, committed on release), and the double-click reset.
  *

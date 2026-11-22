@@ -9,10 +9,9 @@ import {
 import { renderTensor } from './harness';
 
 /**
- * M-MD — the markdown mapping suite (manager level: parse/serialize are
- * pure functions of their input; no editor, no Tauri). The file-flow
- * suite (markdown-io.test.tsx) owns the dialog/fs behavior; this file
- * owns the mapping + lossy classification + the AC round-trip.
+ * The markdown mapping suite (manager level: parse/serialize are pure
+ * functions; no editor, no Tauri). The file-flow suite
+ * (markdown-io.test.tsx) owns the dialog/fs behavior.
  */
 
 const SHA = 'a'.repeat(64); // valid hex — the content-address shape
@@ -107,7 +106,7 @@ describe('markdown mapping — inline + block (stock handlers)', () => {
   });
 });
 
-describe('markdown mapping — images (M-MD specs)', () => {
+describe('markdown mapping — images (markdown specs)', () => {
   it('exports a block image as the media placeholder and reimports it as a block image', () => {
     const json = doc({
       type: 'image',
@@ -337,7 +336,7 @@ describe('lossy classification', () => {
   });
 });
 
-describe('markdown → editor (schema validity, M-MD)', () => {
+describe('markdown → editor (schema validity)', () => {
   it('parsed markdown lands in the production editor with every construct', () => {
     const md = [
       '# Markdown import',

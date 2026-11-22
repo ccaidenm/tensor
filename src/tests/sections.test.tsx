@@ -16,10 +16,8 @@ import { fireEvent, render } from '@testing-library/react';
 
 let mountedDialog: ReturnType<typeof render> | null = null;
 
-/** The dialog rides alongside the editor exactly as App mounts it.
- *  Self-cleaning: a previous test's dialog (still bound to the shared
- *  properties store) would otherwise double-apply on the shared Done
- *  click — the stale one unmounts first. */
+/** Mounted alongside the editor as App does. Self-cleaning: a stale
+ *  dialog would double-apply on Done — the previous one unmounts first. */
 function renderSectionDialog(): void {
   mountedDialog?.unmount();
   mountedDialog = render(<PageSetupDialog />);
@@ -29,11 +27,9 @@ const threeSections =
   '<p>one</p><div data-section-break></div><p>two</p><div data-section-break></div><p>three</p>';
 
 /**
- * #58 SECTIONS — the shell suite: the node's insert law (split-dance,
- * seeded setup), the adapter's boundary resolution (the engine's
- * section-start table), and the VIEW's mixed-page rendering (sheets
- * sized per their own section). The ENGINE's laws live in the
- * engine's own suite (packages/engine/tests/sections.test.ts).
+ * #58 — the shell suite: the node's insert behavior, the adapter's
+ * boundary resolution, and per-section sheet sizing. Engine-level
+ * behavior lives in packages/engine/tests/sections.test.ts.
  */
 
 
@@ -117,10 +113,8 @@ describe('the adapter — boundary resolution', () => {
       undefined,
       useDocumentStore.getState().pageSetup,
     );
-    // THE COMPLETE TABLE (1 break → 2 sections): section 0's start at
-    // the doc begin (afterBlock −1, A4 — the break carries the
-    // PRECEDING section's props) + the FINAL section after the break
-    // (afterBlock 0) riding the doc's pageSetup (the seeded Letter).
+    // 1 break → 2 sections: the break carries the PRECEDING section's
+    // props; the final section rides the doc's pageSetup.
     expect(adapted.sections).toHaveLength(2);
     expect(adapted.sections![0]!.afterBlock).toBe(-1);
     expect(adapted.sections![0]!.geometry.page).toMatchObject(
@@ -160,8 +154,7 @@ describe('the view — mixed page sizes render per section', () => {
     const letterW = Math.round((612 * 96) / 72);
     const firstSheet = sheets[0]!;
     const lastSheet = sheets[sheets.length - 1]!;
-    // The break carries the PRECEDING section's props: section 0 = A4
-    // (the setup we seeded), section 1 = the Letter defaults.
+    // The break carries the PRECEDING section's props: section 0 = A4, section 1 = Letter.
     expect(firstSheet.style.width).toBe(`${a4W}px`);
     expect(lastSheet.style.width).toBe(`${letterW}px`);
     expect(a4W).not.toBe(letterW);
@@ -171,7 +164,6 @@ describe('the view — mixed page sizes render per section', () => {
     const { editor } = renderTensor('<p>first page content</p><div data-section-break></div><p>second section</p>');
     await settleLayout();
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
-    // Two one-paragraph sections → the boundary forced a second sheet.
     expect(sheets.length).toBe(2);
     void editor;
   });
@@ -186,7 +178,7 @@ describe('the view — mixed page sizes render per section', () => {
   });
 });
 
-describe('Phase 2 — the tagged band containers', () => {
+describe('the tagged band containers', () => {
   const longText = '<p>' + 'word '.repeat(400) + '</p>';
 
   /** Insert a break and retag it with a KNOWN sectionId (the deterministic
@@ -288,7 +280,7 @@ describe('Phase 2 — the tagged band containers', () => {
     };
     expect(countByType()).toMatchObject({ breaks: 1, tagged: 1 });
 
-    // Select the break (NodeSelection) → the merge law.
+    // Select the break (NodeSelection).
     const found = findBreak(editor);
     act(() => {
       editor.view.dispatch(
@@ -300,10 +292,7 @@ describe('Phase 2 — the tagged band containers', () => {
       deleted = deleteSectionBreakNear(editor, 'back');
     });
     expect(deleted).toBe(true);
-    // The break AND the tagged container are gone (the merged section
-    // keeps its own bands; the doc default is untouched).
     expect(countByType()).toMatchObject({ breaks: 0, tagged: 0 });
-    // ONE undo step restores BOTH (the single-transaction law).
     act(() => {
       editor.commands.undo();
     });
@@ -324,7 +313,6 @@ describe('Phase 2 — the tagged band containers', () => {
     act(() => {
       enableRegion(editor, 'header', 'default', 'sec-a');
     });
-    // The override exists, tagged, and its content COPIES the default.
     let found: { text: string; tag: string | null } | null = null;
     editor.state.doc.descendants((node) => {
       if (node.type.name !== 'headerBlock' || node.attrs.sectionId !== 'sec-a') return true;
@@ -340,8 +328,6 @@ describe('Phase 2 — the tagged band containers', () => {
   });
 
   it('a section INHERITING the live default has no slot on its pages; an unsectioned doc is unchanged', async () => {
-    // Doc default header + a sectioned doc → section 1's pages inherit
-    // (no slot), while a section with NEITHER shows the slot.
     const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
     act(() => {
       editor.commands.insertContentAt(0, {
@@ -351,18 +337,16 @@ describe('Phase 2 — the tagged band containers', () => {
       });
     });
     await settleLayout();
-    // Section 0 AND section 1 inherit the doc default — NO slots anywhere.
     expect(document.querySelector('[data-testid="hf-slot-header"]')).toBeNull();
     void editor;
   });
 });
 
-describe('Phase 2 — merge-on-delete adjacency', () => {
+describe('merge-on-delete adjacency', () => {
   it('Backspace at the block start after a break merges (caret-adjacent, not just NodeSelection)', () => {
     const { editor } = renderTensor('<p>body</p>');
     const tagged = 'sec-adj';
-    // insertSectionBreak leaves the caret in the paragraph AFTER the
-    // break — retag, then a tagged container to drop with it.
+    // insertSectionBreak leaves the caret after the break — retag, then a tagged container to drop with it.
     act(() => {
       editor.commands.insertSectionBreak();
     });
@@ -382,9 +366,7 @@ describe('Phase 2 — merge-on-delete adjacency', () => {
         content: [{ type: 'paragraph' }],
       });
     });
-    // The caret lands in the paragraph AFTER the break (the insert
-    // law) — but the insertContentAt calls above moved it. Set it
-    // back: the last paragraph's text start (the Backspace posture).
+    // The insertContentAt calls moved the caret — reset it to the last paragraph's text start (the Backspace posture).
     act(() => {
       editor.commands.setTextSelection(editor.state.doc.content.size - 1);
     });
@@ -405,7 +387,7 @@ describe('Phase 2 — merge-on-delete adjacency', () => {
   });
 });
 
-describe('Phase 3 — the Section Properties dialog', () => {
+describe('the Section Properties dialog', () => {
   const threeSections =
     '<p>one</p><div data-section-break></div><p>two</p><div data-section-break></div><p>three</p>';
 
@@ -430,10 +412,7 @@ describe('Phase 3 — the Section Properties dialog', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // The dialog names the caret's section ("Section 2 of 3").
     expect(document.body.textContent).toContain('Section 2 of 3');
-    // The scope: 'Specific section' — reveals the chips and AUTO-
-    // selects the caret's section.
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
     });
@@ -443,16 +422,13 @@ describe('Phase 3 — the Section Properties dialog', () => {
     act(() => {
       fireEvent.click(presetBtn);
     });
-    // The HTML fixture carries NO setup attrs — the dialog falls back
-    // to the store (the effective setup); the commit WRITES the break.
+    // The fixture carries NO setup attrs — the dialog falls back to the store; the commit writes the break.
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup;
-    // Done → ONE commit → break 1's setup carries Narrow.
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     const positions = breakPositions(editor);
     expect(setupOf(positions[1]!).margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
-    // Break 0 untouched (its section wasn't the target — still null).
     expect(setupOf(positions[0]!)).toBeNull();
   });
 
@@ -468,8 +444,6 @@ describe('Phase 3 — the Section Properties dialog', () => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
     expect(document.body.textContent).toContain('Section 3 of 3');
-    // The scope: 'Specific section' — the chips auto-select the FINAL
-    // (the store's props holder).
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
     });
@@ -481,10 +455,7 @@ describe('Phase 3 — the Section Properties dialog', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // The STORE carries Narrow; the breaks untouched.
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
-    // The breaks' attrs stay null (the final section writes the store;
-    // the fixture carried no setup attrs to begin with).
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
     expect(setupOf(positions[0]!)).toBeNull();
     expect(setupOf(positions[1]!)).toBeNull();
@@ -497,29 +468,25 @@ describe('Phase 3 — the Section Properties dialog', () => {
     await settleLayout();
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
     const a4W = Math.round((595 * 96) / 72);
-    // Section 0's pages are A4-wide; the final section's are Letter.
     expect(sheets[0]!.style.width).toBe(`${a4W}px`);
     expect(sheets[sheets.length - 1]!.style.width).toBe(`${GEOMETRY.pageWidth}px`);
   });
 });
 
-describe('Phase 4 — persistence + the sweep', () => {
+describe('persistence + the sweep', () => {
   it('a sectioned doc round-trips .wpdoc (the break attrs ride docJSON, zero format change)', async () => {
     const { DocumentFileSchema } = await import('@/lib/document/schema');
     const { editor } = renderTensor('<p>one</p><div data-section-break></div><p>two</p>');
     setBreakSetup(editor, { pageSize: 'A4', orientation: 'portrait', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP });
-    // The .wpdoc's docJSON = the PM doc's JSON — the break node rides
-    // verbatim (the z.any() passthrough).
+    // The break node rides docJSON verbatim (the z.any() passthrough).
     const docJSON = editor.state.doc.toJSON();
     const roundTripped = DocumentFileSchema.parse({
       version: 1,
       docJSON,
       metadata: { pageSetup: useDocumentStore.getState().pageSetup },
     });
-    // The schema passed the break node through untouched.
     const content = (roundTripped.docJSON as { content: { type: string }[] }).content;
     expect(content.some((n) => n.type === 'sectionBreak')).toBe(true);
-    // And the JSON re-opens: setContent restores the break + its attrs.
     const { editor: editor2 } = renderTensor();
     act(() => {
       editor2.commands.setContent(docJSON as never);
@@ -530,14 +497,12 @@ describe('Phase 4 — persistence + the sweep', () => {
   });
 });
 
-describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
+describe('the ONE Page Setup dialog (Apply-to scopes)', () => {
   const threeSections =
     '<p>one</p><div data-section-break></div><p>two</p><div data-section-break></div><p>three</p>';
 
   beforeEach(() => {
-    // The document store is a singleton — earlier describes' setup
-    // writes (the final-section dialog test leaves Narrow) must not
-    // bleed into the scope assertions.
+    // The store is a singleton — earlier describes' writes must not bleed into the scope assertions.
     useDocumentStore.getState().setPageSetup({
       pageSize: 'Letter',
       orientation: 'portrait',
@@ -582,10 +547,8 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
-    // Break 1 (section 1's props) carries Narrow; break 0 untouched.
     expect(setupOf(breakPositions(editor)[1]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
     expect(setupOf(breakPositions(editor)[0]!)).toBeNull();
-    // The store (the final section) untouched.
     expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
   });
 
@@ -595,7 +558,6 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // The scope defaults to 'This section' — switch to Whole document.
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"] button')].find((b) => b.textContent === 'Whole document')!);
     });
@@ -607,7 +569,6 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
-    // EVERY break carries Narrow; the store too.
     for (const pos of breakPositions(editor)) {
       expect(setupOf(pos)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
     }
@@ -616,10 +577,7 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
 
   it('This point forward: inserts a break seeded with the CURRENT setup; the following section gets the draft', async () => {
     const { editor } = renderTensor('<p>one</p><p>two</p>');
-    // The caret in the SECOND paragraph → section 0. Point forward →
-    // a break at the caret (seeded with section 0's effective = the
-    // store's Letter) + the FOLLOWING section (the store, since no
-    // next break) gets the draft.
+    // Caret in the second paragraph → point forward inserts a break (seeded with the store's Letter); the following section gets the draft.
     act(() => {
       editor.commands.setTextSelection(editor.state.doc.content.size - 1);
     });
@@ -628,9 +586,7 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // A uniform doc KEEPS the scope row visible (the dialog holds its
-    // size) but disables the section-only controls; the write still
-    // collapses to the store.
+    // A uniform doc keeps the scope row visible but disables the section-only controls; the write collapses to the store.
     const thisSectionBtn = [...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')]
       .find((b) => b.textContent === 'Specific section') as HTMLButtonElement;
     expect(thisSectionBtn.disabled).toBe(true);
@@ -641,7 +597,6 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // The uniform doc's write = the store (the scopes collapse to it).
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
     expect(breakPositions(editor).length).toBe(breaksBefore);
   });
@@ -649,8 +604,7 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
   it('This point forward in a SECTIONED doc: the break is inserted + the next holder carries the draft', async () => {
     const { editor } = renderTensor(threeSections);
     const before = breakPositions(editor);
-    // The caret in 'one' (section 0) → point forward → a break inside
-    // section 0 + section 1 (break 1's attrs) gets the draft.
+    // Caret in 'one' (section 0) → a break lands inside section 0; section 1 (break 1) gets the draft.
     act(() => {
       editor.commands.setTextSelection(1); // inside 'one'
     });
@@ -668,12 +622,8 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // THREE breaks now (one inserted at the caret — the doc's very
-    // start, so ALL content follows it). The inserted break (ordinal
-    // 0) seeds section 0's effective (the store's Letter/Normal — the
-    // fixture carries no attrs); the FOLLOWING section's holder (old
-    // break 0, now ordinal 1) carries the draft (Narrow); the last
-    // break is untouched.
+    // THREE breaks now: the inserted one (ordinal 0) seeds the store's
+    // effective; old break 0 (now ordinal 1) carries the draft.
     const after = breakPositions(editor);
     expect(after.length).toBe(before.length + 1);
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
@@ -684,8 +634,7 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
 
   it('the RIBBON quick controls are document-wide (orientation merges into every break)', async () => {
     const { editor } = renderTensor(threeSections);
-    // The orientation toggle path (the group's handler is a module
-    // function — drive it through the same helper the group calls).
+    // The ribbon's handler is a module function — drive the same helper it calls.
     act(() => {
       applyPageSetup('document', { ...useDocumentStore.getState().pageSetup, orientation: 'landscape' }, { orientation: 'landscape' });
     });
@@ -697,7 +646,7 @@ describe('Phase 5 — the ONE Page Setup dialog (Apply-to scopes)', () => {
   });
 });
 
-describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
+describe('continuous breaks, the chooser, the start type', () => {
   /** The sectionBreak positions (doc order). */
   function breakPositions(editor: NonNullable<ReturnType<typeof useDocumentStore.getState>['editor']>): number[] {
     const positions: number[] = [];
@@ -726,21 +675,17 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     const found = findBreak(editor);
     expect(found!.node.attrs.type).toBe('continuous');
     await settleLayout();
-    // Same geometry → the sections SHARE the page (one sheet).
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
     expect(sheets.length).toBe(1);
   });
 
   it('a continuous break with a DIFFERENT geometry upgrades to a page start (the view law)', async () => {
     const { editor } = renderTensor('<p>one</p><div data-section-break data-section-type="continuous"></div><p>two</p>');
-    // Break 0 carries the PRECEDING section's props: section 0 = A4;
-    // the final section (the store) = Letter → the geometries differ
-    // → Word's auto-upgrade: the continuous boundary opens a page.
+    // Section 0 = A4 vs the store's Letter → the continuous boundary auto-upgrades to a page start.
     setBreakSetup(editor, { pageSize: 'A4', orientation: 'portrait', margins: DEFAULT_MARGINS, pageGap: PAGE_GAP });
     await settleLayout();
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
     expect(sheets.length).toBe(2);
-    // Page 0 = section 0's A4; page 1 = the final section's Letter.
     const a4W = Math.round((595 * 96) / 72);
     expect(sheets[0]!.style.width).toBe(`${a4W}px`);
     expect(sheets[1]!.style.width).toBe(`${GEOMETRY.pageWidth}px`);
@@ -752,8 +697,7 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // The scope: 'Specific section' reveals the chips (auto-selecting
-    // the caret's section — the LAST); toggling chip 1 yields {1, 3}.
+    // Chips auto-select the caret's (last) section; toggling chip 1 yields {1, 3}.
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
     });
@@ -769,8 +713,6 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     });
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
     const positions = breakPositions(editor);
-    // Break 0 (section 1's props) = Narrow; break 1 (section 2)
-    // untouched; the store (section 3, chosen) = Narrow.
     expect(setupOf(positions[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
     expect(setupOf(positions[1]!)).toBeNull();
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
@@ -787,8 +729,7 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // The scope: 'Specific section' (the start control targets the
-    // caret's section; its start boundary = break 0).
+    // 'Specific section': the start control targets break 0 (section 1's start boundary).
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
     });
@@ -798,7 +739,6 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // Break 0 (the boundary where section 1 starts) is now continuous.
     const node = editor.state.doc.nodeAt(breakPositions(editor)[0]!)!;
     expect(node.attrs.type).toBe('continuous');
   });
@@ -820,7 +760,7 @@ describe('Phase 6 — continuous breaks, the chooser, the start type', () => {
   });
 });
 
-describe('Phase 7 — per-section page background', () => {
+describe('per-section page background', () => {
   beforeEach(() => {
     useDocumentStore.getState().setPageSetup({
       pageSize: 'Letter',
@@ -834,8 +774,6 @@ describe('Phase 7 — per-section page background', () => {
   it('each section paints ITS background; an unset section inherits the doc default', async () => {
     const longText = '<p>' + 'word '.repeat(300) + '</p>';
     const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
-    // Section 0's setup carries a tint; the store's (the final
-    // section + the doc default) carries another.
     setBreakSetup(editor, {
       pageSize: 'Letter',
       orientation: 'portrait',
@@ -852,32 +790,13 @@ describe('Phase 7 — per-section page background', () => {
     await settleLayout();
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
     expect(sheets.length).toBeGreaterThanOrEqual(2);
-    // Section 0's sheets wear its tint; the final section's wear the
-    // doc default.
     expect(sheets[0]!.style.backgroundColor).toBe('rgb(255, 238, 221)');
     expect(sheets[sheets.length - 1]!.style.backgroundColor).toBe('rgb(221, 238, 255)');
   });
 
-  it('the background bucket in Page Setup edits the DRAFT (Done applies per the scope)', async () => {
-    const { editor } = renderTensor('<p>body</p>');
-    renderSectionDialog();
-    act(() => {
-      useDocumentPropertiesStore.getState().openPageSetup();
-    });
-    // The draft's color changes — the store untouched until Done.
-    act(() => {
-      const bucket = document.querySelector('[aria-label="Page background"]') as HTMLButtonElement;
-      fireEvent.click(bucket);
-    });
-    // The palette popover opens — pick the custom color input path is
-    // ColorPickerButton's internals; drive the draft directly through
-    // the swatch's onChange is not reachable — assert the default.
-    expect(useDocumentStore.getState().pageSetup.pageColor ?? '').toBe('');
-    void editor;
-  });
 });
 
-describe('Phase 8 — the page-setup co-undo', () => {
+describe('the page-setup co-undo', () => {
   /** The sectionBreak positions (doc order). */
   function breakPositions(editor: NonNullable<ReturnType<typeof useDocumentStore.getState>['editor']>): number[] {
     const positions: number[] = [];
@@ -900,10 +819,8 @@ describe('Phase 8 — the page-setup co-undo', () => {
 
   it('a document-scope Done reverts BOTH the break merges and the store in ONE Ctrl+Z', async () => {
     const { editor } = renderTensor(threeSections);
-    // The history GROUPS sub-800ms-apart transactions into ONE item —
-    // the test's Done would merge into the setContent item and one
-    // undo would revert BOTH (the real user's open→edit gap is
-    // seconds). The sleep keeps the page-setup write its own item.
+    // History groups sub-800ms-apart transactions; the sleep keeps
+    // the Done its own item so one undo reverts only it.
     await new Promise((r) => setTimeout(r, 850));
     renderSectionDialog();
     act(() => {
@@ -916,18 +833,15 @@ describe('Phase 8 — the page-setup co-undo', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // The write landed: every break merged + the store carries Narrow.
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
     expect(setupOf(breakPositions(editor)[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
-    // ONE Ctrl+Z reverts the PM part AND the store part.
     act(() => {
       editor.commands.undo();
     });
     expect(setupOf(breakPositions(editor)[0]!)).toBeNull();
     expect(setupOf(breakPositions(editor)[1]!)).toBeNull();
     expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
-    // Ctrl+Y re-applies both.
     act(() => {
       editor.commands.redo();
     });
@@ -950,22 +864,19 @@ describe('Phase 8 — the page-setup co-undo', () => {
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
-    // Typing AFTER the write — its OWN history item (another gap, or
-    // it would merge into the Done item).
+    // Typing needs its own history item (another gap, or it merges into the Done item).
     await new Promise((r) => setTimeout(r, 850));
     act(() => {
       editor.commands.setTextSelection(1);
       editor.commands.insertContent('X');
     });
     expect(editor.state.doc.textContent.startsWith('X')).toBe(true);
-    // Ctrl+Z #1: the typing (the page-setup write is buried).
     act(() => {
       editor.commands.undo();
     });
     expect(editor.state.doc.textContent.startsWith('X')).toBe(false);
     const setupOf = (pos: number) => editor.state.doc.nodeAt(pos)!.attrs.setup as PageSetup | null;
     expect(setupOf(breakPositions(editor)[0]!)!.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
-    // Ctrl+Z #2: the page-setup action (breaks + store together).
     act(() => {
       editor.commands.undo();
     });
@@ -975,7 +886,6 @@ describe('Phase 8 — the page-setup co-undo', () => {
 
   it('a store-only write (the final section) undoes on its own', async () => {
     const { editor } = renderTensor(threeSections);
-    const [brk0] = breakPositions(editor);
     act(() => {
       editor.commands.setTextSelection(editor.state.doc.content.size - 1); // the final section
     });
@@ -983,8 +893,7 @@ describe('Phase 8 — the page-setup co-undo', () => {
     act(() => {
       useDocumentPropertiesStore.getState().openPageSetup();
     });
-    // The scope: 'Specific section' — the chips auto-select the FINAL
-    // (the store's props holder — a store-only write).
+    // 'Specific section' auto-selects the FINAL section — a store-only write.
     act(() => {
       fireEvent.click([...document.querySelectorAll('[role="group"][aria-label="Apply to"] button')].find((b) => b.textContent === 'Specific section')!);
     });
@@ -996,16 +905,14 @@ describe('Phase 8 — the page-setup co-undo', () => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     expect(useDocumentStore.getState().pageSetup.margins).toEqual({ top: 36, bottom: 36, left: 36, right: 36 });
-    // ONE Ctrl+Z restores the store (no PM part — the doc is untouched).
     act(() => {
       editor.commands.undo();
     });
     expect(useDocumentStore.getState().pageSetup.margins).toEqual(DEFAULT_MARGINS);
-    void brk0;
   });
 });
 
-describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
+describe('the co-redo coincidence guard (the user repro)', () => {
   beforeEach(() => {
     useDocumentStore.getState().setPageSetup({
       pageSize: 'Letter',
@@ -1032,18 +939,13 @@ describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
     act(() => {
       fireEvent.click(document.querySelector('[aria-label="Page background"]')!);
     });
-    // The ColorPickerButton's popover internals drive custom colors —
-    // set the draft's color through the palette's public path is its
-    // own component's suite; the swatch here is the default. The
-    // color's DRAFT write is covered by the dialog flow; this test
-    // pins the UNDO/REDO machinery, so Wide alone carries it.
+    // The custom-color path is ColorPickerButton internals (its own suite); this pins the UNDO/REDO machinery, so Wide alone carries it.
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Done')!);
     });
     const setupOf = () => useDocumentStore.getState().pageSetup;
     const WIDE = MARGIN_PRESETS.Wide.margins;
     expect(setupOf().margins).toEqual(WIDE);
-    // The dance: undo, redo, undo.
     act(() => {
       editor.commands.undo();
     });
@@ -1054,8 +956,7 @@ describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
       editor.commands.undo();
     });
     expect(setupOf().margins).toEqual(DEFAULT_MARGINS);
-    // Bold, then unbold (a net-zero mark cycle — the doc returns to
-    // the post-page-setup snapshot BY COINCIDENCE).
+    // Bold then unbold: a net-zero cycle — the doc coincidentally matches the post-page-setup snapshot.
     act(() => {
       editor.commands.selectAll();
       editor.commands.toggleBold();
@@ -1063,7 +964,6 @@ describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
     act(() => {
       editor.commands.toggleBold();
     });
-    // Ctrl+Z: the bold item (net zero) — the page setup must NOT move.
     act(() => {
       editor.commands.undo();
     });
@@ -1077,7 +977,7 @@ describe('Phase 9 — the co-redo coincidence guard (the user repro)', () => {
   });
 });
 
-describe('Phase 10 — per-section header/footer unlink + relink', () => {
+describe('per-section header/footer unlink + relink', () => {
   /** Insert a break and retag it with a KNOWN sectionId. */
   function insertBreakTagged(
     editor: NonNullable<ReturnType<typeof useDocumentStore.getState>['editor']>,
@@ -1114,17 +1014,14 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
       '<header-block><p>DOC HEADER</p></header-block>' + longText + '<div data-section-break></div>' + longText,
     );
     await settleLayout();
-    // The doc default header exists → every section inherits → the
-    // strips are LIVE (no slots).
     expect(document.querySelector('[data-testid="hf-slot-header"]')).toBeNull();
-    // Double-click the header strip on a SECTION 1 page: the stack
-    // rect mocked to origin; page 1's top = pageHeight + gap.
+    // Double-click page 1's header strip: the stack rect is mocked to
+    // origin; page 1's top = pageHeight + gap.
     const stack = document.querySelector('[data-testid="paginated-stack"]') as HTMLElement;
     stack.getBoundingClientRect = () =>
       ({ left: 0, top: 0, right: 816, bottom: 5000, width: 816, height: 5000, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     const page1Top = GEOMETRY.pageHeight + PAGE_GAP;
     fireEvent.doubleClick(stack, { clientX: 300, clientY: page1Top + 40 });
-    // The override exists, tagged, seeded with the inherited COPY.
     let found: { tag: string | null; text: string } | null = null;
     editor.state.doc.descendants((node) => {
       if (node.type.name === 'headerBlock' && node.attrs.sectionId) {
@@ -1135,7 +1032,6 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
     });
     expect(found).not.toBeNull();
     expect(found!.text).toBe('DOC HEADER');
-    // The doc default untouched (one container, untagged, still there).
     let defaultCount = 0;
     editor.state.doc.descendants((node) => {
       if (node.type.name === 'headerBlock' && !node.attrs.sectionId) defaultCount += 1;
@@ -1149,7 +1045,6 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
     const { editor } = renderTensor(
       '<header-block><p>DOC HEADER</p></header-block>' + longText + '<div data-section-break></div>' + longText,
     );
-    // Give the break a sectionId + a tagged override (section 1's own).
     const found = findBreak(editor);
     act(() => {
       editor.view.dispatch(
@@ -1191,7 +1086,6 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
   it('Link to Previous re-links: the tagged override is deleted, the section inherits again', async () => {
     const { editor } = renderTensor(threeSections);
     insertBreakTagged(editor, 'sec-a');
-    // A tagged override for section 1.
     act(() => {
       editor.commands.insertContentAt(0, {
         type: 'headerBlock',
@@ -1208,13 +1102,9 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
       return n;
     };
     expect(countTagged()).toBe(1);
-    // The grouping gap: PM merges sub-500ms-apart transactions into
-    // ONE history item — the setup trs + the relink would merge and
-    // one undo would revert everything at once (the real user's
-    // actions are seconds apart).
+    // The grouping gap: without it the setup trs + relink merge into ONE history item and one undo reverts everything.
     await new Promise((r) => setTimeout(r, 850));
-    // The caret INSIDE the tagged container → the Link to Previous
-    // button appears → click → the override is deleted (one undo step).
+    // Caret INSIDE the tagged container → the Link to Previous button appears.
     const container = (() => {
       let pos: number | null = null;
       editor.state.doc.descendants((node, p) => {
@@ -1230,15 +1120,13 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
     act(() => {
       editor.commands.setTextSelection(container + 2); // inside its paragraph
     });
-    // The Link to Previous toggle (the contextual tab) wraps THIS
-    // command — driven directly (the tab's mount is ribbon state).
+    // The contextual tab's toggle wraps relinkBand — driven directly (the tab's mount is ribbon state).
     let relinked = false;
     act(() => {
       relinked = relinkBand(editor, 'header', 'default', 'sec-a');
     });
     expect(relinked).toBe(true);
     expect(countTagged()).toBe(0);
-    // ONE undo restores the override.
     act(() => {
       editor.commands.undo();
     });
@@ -1246,7 +1134,7 @@ describe('Phase 10 — per-section header/footer unlink + relink', () => {
   });
 });
 
-describe('Phase 8 — per-page styles (#48)', () => {
+describe('per-page styles (#48)', () => {
   beforeEach(() => {
     useDocumentStore.getState().setPageSetup({
       pageSize: 'Letter',
@@ -1259,10 +1147,7 @@ describe('Phase 8 — per-page styles (#48)', () => {
   });
 
   it('the paint chain: per-page → per-section → doc → white', async () => {
-    // A long two-section doc (two sheets per section — ~57 lines
-    // each at FakeMetrics): the doc default wears one tint, section 0
-    // another, and ONE page override beats them all — each sheet
-    // proves its own layer.
+    // Two sheets per section at FakeMetrics: doc default, section tint, and one page override each own a sheet.
     const longText = '<p>' + 'word '.repeat(700) + '</p>';
     const { editor } = renderTensor(longText + '<div data-section-break></div>' + longText);
     setBreakSetup(editor, {
@@ -1282,8 +1167,6 @@ describe('Phase 8 — per-page styles (#48)', () => {
     await settleLayout();
     const sheets = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'));
     expect(sheets.length).toBeGreaterThanOrEqual(4);
-    // Page 1 wears the per-page override; page 0 wears section 0's
-    // tint; the final section's sheets wear the doc default.
     expect(sheets[0]!.style.backgroundColor).toBe('rgb(255, 238, 221)');
     expect(sheets[1]!.style.backgroundColor).toBe('rgb(18, 52, 86)');
     expect(sheets[sheets.length - 1]!.style.backgroundColor).toBe('rgb(221, 238, 255)');
@@ -1296,14 +1179,12 @@ describe('Phase 8 — per-page styles (#48)', () => {
     });
     expect(useDocumentStore.getState().pageStyles).toEqual({ 2: { background: '#101010' } });
 
-    // Clear: back to the section/doc chain.
     applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
       page: { index: 2, background: null },
     });
     expect(useDocumentStore.getState().pageStyles).toEqual({});
 
-    // No-op: an Apply of the same value writes NOTHING (no undo
-    // entry, no dirty flip beyond what already is).
+    // No-op: re-applying the same value writes NOTHING.
     applyPageSetup('page', useDocumentStore.getState().pageSetup, {}, {
       page: { index: 0, background: null },
     });
@@ -1355,13 +1236,12 @@ describe('Phase 8 — per-page styles (#48)', () => {
       '0': { background: '#101010' },
       '3': { background: '#f4f4f5' },
     });
-    // The open-side normalizer: numeric keys, garbage dropped.
     expect(normalizePageStyles({ '0': { background: '#101010' }, x: { background: 'nope' }, '3': {} }))
       .toEqual({ 0: { background: '#101010' } });
   });
 });
 
-describe('Phase 8b — the Page Setup dialog\'s "This page" scope (#48)', () => {
+describe('the Page Setup dialog\'s "This page" scope (#48)', () => {
   beforeEach(() => {
     useDocumentStore.getState().setPageSetup({
       pageSize: 'Letter',
@@ -1389,14 +1269,11 @@ describe('Phase 8b — the Page Setup dialog\'s "This page" scope (#48)', () => 
     act(() => {
       fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'This page')!);
     });
-    // The geometry gates: the paper select disabled (a page owns its
-    // background, never its geometry) + the hint line.
+    // The geometry gates: a page owns its background, never its geometry.
     expect((document.querySelector('button[aria-label="Paper size"]') as HTMLButtonElement).disabled).toBe(true);
     expect(document.body.textContent).toContain('paper and margins belong to its section');
-    // The caption names the target page.
     expect(document.body.textContent).toContain('Page 3');
-    // The bucket: the swatch through the real popover (hex-default
-    // display → the swatch's aria-label IS its hex).
+    // The swatch's aria-label IS its hex (hex-default display) — click through the real popover.
     act(() => {
       fireEvent.click(document.querySelector('button[aria-label="Page background options"]')!);
     });
@@ -1411,7 +1288,6 @@ describe('Phase 8b — the Page Setup dialog\'s "This page" scope (#48)', () => 
     const sheet = document.querySelector('[data-page-index="2"]') as HTMLElement;
     expect(sheet).not.toBeNull();
     expect(sheet.style.backgroundColor).toBe('rgb(185, 28, 28)');
-    // The other pages keep the white default — ONE page, not the doc.
     const other = document.querySelector('[data-page-index="1"]') as HTMLElement;
     expect(other.style.backgroundColor).toBe('');
   });

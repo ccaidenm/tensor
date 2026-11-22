@@ -48,11 +48,11 @@ async function settle() {
   await settleLayout();
 }
 
-// ─── Margins-0 (carryover): the parser clamped zero away ──────────────────
+// Margins-0 carryover: the parser clamped zero away
 
 describe('margins-0', () => {
   it('RECEIPT: the old parser rejected v <= 0 — zero was unwritable', () => {
-    // parseUnitToPt now takes allowZero; dimensions keep the old rule.
+    // parseUnitToPt takes allowZero; dimensions keep the old rule.
     expect(parseUnitToPt('0', 'inches')).toBeNull(); // the old blanket rule
     expect(parseUnitToPt('0', 'inches', { allowZero: true })).toBe(0);
     expect(parseUnitToPt('-1', 'inches', { allowZero: true })).toBeNull();
@@ -122,11 +122,11 @@ describe('margins-0', () => {
   });
 });
 
-// ─── Page background: one setting, two surfaces (carryover) ──────────────
+// Page background: one setting, two surfaces (carryover)
 
 describe('page background — two surfaces', () => {
   it('paginated sheets AND the pageless editing surface paint pageColor', async () => {
-    // Paginated (sheets) — the M5.13 behavior, pinned again here.
+    // Paginated (sheets) — the zero-margin behavior, pinned again here.
     const utils = renderTensor('<p>hello world</p>');
     await settle();
     act(() => {
@@ -154,7 +154,7 @@ describe('page background — two surfaces', () => {
   });
 });
 
-// ─── Middle-click paste: both polarities, both surfaces (carryover) ───────
+// Middle-click paste: both polarities, both surfaces (carryover)
 
 describe('middle-click paste (§7.2 polarity receipt: write path == read path)', () => {
   it('RECEIPT: one config key, one polarity — write config.editor.pasteOnMiddleClick; both gates read the same key and gate on !value (off = preventDefault/return, on = paste at caret). No disease found — pinned by the tests below.', () => {

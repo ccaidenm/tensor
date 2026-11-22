@@ -8,18 +8,14 @@ const DEFAULT_KEYBINDINGS: Record<string, string> = Object.fromEntries(
 );
 
 export const ConfigSchema = z.object({
-  /** #102 — 'system' follows the OS (matchMedia; the store's writer
-   *  resolves it synchronously + listens). The NEW-INSTALL default is
-   *  system (modern expectation); persisted light/dark values ride
-   *  untouched. */
+  /** #102 — 'system' follows the OS; the new-install default.
+   *  Persisted light/dark ride untouched. */
   theme: z.enum(['light', 'dark', 'system']).default('system'),
-  /** #97 — the brand accent (one hex per accent, both modes; the
-   *  config store's writer retunes --primary + the foreground ink;
-   *  the catalog is the one source — see lib/branding/accents). */
+  /** #97 — the brand accent; the store's writer retunes --primary +
+   *  the foreground ink (catalog: lib/branding/accents). */
   accent: z.enum(ACCENT_IDS).default(DEFAULT_ACCENT_ID),
-  /** #100 — which side the custom window controls sit on (the merged
-   *  titlebar row). Linux/Windows only — macOS keeps its native
-   *  traffic lights (Overlay) regardless. */
+  /** #100 — which side the window controls sit on. Linux/Windows only
+   *  (macOS keeps native traffic lights). */
   windowControlsSide: z.enum(['right', 'left']).default('right'),
   /** #103 — the start screen's recent-documents list (most recent
    *  first; deduped by path; capped). Recorded on open and save-as. */
@@ -27,25 +23,19 @@ export const ConfigSchema = z.object({
     .object({ path: z.string(), name: z.string(), openedAt: z.number() })
     .array()
     .default([]),
-  /** #101 — DRAGGABLE SIDEBARS: per-sidebar width memory (px). The
-   *  drag handle live-resizes the panel and commits on release; the
-   *  width rides the config so the user's layout survives restarts. */
+  /** #101 — per-sidebar width memory (px); the layout survives restarts. */
   sidebarWidths: z.record(z.string(), z.number()).default({}),
   autosaveIntervalMs: z.number().default(5000),
   useFloatingToolbar: z.boolean().default(true),
   editor: z.object({
     defaultFontFamily: z.string().default('system-ui'),
     defaultFontSize: z.number().default(16),
-    /** THE SCHEMA AUDIT (the pageless issue's implementation note):
-     *  the speculative string tightens to the TWO real values. The
-     *  field is the NEW-DOCUMENT default only — each document owns its
-     *  mode once set (pageSetup.viewMode, the per-document law).
-     *  .catch: a config from a speculative build carrying a stray
-     *  value falls back to Pages instead of rejecting the whole file. */
+    /** New-document default only; each document owns its mode once set.
+     *  .catch: a stray value from an older build falls back to Pages
+     *  instead of rejecting the whole file. */
     defaultPageLayout: z.enum(['Pages', 'Pageless']).catch('Pages').default('Pages'),
-    /** #101 — SPLIT VIEW: the paginated desk's page arrangement (1 =
-     *  the classic stack; 2 = two pages side by side — Word's "Many
-     *  pages"). A VIEW preference, not a document property. */
+    /** #101 — the paginated desk's page arrangement (1 = stack, 2 =
+     *  two side by side). A view preference, not a document property. */
     pageColumns: z.union([z.literal(1), z.literal(2)]).default(1),
     defaultPageSize: z.string().default('Letter'),
     defaultPageGap: z.number().default(PAGE_GAP),
@@ -64,37 +54,23 @@ export const ConfigSchema = z.object({
      *  persisted: your corner palette keeps YOUR groups. */
     recentSymbolGroups: z.array(z.string()).default([]),
     showNonPrintingChars: z.boolean().default(false),
-    /** M-IMAGES-1: caption DISPLAY toggle (the NPC precedent —
-     *  presentation-only ink, both modes; the model is untouched and
-     *  ToF reads captions regardless). Default: captions visible. */
+    /** Caption display toggle — presentation-only; ToF reads captions
+     *  regardless. */
     showCaptions: z.boolean().default(true),
-    /** M-HEADER-FOOTER: header/footer band DISPLAY toggle (the captions
-     *  NPC precedent — presentation-only; the settings/model are
-     *  untouched and saves round-trip regardless). Default: bands
-     *  visible, matching Word/GDocs. Pages mode only. */
+    /** Header/footer band display toggle — presentation-only; saves
+     *  round-trip regardless. Pages mode only. */
     showHeadersFooters: z.boolean().default(true),
-    /** #WATERMARK — the watermark DISPLAY toggle (the captions NPC
-     *  precedent — presentation-only ink; the document's watermark
-     *  setting is untouched and saves round-trip regardless; this is
-     *  the VIEW's "am I showing watermarks today" switch, Word's own
-     *  view-level affordance). Default: visible. Pages mode only. */
+    /** Watermark display toggle — the view's switch, not the
+     *  document's setting. Pages mode only. */
     showWatermark: z.boolean().default(true),
-    /** #58 — the BREAK MARKS toggle (distinct from the character-level
-     *  NPCs): the page/section-break badges in the paginated view —
-     *  STRUCTURAL ink (a section boundary is meaningful, unlike a
-     *  pilcrow), so this defaults ON. View-only; never printed. */
+    /** #58 — page/section-break badges; structural ink, so on by
+     *  default. View-only; never printed. */
     showBreakMarks: z.boolean().default(true),
-    /** M-RULER: the ruler bars — per-axis display toggles (the command
-     *  palette's show/hide surface). Pages mode only (pageless has no
-     *  page geometry to rule). Defaults: visible, matching Word/GDocs. */
+    /** Ruler bars — per-axis display toggles. Pages mode only. */
     showHorizontalRuler: z.boolean().default(true),
     showVerticalRuler: z.boolean().default(true),
-    /** #COMMENTS — the BOUNDARY CONTENT toggle (the rewired "Show
-     *  Margins" stub): governs the OUTSIDE space around the sheets —
-     *  the comments gutter today, whatever else lands there later. A
-     *  persisted view preference like the ruler toggles (default ON);
-     *  hiding it never reflows the document (the gutter is desk-level
-     *  space reservation, the engine never sees it). Both modes. */
+    /** The outside-space toggle — the comments gutter today. Hiding it
+     *  never reflows the document. Both modes. */
     showBoundaryContent: z.boolean().default(true),
     zoomLevel: z.number().default(100),
     /** Painted-selection background; '' = theme primary at selection
@@ -117,10 +93,6 @@ export const ConfigSchema = z.object({
     customColors: [],
     recentSymbolGroups: [],
     showNonPrintingChars: false,
-    /** #58 — the BREAK MARKS toggle (distinct from the character-level
-     *  NPCs): the page/section-break badges in the paginated view —
-     *  STRUCTURAL ink (a section boundary is meaningful, unlike a
-     *  pilcrow), so this defaults ON. View-only; never printed. */
     showBreakMarks: true,
     showCaptions: true,
     showHeadersFooters: true,
@@ -135,37 +107,24 @@ export const ConfigSchema = z.object({
   }),
   privacy: z.object({
     autoCheckForUpdates: z.boolean().default(false),
-    /** #103 — the DEFAULT posture is externals-off: the wizard's
-     *  privacy step pre-enables this for users who continue through
-     *  setup (the informed choice), but the schema default is OFF. */
+    /** #103 — externals-off by default; the wizard pre-enables it for
+     *  users who continue through setup. */
     fetchLinkMetadata: z.boolean().default(false),
-    /** M-FONTS-A: gate for milestone B's online catalog browsing
-     *  (Google Fonts / Font Share). Inert until B ships — default OFF,
-     *  no network code reads it yet; saving the preference is all it
-     *  does today. */
+    /** Gate for online font-catalog browsing (Google Fonts / Font
+     *  Share) — OFF; no network code reads it yet. */
     allowFontCatalogs: z.boolean().default(false),
   }).default({
     autoCheckForUpdates: false,
     fetchLinkMetadata: false,
     allowFontCatalogs: false,
   }),
-  /** Spell check — the CONSENT posture (the fonts/privacy precedents,
-   *  hardened): OFF by default; enabling requires picking a provider
-   *  with an informed choice (Settings > Proofing / the setup dialog).
-   *  Online = text is sent to LanguageTool's servers; Local = the
-   *  sidecar, loopback-only after a one-time ≈290MB download.
-   *
-   *  TWO INDEPENDENT FEATURES under one consent: `spelling` and
-   *  `grammar` are separate as-you-type toggles (Settings → Proofing)
-   *  so either can run alone; the master switch (ribbon / F7 /
-   *  palette) flips BOTH. `configured` records that the provider
-   *  choice was made — the consent covers both features, since the
-   *  same text goes to the same destination either way.
-   *
-   *  MIGRATION: configs persisted by the spell-check release carry
-   *  `enabled` (both-or-neither) — `enabled: true` maps to both flags
-   *  on (grammar arrives enabled for existing users), anything else
-   *  to both off. */
+  /** Spell check — consent posture: OFF until the user picks a
+   *  provider (Settings > Proofing / the setup dialog). Online sends
+   *  text to LanguageTool's servers; local is loopback-only after a
+   *  ~290MB download. `spelling` and `grammar` are independent
+   *  as-you-type toggles (the master switch flips both); `configured`
+   *  records the provider choice. Migration: old `enabled: true`
+   *  configs map to both flags on. */
   spellCheck: z.preprocess(
     (raw) => {
       if (raw && typeof raw === 'object' && !('spelling' in raw) && !('grammar' in raw)) {
@@ -196,34 +155,13 @@ export const ConfigSchema = z.object({
       grammar: false,
     })
   ),
-  /** TRANSLATE (#issue — the Review tab's on-demand translation): the
-   *  CONSENT posture, the spell-check precedent carried forward — OFF
-   *  by default and nothing reaches the network until the user
-   *  configures a provider with an informed choice (the setup
-   *  dialog). Translation is inherently an ONLINE feature: the selected
-   *  text (or the whole document) is sent to the translation service
-   *  the user chose — never a hardcoded default.
-   *
-   *  FOUR PROVIDERS, ONE CONTRACT (the spell wire law): each speaks
-   *  its own protocol but the transport normalizes every response to
-   *  the same array-in → array-out shape:
-   *    - libretranslate: the open engine; self-hosted = free + keyless
-   *      (the privacy-first choice), the hosted instance is paid-key.
-   *    - google: Google Cloud Translation v2 — API key + billing.
-   *    - deepl: DeepL v2 — free tier (keys ending ':fx' auto-route to
-   *      the api-free host; the free tier is 500k chars/month).
-   *    - local: Bergamot/Marian models downloaded per pair from
-   *      Mozilla's registry — translation runs on-device, nothing is
-   *      sent; downloads happen only when the user picks a pair.
-   *
-   *  `configured` records that the informed choice was MADE (the
-   *  ribbon button / palette open the panel only once true — before
-   *  that they open the setup dialog). `endpoint` is libretranslate's
-   *  routing fact. `lastTargetLang` is the picker's seed (the print
-   *  dialog's lastDestination pattern — reopening lands where you
-   *  were). A fourth provider — LOCAL MODELS (Bergamot/Marian,
-   *  downloaded per pair) — is tracked as its own milestone; the
-   *  provider enum grows when it lands. */
+  /** Translation — the spell-check consent posture carried forward:
+   *  OFF until a provider is configured (the setup dialog). The
+   *  selected text goes to the chosen service — libretranslate
+   *  (self-hostable, keyless), google, deepl, or local (Bergamot,
+   *  on-device). `configured` records the choice; `endpoint` is
+   *  libretranslate's routing fact; `lastTargetLang` seeds the
+   *  picker. */
   translation: z.object({
     provider: z.enum(['libretranslate', 'google', 'deepl', 'local']).default('libretranslate'),
     configured: z.boolean().default(false),
@@ -247,55 +185,36 @@ export const ConfigSchema = z.object({
     reduceMotion: 'system',
     grammarDoubleLine: false,
   }),
-  /** M-T4 — DEVELOPER MODE: exposes Reload + Inspect Element in the
-   *  document context menu. Default OFF; enabling requires accepting
-   *  an explicit warning (General > Advanced) — devtools can inspect
-   *  and mutate anything, and a careless edit can break the running
-   *  app. The toggle is the single gate; the menu reads it live. */
+  /** Developer mode: Reload + Inspect Element in the context menu.
+   *  OFF; enabling accepts an explicit warning. */
   developerMode: z.boolean().default(false),
-  /** M-PRINT (#39): the default folder for PDF exports (and future
-   *  file exports) — '' = the OS's default save location (the save
-   *  dialog's own default). A path = exports write there directly
-   *  unless the button is Shift/Ctrl-clicked (which always prompts). */
+  /** #39 — the default export folder; '' = the OS save dialog's
+   *  default. A path = exports write there unless the button is
+   *  modifier-clicked (always prompts). */
   downloadsDir: z.string().default(''),
-  /** M-PRINT: the modifier that forces Save-as-PDF to PROMPT (the
-   *  always-ask escape hatch). Shift is the default (the classic
-   *  "modifier-click = override" idiom; Ctrl-click carries menu
-   *  baggage on some platforms). */
+  /** The modifier that forces Save-as-PDF to prompt. */
   pdfAlwaysAskTrigger: z.enum(['shift', 'ctrl']).default('shift'),
-  /** M-PRINT: the preview modal's last DESTINATION (the segmented
-   *  control's memory) — reopening the preview lands where you were.
-   *  The custom print dialog's posture: destinations differ in
-   *  options + commit action only. */
+  /** The preview modal's last destination — reopening lands where
+   *  you were. */
   print: z.object({
     lastDestination: z.enum(['printer', 'pdf']).default('printer'),
-    /** The last-used duplex setting — the picker's seed (no
-     *  "printer default" option: a concrete choice, remembered). */
+    /** The last-used duplex setting — the picker's seed. */
     lastDuplex: z
       .enum(['one-sided', 'two-sided-long-edge', 'two-sided-short-edge'])
       .default('one-sided'),
   }).default({ lastDestination: 'printer', lastDuplex: 'one-sided' }),
-  /** M-META: the user's own identity — the default AUTHOR for new
-   *  documents' metadata. Empty = unset: nothing is baked into files
-   *  the user didn't explicitly save with their name (privacy-first;
-   *  local config.json only). Pre-release onboarding will write this
-   *  during setup; the setting itself is permanent — Settings >
-   *  General > User. */
+  /** The user's identity — the default author for new documents.
+   *  Empty = nothing baked into files the user didn't save with
+   *  their name (privacy-first). */
   identity: z.object({
     author: z.string().default(''),
   }).default({ author: '' }),
-  /** #103 — THE FIRST-RUN GATE: true once the setup wizard has been
-   *  completed or skipped. Absent in every pre-#103 config (zod
-   * default false) — per the ruling, EVERYONE sees the wizard once;
-   * the flag then never lets it nag again. */
+  /** #103 — true once the setup wizard completed or was skipped;
+   *  everyone sees the wizard once. */
   firstRunCompleted: z.boolean().default(false),
-  /** Keyed by ShortcutDefinition.id (see src/lib/shortcuts.ts). Flat
-   *  record rather than a fixed shape — every command in the Shortcuts
-   *  registry gets an entry here, seeded from that registry's defaults.
-   *  An empty string value means "explicitly unbound". Missing keys
-   *  (e.g. a persisted config from before a given shortcut existed) fall
-   *  back to the registry default via getEffectiveKeybinding() — never
-   *  index this object directly. */
+  /** Keyed by ShortcutDefinition.id; '' = explicitly unbound. Missing
+   *  keys fall back via getEffectiveKeybinding() — never index this
+   *  object directly. */
   keybindings: z.record(z.string(), z.string()).default(DEFAULT_KEYBINDINGS),
 });
 
@@ -303,9 +222,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export const DEFAULT_CONFIG: Config = ConfigSchema.parse({});
 
-/** The MASTER gate — is any checking feature active? (Either flag on =
- *  the ribbon button shows active; the master switch turns both
- *  together. Either alone is a legitimate running state.) */
+/** Master gate — either spelling or grammar active. */
 export function spellCheckActive(spell: Config['spellCheck']): boolean {
   return spell.spelling || spell.grammar;
 }

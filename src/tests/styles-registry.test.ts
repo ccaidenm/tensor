@@ -4,8 +4,8 @@ import { BUILTIN_DEFINITIONS, LEGACY_HEADING_FALLBACK } from '@/lib/styles/built
 import { isBuiltinId, type StyleDefinition } from '@/lib/styles/types';
 
 /**
- * M-STYLES STEP 5: registry semantics — merge precedence, the missing
- * loud fallback, built-in immutability of id, epoch bumps.
+ * Registry semantics — merge precedence, the missing loud fallback,
+ * built-in immutability of id, epoch bumps.
  */
 
 function resetRegistry() {

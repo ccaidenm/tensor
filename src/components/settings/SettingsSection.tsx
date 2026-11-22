@@ -6,13 +6,9 @@ interface SettingsSectionProps {
   children: ReactNode;
 }
 
-/**
- * Wraps one labeled group of settings inside a panel. `data-section-id`
- * is what useActiveSection's IntersectionObserver, and the nav's
- * scroll-to-section click handler, both key off of — a data attribute
- * rather than a DOM `id`, since only one panel is ever mounted at a time
- * and there's no need for these to be globally unique across panels.
- */
+// One labeled group of settings inside a panel. `data-section-id` keys
+// both useActiveSection's IntersectionObserver and the nav's scroll handler —
+// a data attribute, not an `id` (only one panel is mounted at a time).
 export const SettingsSection = forwardRef<HTMLDivElement, SettingsSectionProps>(function SettingsSection(
   { id, title, children },
   ref,

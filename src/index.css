@@ -70,10 +70,10 @@ body {
   /* Grammar: the ADVISORY blue (Word/GDocs convention) — distinct from
    * spelling's red by color (and, optionally, the double line). */
   --color-grammar-error: oklch(52% 0.17 250);
-  /* #COMMENTS — the anchored-thread tint (Pages overlay background,
-   * pageless mark-span background — one var, both surfaces, the spell
-   * pattern). A VIOLET distinct from search's yellow and spell's
-   * red/blue; the active (caret's thread) tier deepens it. */
+  /* The anchored-thread tint (Pages overlay background, pageless
+   * mark-span background — one var, both surfaces). A VIOLET distinct
+   * from search's yellow and spell's red/blue; the active tier
+   * deepens it. */
   --color-comment-highlight: oklch(91% 0.07 290);
   --color-comment-highlight-active: oklch(84% 0.1 290);
 }
@@ -125,20 +125,17 @@ body {
   outline: none;
 }
 
-/* ── TABLES (pageless surface) — M-TABLES ─────────────────────────────
-   The pageless editor renders the PM DOM directly, so this is where the
-   paginated engine will eventually need to mirror (borders, padding,
-   the borderStyle presets read off data-table-border). Kept here —
-   scoped under .ProseMirror — so the planned pageless-mode rework can
-   move/rename it in one place. */
+/* ── TABLES (pageless surface) ──────────────────────────────────
+   The pageless editor renders the PM DOM directly; the paginated
+   engine mirrors the geometry. */
 .ProseMirror .tableWrapper {
   overflow-x: auto;
 }
 .ProseMirror table {
   border-collapse: collapse;
   table-layout: fixed;
-  /* M-T4 — outer margins + the narrowed width ride the view's CSS vars
-     (unset = the stock 8px 0 look; the engine mirrors the geometry). */
+  /* Outer margins + narrowed width ride the view's CSS vars (unset =
+     the stock 8px 0 look). */
   margin: var(--tensor-table-mt, 8px) var(--tensor-table-mr, 0px) var(--tensor-table-mb, 8px) var(--tensor-table-ml, 0px);
   width: calc(100% - var(--tensor-table-ml, 0px) - var(--tensor-table-mr, 0px));
   position: relative;
@@ -146,9 +143,8 @@ body {
 .ProseMirror td,
 .ProseMirror th {
   border: 1px solid var(--border);
-  /* M-T4 — the table's default cell padding (the view's var; the
-     engine's per-side constants are the fallback). A cell's own
-     padding attr renders as an inline style that beats this. */
+  /* The table's default cell padding (the view's var; a cell's own
+     padding attr beats this). */
   padding: var(--tensor-cell-pad, 4px 8px);
   position: relative;
   vertical-align: top;
@@ -170,9 +166,8 @@ body {
 .ProseMirror table[data-table-border='outer'] th {
   border: none;
 }
-/* M-T3c — table FLOW on the pageless surface: a fully-fixed-width
-   table shorter than the content box honors its alignment marker
-   (the engine's alignOffset mirror). */
+/* Table FLOW (pageless): a fixed-width table shorter than the content
+   box honors its alignment marker. */
 .ProseMirror table[data-table-align='center'] {
   margin-left: auto;
   margin-right: auto;
@@ -213,10 +208,10 @@ body {
   margin-top: 0 !important;
 }
 
-/* THE INPUT-ONLY VIEW (law L3): the hidden PM view receives keyboard
-   input and holds the model selection; nothing about it is ever
-   measured, painted, or positioned from. Native caret and selection
-   are invisible BY DESIGN — the synthetic caret and painted sheets own
+/* THE INPUT-ONLY VIEW: the hidden PM view receives keyboard input
+   and holds the model selection; nothing about it is ever measured,
+   painted, or positioned from. Native caret and selection are
+   invisible BY DESIGN — the synthetic caret and painted sheets own
    the pixels. */
 .pm-input-only {
   caret-color: transparent;
@@ -224,14 +219,11 @@ body {
 
 /* content-visibility on the hidden view's blocks — the input-only
    view renders the full document (opacity 0), but its DOM still costs
-   browser LAYOUT on every keystroke. WebKitGTK showed browserFrame p95
-   38ms (BIG) vs 17ms (SMALL) — the hidden doc's layout is implicated.
-   content-visibility: auto lets the engine skip layout/paint for blocks
-   outside the (fixed, viewport-sized) container; contain-intrinsic-size
-   reserves an estimated height so scrollbar math stays sane. Known
-   risk: the native caret in a skipped block reports wrong coords — the
-   IME popup may misplace; F2 (container follows caret) addresses that
-   if it surfaces. */
+   browser LAYOUT on every keystroke (WebKitGTK browserFrame p95 38ms
+   BIG vs 17ms SMALL). auto skips off-screen blocks;
+   contain-intrinsic-size keeps scrollbar math sane. Known risk: the
+   native caret in a skipped block reports wrong coords (IME may
+   misplace; F2 addresses that if it surfaces). */
 .pm-input-only .ProseMirror > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
@@ -262,11 +254,9 @@ body {
   }
 }
 
-/* M-CONTEXTUAL-RIBBON — the contextual tab's quick entrance: a short
-   fade + rise of the strip trigger (~130ms, ease-out). Deliberately
-   SUBTLE (the tab is a small strip target, not a panel). The component
-   gates the class through useReducedMotion (the app's 'on'/'off'/'system'
-   setting) — this media query is the second belt for the 'system' leg. */
+/* The contextual tab's quick entrance: a short fade + rise (~130ms),
+   deliberately SUBTLE. useReducedMotion gates the class; this media
+   query is the second belt for the 'system' leg. */
 .tensor-contextual-tab-in {
   animation: tensor-contextual-tab-in 130ms ease-out;
 }
@@ -286,10 +276,9 @@ body {
   }
 }
 
-/* M-HEADER-FOOTER-2: the bands are CANVAS paint (engine band lines —
-   the unified pipeline), so no DOM editor styling exists; selection
-   ink, tab advances, and caret all ride the standard paginated
-   projections (paint.ts / hitTest.ts / caret). */
+/* The bands are CANVAS paint (engine band lines): no DOM editor
+   styling exists; selection ink, tab advances, and caret ride the
+   standard paginated projections. */
 
 .ProseMirror li,
 .ProseMirror li p {
@@ -408,10 +397,9 @@ body {
   margin-left: 2px;
 }
 
-/* M-REFS — the index-mark NPC affordance (the pilcrow law, applied to
-   a mark): indexEntry spans are INVISIBLE in reading mode (the Index
-   itself is the feedback); with non-printing characters ON, they show
-   a dotted underline so authors can audit their marks. */
+/* The index-mark NPC affordance: indexEntry spans are invisible in
+   reading mode; with non-printing characters ON they show a dotted
+   underline so authors can audit their marks. */
 .show-non-printing span[data-tensor-index='true'] {
   text-decoration: underline dotted;
   text-decoration-color: theme(colors.muted-foreground);
@@ -460,14 +448,11 @@ body {
   text-decoration-style: double;
 }
 
-/* ── #COMMENTS (pageless surface) ────────────────────────────────────
-    The anchored-thread tint: the mark's OWN span carries the base
-    background (the mark's renderHTML class — no decoration needed for
-    the base); the tracking plugin's decoration adds
-    .tensor-comment-active on the caret's thread. The tint is
-    translucent (color-mix over the sheet) so the text stays readable,
-    the same readability law as the search highlight. Pages mode paints
-    the same two tiers as overlay rects (CommentHighlights). */
+/* ── Comments (pageless surface) ────────────────────────────────
+    The anchored-thread tint: the mark's span carries the base
+    background; the tracking plugin adds .tensor-comment-active on
+    the caret's thread. Translucent so text stays readable; Pages
+    mode paints the same two tiers as overlay rects. */
 .tensor-comment-mark {
   background-color: color-mix(in oklab, var(--color-comment-highlight) 60%, transparent);
   border-radius: 2px;
@@ -572,13 +557,10 @@ body {
 /*
  ---break---
  */
-/* M-EQ — equations. The ONLY new global CSS this feature adds: the
-   katex.min.css import above (fonts bundled by Vite, never a CDN) and
-   this scoped block. Everything is under .tensor-equation — one
-   wrapper class shared by the node view, the paginated EquationLayer,
-   AND the measurement probe, so the measured box is the painted box by
-   construction (one CSS derivation). Theme tokens only; no new
-   styling system. */
+/* Equations: everything is under .tensor-equation — one wrapper class
+   shared by the node view, the paginated EquationLayer, AND the
+   measurement probe, so the measured box is the painted box by
+   construction. */
 .tensor-equation {
   display: flex;
 }
@@ -633,18 +615,11 @@ body {
   outline-offset: 2px;
   border-radius: 2px;
 }
-/* M-EQ-2 — the WYSIWYG math-field editor surface (the bubble's
-   MathLiveField wrapper). The WRAPPER carries the app's shadcn Input
-   recipe (ui/input.tsx verbatim: border-input / focus-within ring in
-   --ring, the app's accent); these rules NEUTRALIZE MathLive's own
-   :host chrome so the custom element reads as one native input:
-   its built-in #acacac-bordered gray box (the "empty container below
-   the input" — a second box INSIDE the wrapper), its system 'field'
-   background (an off-theme fill), and the UA focus outline
-   (-webkit-focus-ring-color — the non-native ring color). Outer
-   document rules on the host element beat shadow :host rules. Its
-   INTERNAL styles stay MathLive's own (the math fonts are the same
-   KaTeX_* faces the document bundles). */
+/* The WYSIWYG math-field editor surface (the bubble's MathLiveField
+   wrapper): the wrapper carries the app's Input recipe; these rules
+   NEUTRALIZE MathLive's own :host chrome (its gray box, system
+   'field' background, UA focus outline) so the custom element reads
+   as one native input. Outer document rules beat shadow :host rules. */
 .tensor-equation-editor math-field {
   display: block;
   width: 100%;
@@ -672,13 +647,8 @@ body {
    ours. */
 
 
-/* M-REFS-7 — the NodeView is RESTORED (the user's ruling): the
-   bordered field frame is the React surface's (ReferenceTableNodeView);
-   this native-render block shipped with the round-6 experiment only. */
-
-/* M-REFS-11 — the reference-table rows' SEMANTIC links: invisible in
-   the editor (the user's ruling — Ctrl+click follows, the styling
-   never shouts). The link mark renders <a href="tensor-ref:...">. */
+/* The reference-table rows' semantic links: invisible in the editor
+   (Ctrl+click follows); the link mark renders <a href="tensor-ref:...">. */
 .tensor-ref-table-entries a,
 .tensor-ref-table a {
   color: inherit;
@@ -705,11 +675,10 @@ textarea,
   -webkit-user-select: text;
 }
 
-/* M-PRINT (#43, Mark 2) — THE PRINT MEDIA SPLIT. On paper: the screen
- * chrome (ribbon, status bar, sidebars, dialogs, the preview itself)
- * hides; only the print container (PrintContainer.tsx) shows. On
- * screen the container is display:none (its own inline law) — the
- * two rules are a pair, both must name the same markers. */
+/* #43 — THE PRINT MEDIA SPLIT. On paper: the screen chrome hides and
+ * only the print container (PrintContainer.tsx) shows; on screen the
+ * container is display:none (its own inline law). The two rules are a
+ * pair — both must name the same markers. */
 @media print {
   [data-screen-chrome] {
     display: none !important;
