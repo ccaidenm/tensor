@@ -254,6 +254,14 @@ body {
   }
 }
 
+/* The empty-document placeholder: ephemeral decoration ink (never
+   document text — there is nothing to delete). The pageless surface
+   shows this widget; the paginated canvas paints its own copy. */
+.tensor-placeholder {
+  color: var(--color-muted-foreground);
+  pointer-events: none;
+}
+
 /* The contextual tab's quick entrance: a short fade + rise (~130ms),
    deliberately SUBTLE. useReducedMotion gates the class; this media
    query is the second belt for the 'system' leg. */

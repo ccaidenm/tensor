@@ -102,6 +102,7 @@ import { useEquationEditor } from '@/lib/editor/useEquationEditor';
 import { getEquationMetrics, katexFontEpochNow, subscribeKatexFonts } from '@/lib/equations/measure';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { bitmapVersionNow, getBitmapFailed, resolveMediaBitmap, subscribeBitmaps } from '@/lib/media/bitmapCache';
+import { PLACEHOLDER_TEXT } from '@/lib/editor/PlaceholderExtension';
 import { TooltipProvider } from '../ui/tooltip';
 
 /**
@@ -2079,6 +2080,15 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
   }
 
   const { result, blocks } = layout;
+  // The empty-document placeholder: the doc holds one empty paragraph.
+  // Decoration ink, never text (PlaceholderExtension covers the
+  // pageless surface; this covers the canvas).
+  const docPlaceholder =
+    editor.state.doc.childCount === 1 &&
+    editor.state.doc.firstChild!.isTextblock &&
+    editor.state.doc.firstChild!.content.size === 0
+      ? PLACEHOLDER_TEXT
+      : undefined;
   // #58 — pageW/pageH are gone (pages differ per section); every
   // consumer reads its OWN page's geometry or the cumulative table
   // (the rulers keep the desk's FIRST page).
@@ -2314,7 +2324,7 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                   />
                 )}
                 {(visiblePages === null || visiblePages.has(page.index)) &&
-                  pageGroups.map((group) => {
+                  pageGroups.map((group, gi) => {
                     const block = blocks.find((b) => b.id === group.blockId);
                     if (!block) return null;
                     const minY = group.lines[0].rect.y;
@@ -2342,6 +2352,11 @@ export function PaginatedView({ editor, metrics: injectedMetrics, equationMetric
                         align={block.align}
                         runDecor={block.runDecor}
                         npc={showNonPrintingChars}
+                        placeholder={
+                          docPlaceholder != null && page.index === 0 && gi === 0
+                            ? docPlaceholder
+                            : undefined
+                        }
                         paint={block.paint}
                         markerStyle={
                           (block.runs.find((r) => r.kind !== 'inlineImage') as

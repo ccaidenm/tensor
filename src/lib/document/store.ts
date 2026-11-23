@@ -284,7 +284,7 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
       }
     }
     editor.commands.clearContent();
-    editor.commands.setContent('<p>Start typing…</p>');
+    editor.commands.setContent('<p></p>');
     set({
       hasDocument: false,
       filePath: null,
@@ -378,9 +378,9 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
         editor.commands.setContent(templateHtml);
       } else {
         editor.commands.clearContent();
-        // The placeholder the Editor boots with (the same fresh-doc
-        // look a brand-new file gets).
-        editor.commands.setContent('<p>Start typing…</p>');
+        // An EMPTY paragraph — the placeholder is decoration ink, not
+        // text the user has to delete (PlaceholderExtension paints it).
+        editor.commands.setContent('<p></p>');
       }
       editor.commands.focus();
     }

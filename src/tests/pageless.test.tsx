@@ -64,6 +64,19 @@ async function goPageless() {
 }
 
 describe('the pageless strip', () => {
+  it('the empty-document placeholder: decoration ink on an empty doc, gone after typing', async () => {
+    const { editor } = harness('<p></p>');
+    await goPageless();
+    const widget = document.querySelector('.tensor-placeholder');
+    expect(widget).not.toBeNull();
+    expect(widget!.textContent).toBe('Start typing…');
+
+    act(() => {
+      editor.commands.insertContent('x');
+    });
+    expect(document.querySelector('.tensor-placeholder')).toBeNull();
+  });
+
   it('the sheet paints WHITE by default, the page color when set', async () => {
     harness('<p>sheet</p>');
     await goPageless();

@@ -53,6 +53,8 @@ import { PageSetupHistoryExtension } from '@/lib/editor/pageSetupHistoryExtensio
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
  * production editor. */
+import { PlaceholderExtension } from './PlaceholderExtension';
+
 export function tensorExtensions(): Extensions {
   return [
     StarterKit.configure({
@@ -77,6 +79,7 @@ export function tensorExtensions(): Extensions {
     Color,
     Highlight.configure({ multicolor: true }),
     FontSize,
+    PlaceholderExtension,
     // The charStyle mark (registry reference) + apply/convert commands
     // + the reactive heading-sync plugin.
     CharStyleMark,

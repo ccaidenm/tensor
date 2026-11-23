@@ -86,6 +86,8 @@ interface BlockCanvasProps {
    */
   pageNumber: number;
   pageTotal: number;
+  /** The empty-document placeholder (first block of an empty doc only). */
+  placeholder?: string;
 }
 
 /**
@@ -96,7 +98,7 @@ interface BlockCanvasProps {
  * clears/redraws only from the first changed line down; full repaint
  * on resize, first-line edits, or style changes.
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, columnFrame, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, columnFrame, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal, placeholder }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -180,7 +182,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         const damageTop = lines[damageFrom].rect.y - first.rect.y;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, damageTop, width, height - damageTop);
-        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
         // Receipt: px² actually rasterized (cleared + repainted region).
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
       } else {
@@ -189,7 +191,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
         // Receipt: full canvas.
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
       }
@@ -204,7 +206,7 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
       } catch (retryErr) {
         console.error('[BlockCanvas] repaint retry failed — full repaint armed for next render', retryErr);
         prevLinesRef.current = null;

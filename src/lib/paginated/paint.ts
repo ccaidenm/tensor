@@ -23,6 +23,9 @@ const DEFAULT_TEXT_COLOR = '#000';
 /** Muted ink for non-printing-character glyphs (canvas has no theme). */
 const NPC_COLOR = 'rgba(0, 0, 0, 0.45)';
 
+/** The empty-document placeholder's ink (muted, never mistaken for text). */
+const PLACEHOLDER_COLOR = 'rgba(0, 0, 0, 0.35)';
+
 /** Block-decor constants (canvas has no theme access — pageless-look
  * approximations of the prose classes). */
 const QUOTE_BORDER_COLOR = '#d4d4d8';
@@ -102,6 +105,13 @@ export interface PaintExtras {
    * instead of the measured placeholder. Absent = no fields.
    */
   fieldPage?: { number: number; total: number };
+  /**
+   * The empty-document placeholder — set ONLY for the document's first
+   * block when the whole doc is empty (an empty paragraph mid-document
+   * is not a placeholder). Drawn as muted ink on the first line; never
+   * document text.
+   */
+  placeholder?: string;
   /** The marker's font — resolved by the caller from the block's first
    *  run, falling back to the document default for empty items
    *  ("style from the block's runs"). */
@@ -186,6 +196,22 @@ export function paintLines(
     const off = alignOffset(align, line.rect.width, columnLeft + columnWidth - line.rect.x);
     const baselineY = line.rect.y - minY + line.baseline;
     const baseX = line.rect.x + off;
+
+    // The empty-document placeholder: muted ink on the block's first
+    // line only, styled like the block's own run (an empty doc's P1
+    // zero-length run carries the resolved style).
+    if (extras.placeholder && text.length === 0 && line === lines[0] && line.lineIndex === 0) {
+      const style = runs[0]?.kind !== 'inlineImage' ? runs[0]?.style : undefined;
+      if (style) {
+        const prevFill = ctx.fillStyle;
+        const prevFont = ctx.font;
+        ctx.font = fontString(style);
+        ctx.fillStyle = PLACEHOLDER_COLOR;
+        ctx.fillText(extras.placeholder, baseX, baselineY);
+        ctx.fillStyle = prevFill;
+        ctx.font = prevFont;
+      }
+    }
 
     // BLOCK DECOR (before ink, per line); tints span the COLUMN.
     if (paint?.blockquote) {

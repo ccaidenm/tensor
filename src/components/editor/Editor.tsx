@@ -38,7 +38,7 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
 
   const editor = useEditor({
     extensions: tensorExtensions(),
-    content: "<p>Start typing…</p>",
+    content: "<p></p>",
     // INITIAL content is created without a transaction, so
     // appendTransaction never fires — mint block ids explicitly or the
     // first layout throws on the id-less doc; style-sync is the same
