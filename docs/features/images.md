@@ -36,9 +36,6 @@ The context menu on an image carries the rest:
 
 Captions feed the Table of Figures: any paragraph with the Caption style is readable by the ToF generator even when captions are hidden. The View tab's **Show Captions** toggle is presentation-only -- it never changes what the document stores.
 
-![The Alt Text dialog with its description field and decorative switch](../assets/images/alt-text-dialog.png)
-<!-- SHOT: images/alt-text-dialog.png | Show: Alt Text dialog open on a selected image: preview, description field, Mark as decorative switch -->
-
 ## Watermarks
 
 Watermarks live on the **Insert** tab's **Watermark** button (you insert one). It opens a docked panel that writes live: every control commits as you touch it, and the page behind the panel is the preview.
