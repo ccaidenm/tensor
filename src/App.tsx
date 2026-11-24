@@ -35,6 +35,7 @@ import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
 import { SetupWizard } from './components/setup/SetupWizard';
 import { useConfigPersistence } from './lib/config/useConfigPersistence';
+import { startUpdateCheck } from './lib/updater/check';
 import './index.css';
 import { useAppShortcuts } from './lib/shortcuts/useAppShortcuts';
 import { useAutosave } from './lib/document/useAutosave';
@@ -64,6 +65,12 @@ function App() {
   // bootstrap; doc layers apply on open.
   useEffect(() => {
     void useStyleRegistryStore.getState().loadGlobal();
+  }, []);
+
+  // The opt-in update check: once per launch, a beat after first
+  // paint, and only when the user turned it on.
+  useEffect(() => {
+    startUpdateCheck();
   }, []);
 
   // Kill the WebView's own right-click menu everywhere — the custom
