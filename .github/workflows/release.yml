@@ -14,11 +14,9 @@ jobs:
         include:
           - os: windows-latest
             targets: x86_64-pc-windows-msvc
-          - os: macos-latest        # Apple Silicon
-            targets: aarch64-apple-darwin
-          - os: macos-13            # Intel
-            targets: x86_64-apple-darwin
-          - os: ubuntu-22.04        # not ubuntu-latest
+          - os: macos-latest
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - os: ubuntu-24.04
             targets: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
