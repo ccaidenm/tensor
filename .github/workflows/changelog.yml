@@ -28,7 +28,9 @@ jobs:
 
       - name: Open changelog PR
         uses: peter-evans/create-pull-request@v7
+        if: ${{ !contains(github.ref_name, '-') }}
         with:
+          base: main
           commit-message: "docs: Update changelog"
           title: "docs: Update changelog"
           body: |
