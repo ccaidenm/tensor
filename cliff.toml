@@ -1,0 +1,54 @@
+# git-cliff configuration — Tensor
+[changelog]
+header = """
+<!-- markdownlint-disable MD041 -->
+
+# Changelog
+
+All notable changes to Tensor are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+"""
+body = """
+{% if version %}## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## [Unreleased]{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {{ commit.message | upper_first | trim }}{% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/ccaidenm/tensor/pull/{{ commit.remote.pr_number }})){% endif %}
+{%- if commit.body and commit.body | contains(key="breaking") %} — **BREAKING:** see below{% endif %}
+{% endfor %}
+{% endfor %}
+{% for commit in commits %}{% if commit.body %}{% set b = commit.body %}{% if b | contains(key="BREAKING CHANGE") %}
+#### Breaking changes in {{ version | default(value="Unreleased") }}
+{% set lines = b | split(pat="\n") %}{% for line in lines %}{% if line | starts_with(pat="BREAKING CHANGE:") %}- {{ line | replace(from="BREAKING CHANGE:", to="") | trim }}{% endif %}{% endfor %}
+{% endif %}{% endif %}{% endfor %}
+{%- if commits | filter(attribute="breaking", value=true) | length == 0 %}{% else %}{% endif %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = true
+tag_pattern = "v[0-9].*"
+sort_commits = "newest"
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^test", group = "Testing" },
+  { message = "^revert", group = "Reverted" },
+  { message = "^chore\\(deps", group = "Dependencies" },
+  { message = "^chore\\(ci", group = "Build & CI" },
+  { message = "^chore", group = "Internal" },
+  { message = ".*", group = "Other" },
+]
+
+commit_filters = [
+  { message = "^docs" },
+]

@@ -1,0 +1,20 @@
+name: Project automation
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  issues:
+    types: [closed]
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node .github/scripts/promote-unblocked.mjs
+        env:
+          PROJECT_URL: https://github.com/users/ccaidenm/projects/7
+          REPO: ccaidenm/tensor
+          GITHUB_TOKEN: ${{ secrets.PROJECT_TOKEN }}
