@@ -6,17 +6,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  STACKED_DIALOG_CONTENT,
+  STACKED_DIALOG_OVERLAY,
 } from '@/components/ui/dialog';
 import { create } from 'zustand';
 
-/**
- * M-MD/M-DOCX — THE import report surface: what an import dropped,
- * converted, or refused — one in-app shadcn dialog (the same family as
- * the export confirm), never a native popup. Informational only: the
- * import already happened; the dialog names what changed so nothing is
- * ever silently lost. Markdown's dropped-image count and the Word
- * import's notices both surface here.
- */
+// The import report: what an import dropped, converted, or refused.
+// Informational only — the import already happened; this names what
+// changed so nothing is silently lost.
 
 interface ImportReportDialogStore {
   pending: { title: string; lines: string[] } | null;
@@ -37,10 +34,9 @@ export function ImportReportDialog() {
   return (
     <Dialog open={pending !== null} onOpenChange={(o) => { if (!o) dismiss(); }}>
       <DialogContent
-        // The raised-overlay treatment the other dialogs use — the
-        // frosted layer dims/blurs the app, never the card.
-        className="sm:max-w-sm z-[110]"
-        overlayClassName="z-[100] bg-black/30 backdrop-blur-lg"
+        // Raised overlay: the frosted layer dims/blurs the app, never the card.
+        className={`sm:max-w-sm ${STACKED_DIALOG_CONTENT}`}
+        overlayClassName={STACKED_DIALOG_OVERLAY}
       >
         <DialogHeader>
           <DialogTitle>{pending?.title ?? ''}</DialogTitle>

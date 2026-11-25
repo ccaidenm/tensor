@@ -1,35 +1,17 @@
 import type { JSONContent } from '@tiptap/core';
 
 /**
- * M-MD — the lossy classifier. ONE walk over the document JSON answers
- * "what would this export lose?", and the answer gates the export
- * (ruling 2): content Markdown cannot represent produces a CONFIRM
- * before the save dialog — never a silent loss, never a post-hoc
- * apology.
- *
- * THE LINE (the inserted-image cry-wolf fix): the confirm fires for
- * (a) content that DISAPPEARS (band text, reference tables, page
- * breaks) and (b) TEXT formatting Markdown cannot express (custom
- * styles, colors, fonts, sizes, alignment, spacing, indents, tab
- * stops). OBJECT DECORATION does not warn — images, equations, tables
- * and lists are all REPRESENTED in Markdown and merely lose paint
- * attrs (size, shading, borders, numbering style); those are
- * documented in docs/markdown.md, and warning on them would fire at
- * the first inserted image (insert always stamps natural dimensions).
- *
- * The classifier is deliberately coarse: the user is asked about
- * CATEGORIES, not per-node minutiae. The same walk defines what
- * "clean" means: a document none of whose categories fire exports with
- * NO dialog — headings, lists, bold, images through the stock handlers
- * are not lossy by definition.
+ * The lossy classifier: one walk gates the export, warning on content that
+ * disappears and text formatting Markdown can't express — never on object
+ * decoration (documented paint-attr losses would cry wolf at every image).
  */
 
 export interface MarkdownLossyReport {
   /** headerBlock/footerBlock regions that carry content — the band
    *  text is document-level structure with no Markdown spelling. */
   headerFooterRegions: number;
-  /** referenceTable containers — their entries are DERIVED content
-   *  (the generator owns them); neither container nor entries export. */
+  /** referenceTable containers — their entries are derived content;
+   *  neither container nor entries export. */
   referenceTables: number;
   /** pageBreak atoms — Markdown has no page concept. */
   pageBreaks: number;
@@ -39,17 +21,15 @@ export interface MarkdownLossyReport {
   /** Any dropped formatting at all (marks, style ids, alignment,
    *  spacing, indents, tab stops, image sizing, table decoration). */
   customFormatting: boolean;
-  /** #WATERMARK — the document-level watermark (a store fact, not
-   *  docJSON — the exporter threads it in). Markdown has no page
-   *  concept to paint it on. */
+  /** The document-level watermark (a store fact, not docJSON —
+   *  the exporter threads it in). */
   watermark: boolean;
 }
 
 /**
- * Marks that round-trip through Markdown (stock handlers or the
- * official extension's conventions). Everything else visible is a loss.
- * indexEntry/refLeader are INVISIBLE structural marks (reference
- * machinery) — they carry no formatting a reader would miss.
+ * Marks that round-trip through Markdown; everything else visible is a
+ * loss. indexEntry/refLeader are invisible structural marks — no
+ * formatting a reader would miss.
  */
 const KEPT_MARKS = new Set([
   'bold',
@@ -221,15 +201,9 @@ function checkFormatting(node: JSONContent, report: MarkdownLossyReport): void {
     case 'image':
     case 'inlineImage':
     case 'equation':
-      // OBJECT DECORATION — documented, never warned. These objects are
-      // all REPRESENTED in Markdown (the image renders, the cells keep
-      // their text, the equation's latex travels); only their paint
-      // attrs drop (image size/align/radius/float, cell shading/
-      // padding, table borders/flow, list numbering styles, equation
-      // align/color/scale). Warning on them cried wolf at the first
-      // inserted image — insert always stamps natural dimensions — so
-      // the confirm reserves itself for what disappears or how TEXT
-      // reads (see the paragraph/heading case above).
+      // Object decoration — documented, never warned: these objects are
+      // all represented in Markdown; only paint attrs drop. The confirm
+      // reserves itself for what disappears or how text reads.
       return;
   }
 }

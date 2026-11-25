@@ -30,21 +30,21 @@ function DialogOverlay({
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 isolate duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        // The DEFAULT dim/blur applies only when the caller passes NO
-        // className (i.e. DialogContent's overlayClassName is absent).
-        // This is deliberate override semantics: tailwind-merge
-        // resolves same-variant conflicts but KEEPS variant-qualified
-        // utilities — a caller's plain `backdrop-blur-md` would lose
-        // the CSS cascade to the base's
-        // `supports-backdrop-filter:backdrop-blur-xs` (variant rules
-        // emit after base ones), silently rendering ~no blur. Owning
-        // the whole treatment sidesteps the variant-survival trap.
+        // The default applies only when the caller passes NO className:
+        // tailwind-merge keeps variant-qualified utilities, so a caller's
+        // plain blur class would lose the cascade to the base variant rule.
         className ?? "z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs"
       )}
       {...props}
     />
   )
 }
+
+// #101 — shared classes for a dialog opening OVER another open dialog:
+// the overlay wears the heavy frosted scrim and climbs above the base
+// z-50; the popup clears its own overlay.
+export const STACKED_DIALOG_OVERLAY = 'z-[100] bg-black/30 backdrop-blur-lg'
+export const STACKED_DIALOG_CONTENT = 'z-[110]'
 
 function DialogContent({
   className,

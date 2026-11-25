@@ -7,11 +7,10 @@ import { pairLabel, languageName } from '@/lib/editor/translate/local/names';
 import type { InstalledPair } from '@/lib/editor/translate/local/types';
 
 /**
- * THE LOCAL-MODEL PIECES that don't need the WASM: the registry
+ * The local-model pieces that don't need the WASM: the registry
  * builder (the wrapper's exact contract), the language names, the
  * store's local actions, and the engine lifecycle. `invoke` and the
- * wrapper module are mocked; the WASM itself has a separate smoke
- * path (scripts + manual, it is a real binary).
+ * wrapper are mocked; the WASM has a separate smoke path.
  */
 
 vi.mock('@tauri-apps/api/core', () => ({

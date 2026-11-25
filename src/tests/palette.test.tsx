@@ -9,7 +9,7 @@ import { useSidebarStore } from '@/lib/layout/sidebarStore';
 import { useStyleDialogStore } from '@/lib/styles/dialogStore';
 import { usePaletteStore } from '@/lib/palette/store';
 import { CommandPalette } from '@/components/palette/CommandPalette';
-import { COMMANDS, getCommand, getCommandByMenuEvent } from '@/lib/commands/registry';
+import { COMMANDS, getCommand } from '@/lib/commands/registry';
 import { filterCommands } from '@/lib/commands/useAppCommands';
 import { hasBandContainer, selectionInBand, setDifferentFirstPage } from '@/lib/editor/headerFooterCommands';
 import { EDITOR_COMMAND_MAP } from '@/lib/editor/editorCommands';
@@ -22,10 +22,10 @@ import {
 import { renderTensor } from './harness';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 
-// ─── Tauri surface mocks (fs/path/window — quit & recovery paths) ────────
+// Tauri surface mocks (fs/path/window — quit & recovery paths)
 
-// M-IMAGES-0: the .wpdoc v2 container simulator (recovery snapshots
-// package through package_document now).
+// .wpdoc v2 container simulator (recovery snapshots package through
+// package_document).
 const wpdocFiles = vi.hoisted(() => new Map<string, { kind: 'v2'; document: string; media: unknown[] }>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -54,7 +54,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ close: windowMocks.close }),
 }));
 
-// ─── Store resets (module singletons persist across tests) ───────────────
+// Store resets (module singletons persist across tests)
 
 beforeEach(() => {
   useDocumentStore.setState({
@@ -105,78 +105,34 @@ function paletteHint(id: string): HTMLElement | null {
   return document.querySelector(`[data-testid="palette-hint-${id}"]`);
 }
 
-// ─── 1. Menu ⇄ registry: single source of truth, no drift ─────────────────
+// 1. Registry shape
 
-/** RECEIPT — the Rust-side MenuItem ids (src-tauri/src/lib.rs, lines
- *  17-55). The native menu can only emit these payloads; each must
- *  map to EXACTLY ONE registry entry, or the menu would dispatch a
- *  different action than the palette shows. */
-const RUST_MENU_EVENT_IDS = [
-  'menu-new',
-  'menu-open',
-  'menu-save',
-  'menu-save-as',
-  'menu-quit',
-  'menu-undo',
-  'menu-redo',
-  'menu-cut',
-  'menu-copy',
-  'menu-paste',
-  'menu-toggle-dark-mode',
-] as const;
+// #100 — the old menu-parity block died with the native menu (absorbed
+// into the app: the Ribbon + palette + web shortcuts own its items).
+// The registry INVARIANTS it happened to carry live on:
 
-describe('registry ⇄ menu parity (drift is structurally impossible)', () => {
-  it('every Rust menu id resolves to exactly one registry command', () => {
-    for (const id of RUST_MENU_EVENT_IDS) {
-      const matches = COMMANDS.filter((c) => c.menuEventId === id);
-      expect(matches, id).toHaveLength(1);
-    }
-  });
-
-  it('no orphan menuEventIds — the registry carries nothing the Rust menu cannot emit', () => {
-    const registryMenuIds = COMMANDS.filter((c) => c.menuEventId).map((c) => c.menuEventId);
-    for (const id of registryMenuIds) {
-      expect(RUST_MENU_EVENT_IDS, `orphan menuEventId ${id}`).toContain(id);
-    }
-  });
-
-  it('toggle-dark-mode is ONE entry serving both menu and palette (no duplicate non-menu dark action)', () => {
-    const darkCommands = COMMANDS.filter(
-      (c) => c.keywords.includes('dark') || c.title.toLowerCase().includes('dark'),
-    );
-    expect(darkCommands.map((c) => c.id)).toEqual(['toggleDarkMode']);
-    expect(getCommandByMenuEvent('menu-toggle-dark-mode')!.id).toBe('toggleDarkMode');
-  });
-
+describe('registry shape', () => {
   it('registry ids are unique', () => {
     const ids = COMMANDS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('hidden is PALETTE-only: "new" (stub) never shows in the palette, but the menu still dispatches it', () => {
-    expect(filterCommands(false).some((c) => c.id === 'new')).toBe(false);
-    expect(filterCommands(true).some((c) => c.id === 'new')).toBe(false);
-    // Menu path still resolves and runs the stub (the console.warn
-    // receipt) without throwing:
-    expect(() => getCommandByMenuEvent('menu-new')!.run()).not.toThrow();
+  it('"new" is a REAL palette command now (#103) — visible, safe-quit marked', () => {
+    expect(filterCommands(false).some((c) => c.id === 'new')).toBe(true);
+    expect(getCommand('new')!.requiresSafeQuit).toBe(true);
   });
 
   it('quit IS a palette command (amendment 1a) and carries the safe-quit marker', () => {
     const quit = getCommand('quit')!;
     expect(filterCommands(false).some((c) => c.id === 'quit')).toBe(true);
     expect(quit.requiresSafeQuit).toBe(true);
-    expect(quit.menuEventId).toBe('menu-quit');
-  });
-
-  it('quit and "new-when-real" are the only safe-quit surfaces', () => {
-    expect(COMMANDS.filter((c) => c.requiresSafeQuit).map((c) => c.id)).toEqual(['quit']);
   });
 });
 
-// ─── 2. Palette shortcut wiring ──────────────────────────────────────────
+// 2. Palette shortcut wiring
 
 describe('palette shortcut', () => {
-  it('registered: ctrl+shift+p, app context (collision-free — STEP 0 receipt)', () => {
+  it('registered: ctrl+shift+p, app context', () => {
     const def = SHORTCUTS.find((s) => s.id === 'palette')!;
     expect(def.keys).toBe('ctrl+shift+p');
     expect(def.context).toBe('app');
@@ -257,7 +213,7 @@ describe('palette shortcut', () => {
   });
 });
 
-// ─── 3. Context filtering & enablement in the palette UI ────────────────
+// 3. Context filtering & enablement in the palette UI
 
 describe('palette UI', () => {
   it('editor-context commands are absent when the palette was opened outside the editor', () => {
@@ -277,7 +233,7 @@ describe('palette UI', () => {
     expect(paletteItem('applyStyleQuote')).not.toBeNull();
   });
 
-  it('open() captures the editor-focus context at open time', () => {
+  it('open captures the editor-focus context at open time', () => {
     renderTensor('<p>hello</p>');
     // Not focused → editorContext false.
     act(() => {
@@ -394,16 +350,13 @@ describe('palette UI', () => {
   });
 });
 
-// ─── 4. Dispatch: palette run == menu run (the drift-proof test) ────────
+// 4. Dispatch: palette/shortcuts run the same body
 
 describe('dispatch equivalence', () => {
-  it('menu path and palette path run the SAME save (identical store effect)', () => {
+  it('the palette path runs the save (the single dispatch body)', () => {
     const saveSpy = vi.spyOn(useDocumentStore.getState(), 'save');
-    // Menu path:
-    void getCommandByMenuEvent('menu-save')!.run();
-    // Palette path:
     void getCommand('save')!.run();
-    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
     saveSpy.mockRestore();
   });
 
@@ -415,9 +368,9 @@ describe('dispatch equivalence', () => {
       editor.commands.insertContent(' MORE');
     });
     expect(editor.state.doc.textContent).toContain('MORE');
-    void getCommandByMenuEvent('menu-undo')!.run();
+    void getCommand('undo')!.run();
     expect(editor.state.doc.textContent).not.toContain('MORE');
-    // Palette path — identical effect:
+    // The same single body:
     act(() => {
       editor.commands.insertContent(' AGAIN');
     });
@@ -459,8 +412,6 @@ describe('dispatch equivalence', () => {
 
     void getCommand('toggleDarkMode')!.run();
     expect(useConfigStore.getState().config.theme).toBe('dark');
-    // ...and it is the same entry the menu dispatches:
-    expect(getCommandByMenuEvent('menu-toggle-dark-mode')!.id).toBe('toggleDarkMode');
 
     void getCommand('toggleNPC')!.run();
     expect(useConfigStore.getState().config.editor.showNonPrintingChars).toBe(true);
@@ -480,7 +431,7 @@ describe('dispatch equivalence', () => {
   });
 });
 
-// ─── 5. Safe quit: recovery snapshot before close ────────────────────────
+// 5. Safe quit: recovery snapshot before close
 
 describe('safe quit (requiresSafeQuit)', () => {
   it('dirty doc → recovery snapshot written to appDataDir/recovery/ with current content, THEN close', async () => {
@@ -494,9 +445,8 @@ describe('safe quit (requiresSafeQuit)', () => {
     });
 
     expect(windowMocks.close).toHaveBeenCalledTimes(1);
-    // M-IMAGES-0: snapshots are v2 CONTAINERS now — one
-    // package_document command at the recovery path (recovery.ts law
-    // unchanged otherwise):
+    // Snapshots are v2 CONTAINERS — one package_document command at
+    // the recovery path:
     const { invoke } = await import('@tauri-apps/api/core');
     const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
     const packageCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === 'package_document');
@@ -529,9 +479,9 @@ describe('safe quit (requiresSafeQuit)', () => {
   });
 });
 
-// ─── M-HEADER-FOOTER-3: the header/footer palette commands ────────────────
+// The header/footer palette commands
 
-describe('header/footer palette commands (M-HEADER-FOOTER-3)', () => {
+describe('header/footer palette commands', () => {
 
   it('the four entries register; presence enablement hides remove-when-empty', () => {
     // Registration (the unique-ids pin lives in the base suite).

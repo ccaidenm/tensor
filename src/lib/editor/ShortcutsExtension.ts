@@ -18,11 +18,9 @@ export const DynamicShortcutsExtension = Extension.create({
         key: new PluginKey('dynamicShortcuts'),
         props: {
           handleKeyDown(_view, event) {
-            // Same reasoning as useAppShortcuts' identical guard. NOTE
-            // THE SYMMETRY: this guard and useAppShortcuts' are written
-            // as a pair — any new "chrome surface suppresses editor
-            // shortcuts" condition (settings, palette) MUST be added to
-            // BOTH or keymap behavior silently forks by focus context.
+            // The SAME guard as useAppShortcuts, written as a pair — any
+            // new "chrome surface suppresses editor shortcuts" condition
+            // MUST be added to BOTH or keymap behavior forks by focus.
             if (useSettingsDialogStore.getState().isOpen) return false;
             if (usePaletteStore.getState().isOpen) return false;
             if (usePrintPreviewStore.getState().isOpen) return false;

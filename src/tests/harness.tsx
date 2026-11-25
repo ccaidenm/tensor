@@ -7,7 +7,7 @@ import { FakeEquationMetrics, FakeMetrics } from './fakeMetrics';
 /** Renders the REAL production <Editor/> (tensorExtensions, mode routing,
  * PaginatedView) with deterministic FakeMetrics injected through the
  * metrics seam, optionally replacing the document content. The desk
- * wrapper/scroller structure mirrors App.tsx — the M-RULER bar portals
+ * wrapper/scroller structure mirrors App.tsx — the ruler bar portals
  * into [data-desk-wrapper], so the contract must exist here too. */
 export function renderTensor(initialHTML?: string) {
   const utils = render(
@@ -24,6 +24,12 @@ export function renderTensor(initialHTML?: string) {
       editor.commands.setContent(initialHTML);
     });
   }
+  // #103 — the harness's context is an OPEN DOCUMENT (the app boots to
+  // the start screen; every existing suite tests the editor surface,
+  // so Home steps aside here — the start-screen suite re-opens it).
+  act(() => {
+    useDocumentStore.setState({ startActive: false });
+  });
   return { editor, ...utils };
 }
 
@@ -109,8 +115,7 @@ export function dataEvent(type: string, payload: { clipboardData?: DataTransfer;
  * layout version (data-layout-version on the stack) stops advancing for
  * two consecutive microtask+timeout cycles, or times out. Works
  * identically under the synchronous-first path (immediate) and the
- * coalesced rAF path (one extra frame). Replaces the fixed 20ms
- * timeouts the old coalescer forced onto the suite.
+ * coalesced rAF path (one extra frame).
  */
 export async function settleLayout(timeoutMs = 200): Promise<void> {
   const version = () =>

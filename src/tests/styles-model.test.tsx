@@ -10,8 +10,8 @@ import {
 } from '@/lib/styles/selection';
 
 /**
- * M-STYLES STEP 5 + amendments 4/5: the model — apply/convert
- * commands, reactive heading sync, one-char-style-per-span.
+ * The model: apply/convert commands, reactive heading sync,
+ * one-char-style-per-span.
  */
 
 function resetRegistry() {

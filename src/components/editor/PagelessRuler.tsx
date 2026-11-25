@@ -16,42 +16,19 @@ const MED_LEN = 7;
 const MIN_LEN = 4;
 
 /**
- * THE PAGELESS RULER — the horizontal bar over the continuous strip
- * (Phase 1: READ-ONLY; band dragging is a tracked follow-up).
- *
- * MIMICRY LAW (the user ruling): the paginated bar's visual language,
- * 1:1 except NO numbers — the same bar chrome (border-b border-border/
- * 60, bg-card, RULER_HEIGHT), the same CANVAS tick field with the
- * two-tone ink law (foreground inside the content box — majors
- * full-height, mediums 7px, minors 4px; muted and short in the margin
- * spans), the same full-height rails at the content box's edges, and
- * no shaded band fills (the paginated bar inks margin ticks muted; it
- * never paints band fills). The difference list: no number labels, no
- * drag handles (read-only), and the geometry source is the STRIP's DOM
- * boxes — no engine PageGeometry exists in the continuous flow.
- *
- * MOUNT LAW (the paginated bar's own chrome slot): portaled into the
- * desk wrapper (`[data-desk-wrapper]`) as `absolute top-0` — outside
- * the scroll flow, always visible. Gated on
- * `config.editor.showHorizontalRuler`.
- *
- * TRACKING LAW: everything derives from the STRIP's two boxes — the
- * viewport rect (includes the zoom transform) and the layout box
- * (offsetWidth). The SCALE is their ratio; the content box is the
- * strip's computed padding scaled into viewport px. Zoom, resizes and
- * content scrolls all change one of the boxes — the measure loop
- * re-runs on all three.
+ * The horizontal ruler over the continuous strip — READ-ONLY. Mimics
+ * the paginated bar's visual language 1:1 minus numbers (same two-tone
+ * ink, same rails, no band fills); geometry comes from the strip's DOM
+ * boxes — no engine PageGeometry in continuous flow. Scale = viewport
+ * rect ÷ offsetWidth; zoom, resize, and scroll all re-measure. Portaled
+ * into [data-desk-wrapper] as absolute top-0, outside the scroll flow;
+ * gated on config.editor.showHorizontalRuler.
  */
 
 /** The canvas overhang on each side of the strip: the edge tick draws
  *  its pixel column exactly AT the strip's edge and would clip against
- *  an exactly-sized canvas (the paginated bar's LABEL_PAD law). */
+ *  an exactly-sized canvas. */
 const LABEL_PAD = 12;
-
-/** Functional tick heights (px up from the bar's bottom edge) — the
- *  paginated bar's own values. Majors run FULL height. */
-
-
 
 export interface RulerGeo {
   /** The strip's viewport left relative to the wrapper. */
@@ -66,7 +43,7 @@ export interface RulerGeo {
   contentR: number;
 }
 
-/** THE GEOMETRY (pure — unit-testable; jsdom has no layout, so the
+/** Pure geometry (unit-testable — jsdom has no layout, so the
  *  component test asserts structure while this carries the math). */
 export function measureRulerGeo(
   stripRect: { left: number; width: number },
@@ -75,11 +52,9 @@ export function measureRulerGeo(
   computedPaddingLeftPx: number,
   computedPaddingRightPx: number,
 ): RulerGeo {
-  // THE ZERO-RECT GUARD (jsdom has no layout): a non-finite or zero
-  // scale would make generateTicks' width NaN — its loop terminates on
-  // `x > width`, which never fires for NaN (the worker-abort crash
-  // class). Scale 1 + the honest (zero) width keep every consumer
-  // finite; the paint skips empty strips.
+  // ZERO-RECT GUARD (jsdom has no layout): a non-finite/zero scale
+  // would make generateTicks' width NaN — its `x > width` loop never
+  // terminates for NaN. Scale 1 + zero width keep consumers finite.
   let scale = stripRect.width / (stripOffsetWidth || 1);
   if (!Number.isFinite(scale) || scale <= 0) scale = 1;
   return {
@@ -103,10 +78,8 @@ export function PagelessRuler({ containerRef }: { containerRef: RefObject<HTMLDi
   const marginsRef = useRef(margins);
   marginsRef.current = margins;
 
-  // THE MEASUREMENT LOOP: strip rect (viewport) vs the desk wrapper
-  // rect (the portal host) positions the bar; the strip's computed
-  // padding × the rect/offset scale draws the content box. The math is
-  // the pure measureRulerGeo (unit-tested); this loop feeds it.
+  // THE MEASUREMENT LOOP: strip viewport rect vs desk wrapper rect
+  // positions the bar; the pure measureRulerGeo carries the math.
   useEffect(() => {
     const measure = () => {
       const wrapper = document.querySelector('[data-desk-wrapper]') as HTMLElement | null;
@@ -139,12 +112,10 @@ export function PagelessRuler({ containerRef }: { containerRef: RefObject<HTMLDi
     };
   }, [containerRef]);
 
-  // THE PAINT (the paginated bar's canvas discipline, DPR-scaled): the
-  // tick field spans ONLY the strip (the overhang keeps the edge ticks
-  // unclipped), inked by region — foreground inside the content box,
-  // muted in the margin spans — with full-height rails at the content
-  // edges and NO numbers (the mimicry law). Redraws on geometry, unit
-  // and theme (the light/dark flip re-reads the tokens).
+  // THE PAINT (DPR-scaled): the tick field spans only the strip
+  // (overhang keeps edge ticks unclipped), foreground inside the
+  // content box / muted in margins, rails at the content edges, no
+  // numbers. Redraws on geometry, unit, and theme.
   useEffect(() => {
     if (!geo) return;
     const canvas = canvasRef.current;
@@ -160,17 +131,15 @@ export function PagelessRuler({ containerRef }: { containerRef: RefObject<HTMLDi
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvasW, RULER_HEIGHT);
 
-    // Theme reads at paint time (the paginated law): foreground ink for
-    // the usable span AND the rails, muted for the margin spans. The
-    // app's --primary is the brand ORANGE — never a tick ink.
+    // Theme reads at paint time: foreground ink for the content span
+    // and rails, muted for margins. --primary (brand orange) is never a tick ink.
     const fg = getComputedStyle(bar).color || '#000';
     const muted =
       (mutedProbeRef.current && getComputedStyle(mutedProbeRef.current).color) || fg;
 
-    // Canvas-local coordinates: the canvas sits at stripLeft − PAD, so
-    // the strip's left edge is PAD in from the canvas boundary (the
-    // paginated overhang law — applying geo.left here TOO would double
-    // the offset).
+    // Canvas-local coords: the canvas sits at stripLeft − PAD, so the
+    // strip's left edge is PAD in — applying geo.left here TOO would
+    // double the offset.
     const contentLs = LABEL_PAD + geo.contentL;
     const contentRs = LABEL_PAD + geo.contentR;
 
@@ -202,8 +171,7 @@ export function PagelessRuler({ containerRef }: { containerRef: RefObject<HTMLDi
       }
     }
 
-    // THE RAILS — the content box's edges, full height, foreground
-    // (the paginated paint, bit-identical minus the drag handles).
+    // THE RAILS — the content box's edges, full height, foreground.
     ctx.globalAlpha = 1;
     ctx.fillStyle = fg;
     ctx.fillRect(Math.round(contentLs) - 1, 0, 2, RULER_HEIGHT);

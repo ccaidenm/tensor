@@ -23,7 +23,7 @@ import { pmDocToSemantic } from '@/lib/paginated/adapter';
 import { GEOMETRY } from './harness';
 import { renderTensor, settleLayout } from './harness';
 
-// ─── Tauri surface mocks (fs/path/dialog — upload + persistence) ─────────
+// Tauri surface mocks (fs/path/dialog — upload + persistence)
 
 const mocks = vi.hoisted(() => ({
   pickPath: null as string | null,
@@ -63,8 +63,8 @@ beforeAll(() => {
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', { value: {}, configurable: true });
 });
 
-// ─── Minimal sfnt fixture builder (the parser's test bytes AND the
-//     upload flow's mock readFile payload) ────────────────────────────────
+// Minimal sfnt fixture builder (the parser's test bytes AND the
+// upload flow's mock readFile payload)
 
 /** Builds a valid sfnt (.ttf) with one 'name' table carrying the given
  *  records. platformId 3, encoding 1 → UTF-16BE (the Windows/UCS2
@@ -116,7 +116,7 @@ function fixtureBytes(): Uint8Array {
   ]);
 }
 
-// ─── Store resets ─────────────────────────────────────────────────────────
+// Store resets
 
 beforeEach(() => {
   useFontRegistryStore.setState({ entries: [...BUNDLED_FONTS], epoch: 0, status: 'idle', recentFamilies: [] });
@@ -142,7 +142,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. The sfnt name-table parser (STEP 2's mini metadata reader) ───────
+// 1. The sfnt name-table parser
 
 describe('parseFontFamilyName (mini sfnt parser)', () => {
   it('reads nameID 1 (family) from a minimal sfnt', () => {
@@ -169,7 +169,7 @@ describe('parseFontFamilyName (mini sfnt parser)', () => {
   });
 });
 
-// ─── 2. Bundled catalog claims (bold/italic receipts — amendment 3) ───────
+// 2. Bundled catalog claims (bold/italic receipts)
 
 describe('bundled catalog — per-face claims are exactly what Fontsource ships', () => {
   /** '@fontsource/<pkg>/700.css' → node_modules woff2 on disk. */
@@ -225,7 +225,7 @@ describe('bundled catalog — per-face claims are exactly what Fontsource ships'
   });
 });
 
-// ─── 3. Upload → registry + copied file + registered FontFace ─────────────
+// 3. Upload → registry + copied file + registered FontFace
 
 describe('upload flow', () => {
   it('upload: file COPIED into appDataDir()/fonts/, entry registered, FontFace added and loaded', async () => {
@@ -239,7 +239,7 @@ describe('upload flow', () => {
     });
     expect(entry).not.toBeNull();
 
-    // COPIED — never referenced in place (the receipt's law):
+    // COPIED — never referenced in place:
     const [from, to] = (copyFile as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string];
     expect(from).toBe('/home/u/MyFont.ttf');
     expect(to).toMatch(/^\/appdata\/fonts\/[\w-]+-MyFont\.ttf$/);
@@ -267,7 +267,7 @@ describe('upload flow', () => {
   });
 });
 
-// ─── 4. Persistence round-trip (relaunch flow) ───────────────────────────
+// 4. Persistence round-trip (relaunch flow)
 
 describe('persistence round-trip', () => {
   it('fonts.json written with the uploaded entry; relaunch re-registers from disk; bundled re-seeded', async () => {
@@ -276,7 +276,7 @@ describe('persistence round-trip', () => {
       displayName: 'Typo Family',
       sourcePath: '/home/u/MyFont.ttf',
     });
-    // Persisted (registry in app-config — styles.json precedent):
+    // Persisted (registry in app-config):
     const [path, contents] = (writeTextFile as ReturnType<typeof vi.fn>).mock.calls.find(
       (c) => (c[0] as string).endsWith('fonts.json'),
     ) as [string, string];
@@ -299,9 +299,8 @@ describe('persistence round-trip', () => {
     expect(entries.some((e) => e.family === 'Open Sans')).toBe(true);
     expect(entries.some((e) => e.family === 'Arial')).toBe(true);
     // Uploaded re-registered from disk: registration REPLACES faces
-    // for the same family (registerFont's dedupe law), so the honest
-    // assertion is IDENTITY — a FRESH FontFace built from
-    // appDataDir()/fonts/ bytes, not the session's original object.
+    // for the same family, so the honest assertion is IDENTITY — a
+    // FRESH FontFace built from appDataDir()/fonts/ bytes.
     expect(entries.find((e) => e.family === 'Typo Family')?.source).toBe('uploaded');
     const faceAfter = [...(document.fonts as unknown as Iterable<{ family: string }>)].find(
       (f) => f.family === 'Typo Family',
@@ -319,13 +318,12 @@ describe('persistence round-trip', () => {
   });
 });
 
-// ─── 5. The stale-widths symptom test (amendment 1) ───────────────────────
+// 5. The stale-widths symptom test
 
 describe('stale widths — the install symptom, asserted not assumed', () => {
   /** The seam: a ruler whose substitute measures NARROW and whose real
-   *  face measures WIDE, keyed on the registry's own state — exactly
-   *  what the real ruler does when a registered face replaces the
-   *  system substitute. */
+   *  face measures WIDE, keyed on the registry's own state — what the
+   *  real ruler does when a registered face replaces the substitute. */
   function symptomMetrics(): TextMetrics {
     return {
       measure: (text, style: TextStyle) => {
@@ -390,7 +388,7 @@ describe('stale widths — the install symptom, asserted not assumed', () => {
     // The font-epoch effect: re-gate → engine recreate → relayout.
     await settleLayout();
 
-    // SYMPTOM ASSERTIONS — same doc, same strings, a different ruler:
+    // Same doc, same strings, a different ruler:
     // 1. pages re-walked: 20px/char wraps to ~108 lines → 2 sheets.
     expect(document.querySelectorAll('[data-page-index]')).toHaveLength(2);
     // 2. lines re-walked: the caret at the same doc position now sits
@@ -398,10 +396,9 @@ describe('stale widths — the install symptom, asserted not assumed', () => {
     const caretAfter = (document.querySelector('[data-testid="synthetic-caret"]') as HTMLElement)
       .style.top;
     expect(caretAfter).not.toBe(caretBefore);
-    // 3. the re-gate held: the installed face is LOADED before the
-    //    re-measure (M5.6 extended to installs — a recreated engine
-    //    restarts its layout version, so the face, not the version
-    //    counter, is the honest gate receipt).
+    // 3. the installed face is LOADED before the re-measure (a
+    //    recreated engine restarts its layout version, so the FACE,
+    //    not the version counter, is the honest gate receipt).
     void versionBefore;
     const face = [...(document.fonts as unknown as Iterable<{ family: string; status: string }>)].find(
       (f) => f.family === 'TempFam',
@@ -412,7 +409,7 @@ describe('stale widths — the install symptom, asserted not assumed', () => {
   });
 });
 
-// ─── 6. The installed family reaches all three surfaces (STEP 5 test 3) ───
+// 6. The installed family reaches all three surfaces
 
 describe('installed family reaches every surface', () => {
   it('adapter TextStyle.fontFamily + paginated paint font-string carry the family', async () => {
@@ -462,7 +459,7 @@ describe('installed family reaches every surface', () => {
   });
 });
 
-// ─── 7. Uninstall (warned-set — the styles precedent) ─────────────────────
+// 7. Uninstall (warned-set)
 
 describe('uninstall', () => {
   it('removes files + entry + faces; a doc using the family warns ONCE (warned set)', async () => {
@@ -497,9 +494,9 @@ describe('uninstall', () => {
   });
 });
 
-// ─── 8. Privacy toggle (STEP 3) ──────────────────────────────────────────
+// 8. Privacy toggle
 
-describe('privacy: allow font catalogs (inert until milestone B)', () => {
+describe('privacy: allow font catalogs (default OFF)', () => {
   it('default OFF — schema round-trip keeps it off', () => {
     expect(DEFAULT_CONFIG.privacy.allowFontCatalogs).toBe(false);
     const parsed = ConfigSchema.parse({});
@@ -510,7 +507,7 @@ describe('privacy: allow font catalogs (inert until milestone B)', () => {
     render(<PrivacyPanel />);
     const sw = document.querySelector('[data-testid="allow-font-catalogs-switch"]')!;
     expect(sw).not.toBeNull();
-    expect(document.body.textContent).toContain('Google Fonts / Font Share');
+    expect(document.body.textContent).toContain('Google Fonts, Font Share, and Fontsource');
     act(() => {
       useConfigStore.getState().setAllowFontCatalogs(true);
     });
@@ -518,7 +515,7 @@ describe('privacy: allow font catalogs (inert until milestone B)', () => {
   });
 });
 
-// ─── 9. Dialog + FontGroup entry points + palette (STEP 5 test 7) ────────
+// 9. Dialog + FontGroup entry points + palette
 
 describe('Font Browser + entry points', () => {
   it('the dialog lists bundled + uploaded with per-font previews and source badges', () => {
@@ -540,10 +537,10 @@ describe('Font Browser + entry points', () => {
     expect(document.querySelector('[data-testid="font-badge-bundled"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="font-badge-system"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain('BUNDLED');
-    // Style + direction badges replace the old prose subtitle:
+    // Style + direction badges:
     expect(document.querySelector('[data-testid="font-styles-badge"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="font-direction-badge"]')?.textContent).toBe('LTR');
-    // Tooltips are bare source names now — no "Source (...)" wrapper:
+    // Tooltips are bare source names — no "Source (...)" wrapper:
     expect(document.body.textContent).not.toContain('Source (');
   });
 
@@ -588,8 +585,7 @@ describe('Font Browser + entry points', () => {
     act(() => {
       fireEvent.click(document.querySelector('[data-testid="font-filter-catalog"]')!);
     });
-    // OFF: CloudOff icon + the turn-on link (guidance moved out of
-    // the slim banner):
+    // OFF: CloudOff icon + the turn-on link:
     expect(document.querySelector('[data-testid="font-list"]')!.textContent).toContain(
       'no network requests',
     );
@@ -667,17 +663,34 @@ describe('Font Browser + entry points', () => {
     expect(allSection).not.toContain('Geist Variable');
     expect(allSection.some((n) => /\.?\s*Variable$/.test(n ?? ''))).toBe(false);
 
-    // Weight flyout: variable Geist offers axis stops; only 400/700
-    // selectable (the engine's two worlds), the rest disabled.
+    // Weight menu: the affordance exists ONLY for fonts with stops
+    // beyond Normal/Bold; Regular/Bold applicable, the other axis
+    // stops visible-but-disabled (the engine renders two weights).
     const geistRow = document.querySelector('[data-testid="font-picker-row-Geist Variable"]') as HTMLElement;
     expect(geistRow.textContent).toContain('Geist'); // display name only
+    expect(geistRow.querySelector('button[aria-label="Weights for Geist"]')).not.toBeNull();
     act(() => {
       fireEvent.click(geistRow.querySelector('button[aria-label="Weights for Geist"]')!);
     });
-    const light = document.querySelector('[data-testid="font-picker-weight-Geist Variable-300"]') as HTMLButtonElement;
-    expect(light.disabled).toBe(true);
-    const boldBtn = document.querySelector('[data-testid="font-picker-weight-Geist Variable-700"]') as HTMLButtonElement;
-    expect(boldBtn.disabled).toBe(false);
+    // The extra stops are SUGGESTED, disabled (picking Light would
+    // render Regular — the accepted-input lie):
+    const light = document.querySelector('[data-testid="font-picker-weight-Geist Variable-300"]') as HTMLElement;
+    expect(light).not.toBeNull();
+    // Menu items are divs — the disabled spelling is base-ui's:
+    expect(light.getAttribute('aria-disabled')).toBe('true');
+    const boldBtn = document.querySelector('[data-testid="font-picker-weight-Geist Variable-700"]') as HTMLElement;
+    expect(boldBtn).not.toBeNull();
+    // The enabled item carries no aria-disabled at all (base-ui omits it).
+    expect(boldBtn.hasAttribute('aria-disabled')).toBe(false);
+    expect(boldBtn.hasAttribute('data-disabled')).toBe(false);
+
+    // Close the menu by re-clicking its trigger (a toggle — the
+    // picker stays open; Escape would close the whole popover).
+
+    // The other half: a 400/700-only font carries NO weights
+    // affordance (the Bold button covers it):
+    expect(document.querySelector('[data-testid="font-picker-row-Open Sans"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="font-picker-weights-Open Sans"]')).toBeNull();
 
     // Applying a font records it as recently used:
     act(() => {

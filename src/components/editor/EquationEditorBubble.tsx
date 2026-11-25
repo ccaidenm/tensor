@@ -15,31 +15,15 @@ import { equationDomAnchor, type EquationEditorState } from '@/lib/editor/useEqu
 import type { Editor } from '@tiptap/core';
 
 /**
- * M-EQ-2 — the equation editor bubble, VISUAL-FIRST. The WYSIWYG math
- * field (MathLive) is the PRIMARY editing surface: typing `1/2` grows
- * a live fraction, the palette drops structures in with the caret
- * INSIDE the new slots (inline editing, never a LaTeX round trip),
- * and the "Source LaTeX" box remains for power users (the issue's
- * power-user path) — the two surfaces are two views of ONE draft.
- *
- * ONE DRAFT, TWO SURFACES: `draft` is the single source of truth; the
- * math field emits it via input events, the Source textarea edits it
- * directly. Every draft change live-applies to the node (coalesced by
- * prosemirror-history) — which makes THE DOCUMENT the live preview
- * (no preview pane; the user ruling). What remains in-bubble is the
- * FAILURE signal alone: a one-line error, only when the source does
- * not parse.
- *
- * STYLE CONTROLS (the M-EQ-2 ruling): color via the SHARED
- * ColorPickerButton (the font-color tool's own component — same
- * palette, same custom-color store; null = inherit the document
- * default), scale presets (S/M/L/XL → 0.75/1/1.25/1.5 — a
- * LAYOUT-relevant attr folded into the metrics fontSize key).
- *
- * FALLBACK: MathLive needs real layout — when it can't run (jsdom
- * tests, exotic webviews) the field calls onUnavailable once and the
- * bubble falls back to the Source textarea as the editing surface
- * (graceful, the broken-glyph law's editor arm).
+ * The equation editor bubble, VISUAL-FIRST: the MathLive field is the
+ * PRIMARY surface (palette inserts land with the caret INSIDE the new
+ * slots); the "Source LaTeX" box remains for power users — two views
+ * of ONE draft. Every draft change live-applies to the node (coalesced
+ * by prosemirror-history), so the DOCUMENT is the live preview; the
+ * bubble keeps only the FAILURE signal (a one-line error when the
+ * source does not parse). Scale presets are a LAYOUT-relevant attr
+ * (folded into the metrics fontSize key). MathLive unavailable
+ * (jsdom, exotic webviews) → the Source textarea is the surface.
  */
 
 interface EquationEditorBubbleProps {
@@ -76,20 +60,17 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
   // point is computed against the OLD draft, so it lands AFTER the
   // DOM re-render.
   const pendingCursorRef = useRef<number | null>(null);
-  // DRAG (the tear-off model): while ANCHORED the bubble re-derives
-  // its base at every render (fresh through scrolls/zoom) and the
-  // offset rides it; the first completed drag BAKES the current
-  // position as the new base — from then on the bubble is a floating
-  // panel that ignores re-anchors (Word's docked-equation-tools
-  // precedent: a torn-off editor panel is a panel).
+  // DRAG (tear-off): while ANCHORED the bubble re-derives its base at
+  // every render; the first completed drag BAKES the position as the
+  // new base — from then on it is a floating panel that ignores
+  // re-anchors.
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [hasDragged, setHasDragged] = useState(false);
   const frozenBaseRef = useRef<{ left: number; top: number } | null>(null);
   const dragStartRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
-  // The in-flight offset's SOURCE OF TRUTH: endDrag must read the
-  // final delta SYNCHRONOUSLY (its state twin is still the pre-batch
-  // closure value when React batches pointerMove+pointerUp into one
-  // flush — the delta was silently lost there).
+  // The in-flight offset's SOURCE OF TRUTH: endDrag must read the final
+  // delta SYNCHRONOUSLY — the state twin is still the pre-batch closure
+  // value when React batches pointerMove+pointerUp into one flush.
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   // Scroll-follow (anchored state): the body portal is fixed-position
   // (viewport coords), so content scrolls must re-derive the anchor —
@@ -149,16 +130,12 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
     pendingCursorRef.current = null;
   }, [draft]);
 
-  // ─── POSITION (the body-portal model) ─────────────────────────────
-  // The bubble renders through a document.body portal at fixed
-  // position + max z: it ESCAPES the editor's scroll container, whose
-  // overflow would otherwise clip it at the ribbon's edge (the
-  // dragged-under-the-ribbon bug) — no ancestor z-index can beat a
-  // clip. Fixed positioning takes VIEWPORT coordinates directly, so
-  // the anchor resolvers (both already viewport-spaced) need no
-  // container subtraction. While anchored, the base re-derives at
-  // every render; the scroll listener below keeps it fresh through
-  // content scrolls.
+  // POSITION (body-portal): the bubble renders through a document.body
+  // portal at fixed position — it ESCAPES the editor's scroll
+  // container, whose overflow clip no ancestor z-index can beat. Fixed
+  // positioning takes VIEWPORT coordinates directly, so the anchor
+  // resolvers need no container subtraction; while anchored, the base
+  // re-derives at every render (the scroll listener keeps it fresh).
   const currentAnchorRef = useRef<{ left: number; top: number }>({ left: 0, top: 0 });
   const anchor = hasDragged
     ? (frozenBaseRef.current ?? state.coords)
@@ -207,11 +184,10 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
 
   function applyDraft(next: string) {
     setDraft(next);
-    // THE ONE BOUNDARY: MathLive's editing tokens (\placeholder{},
-    // \imaginaryI, …) never reach the document — KaTeX can't parse
-    // them and the node would fall into the raw-source invalid face.
-    // The DRAFT stays raw (the field's slots survive its own re-fires
-    // through the echo guard); only the committed latex is normalized.
+    // MathLive's editing tokens (\placeholder{}, \imaginaryI, …) never
+    // reach the document — KaTeX can't parse them. The DRAFT stays raw
+    // (the field's slots survive re-fires); only the committed latex
+    // is normalized.
     commit({ latex: sanitizeMathliveLatex(next) });
   }
 
@@ -297,15 +273,11 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
       data-equation-bubble
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={handleKeyDown}
-      // FIXED at body level, z-[45]: the bubble escapes the editor's
-      // scroll container (whose overflow clip is what put a dragged
-      // bubble under the ribbon — no ancestor z-index can beat a
-      // clip). THE Z-LAW (toast.tsx): dialogs/popovers/menus/tooltips
-      // cap at z-50 and toasts sit at z-[100] as the topmost layer —
-      // a floating bubble must sit UNDER that layer so its own menus
-      // and tooltips (and every dialog) render above it, above the
-      // docked panels (z-40) and the ruler (z-30). Viewport
-      // coordinates directly — no container math.
+      // FIXED at body level, z-[45]: escapes the scroll container's
+      // overflow clip (no z-index can beat a clip). z-[45] sits under
+      // dialogs/popovers/menus/tooltips (z-50 cap) and toasts (z-[100])
+      // so they render above the bubble, and above the docked panels
+      // (z-40) and ruler (z-30). Viewport coords — no container math.
       className="fixed z-[45] w-80 rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
       style={{
         left: anchor.left + dragOffset.x,
@@ -327,9 +299,8 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
         <span className="font-medium">Equation</span>
       </div>
 
-      {/* The style toolbar: alignment (the engine's align attr), the
-          SHARED color picker (null = inherit), scale presets, and the
-          Visual/Source surface toggle. */}
+      {/* Style toolbar: alignment (the engine's align attr), the SHARED
+          color picker (null = inherit), scale presets, Visual/Source. */}
       <div className="mb-2 flex items-center gap-1">
         {toolbarButton(
           'equation-align-left',
@@ -390,21 +361,15 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
         </div>
       </div>
 
-      {/* THE EDITING SURFACE — visual (MathLive) or source (textarea).
-          Visual is primary; the Source path remains (the issue's
-          power-user ruling). */}
+      {/* The editing surface — visual (MathLive) or source (textarea); visual is primary. */}
       {mode === 'visual' && fieldAvailable ? (
         <MathLiveField
           ref={fieldRef}
           latex={draft}
-          // THE SHADCN INPUT RECIPE (ui/input.tsx verbatim, with
-          // :focus-within standing in for :focus-visible — the custom
-          // element owns the actual focus): the wrapper carries the
-          // app's border/bg/ring treatment, and index.css neutralizes
-          // MathLive's own :host chrome (its built-in #acacac box,
-          // system 'field' background, and the UA focus outline — the
-          // non-native ring). No min-height: the wrapper hugs the
-          // field's content, killing the empty band below the input.
+          // The shadcn input recipe (ui/input.tsx verbatim, :focus-within
+          // standing in for :focus-visible — the custom element owns
+          // focus); index.css neutralizes MathLive's :host chrome. No
+          // min-height: the wrapper hugs the field's content.
           className="tensor-equation-editor mb-2 rounded-lg border border-input bg-transparent transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50 dark:bg-input/30"
           style={{ fontSize: '16px' }}
           onChange={applyDraft}
@@ -424,11 +389,9 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
         />
       )}
 
-      {/* NO PREVIEW PANE (the user ruling): live-apply makes the
-          DOCUMENT the preview — it re-renders on every keystroke.
-          What remains here is the FAILURE signal alone: a one-line
-          error, shown ONLY when the (sanitized) source does not
-          parse, so the surface stays clean in the common case. */}
+      {/* No preview pane: live-apply makes the DOCUMENT the preview.
+          Only the FAILURE signal stays — a one-line error, shown only
+          when the sanitized source does not parse. */}
       {parseError && (
         <div
           data-testid="equation-bubble-error"
@@ -524,11 +487,9 @@ export const EquationEditorBubble = forwardRef<HTMLDivElement, EquationEditorBub
         </TabsContent>
       </Tabs>
 
-      {/* THE FOOTER — the app's DialogFooter pattern (ui/dialog.tsx):
-          negative margins escape the root's padding so the rule and
-          the muted band run EDGE-TO-EDGE, rounded to the bubble's own
-          bottom corners; the live-apply hint and the one explicit
-          close live inside it. */}
+      {/* THE FOOTER — DialogFooter pattern: negative margins escape the
+          root's padding so the rule and muted band run EDGE-TO-EDGE,
+          rounded to the bubble's bottom corners. */}
       <div
         data-testid="equation-bubble-footer"
         className="-mx-3 -mb-3 mt-2 flex items-center justify-between rounded-b-lg border-t bg-muted/50 px-3 py-2"

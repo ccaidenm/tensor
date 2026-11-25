@@ -19,100 +19,86 @@ interface BlockCanvasProps {
    * display-only ink, never a layout fact, never in print/export. */
   npc?: boolean;
   /** Block paint hints (list marker, blockquote, code bg, rule) —
-   * M6.1 paint-only decor, identity-stable per adapter conversion. */
+   * paint-only decor, identity-stable per adapter conversion. */
   paint?: BlockPaint;
   /** Marker font: the block's first run style, else the document
    * default ("style from the block's runs"). */
   markerStyle?: TextStyle;
   /**
-   * REGISTRY EPOCH (M-STYLES amendment 1): the repaint key's third
-   * leg. A RunDecor-level property edit (a style's COLOR) changes no
-   * layout-relevant fact — the engine splices (blocksWalked = 0) and
-   * hands back the SAME frozen LineBox references, so the line
-   * identity test below would skip the repaint and the new color
-   * would stay invisible behind the dirty-skip. The epoch forces the
-   * repaint: any definition edit repaints every block once, and the
-   * epoch comes from the same store subscription PaginatedView uses.
+   * REGISTRY EPOCH — the repaint key's third leg. A style property edit
+   * changes no layout fact: the engine hands back the SAME frozen
+   * LineBox references, so the identity test below would skip the
+   * repaint and the new color would stay invisible. Any definition edit
+   * bumps the epoch and repaints every block once.
    */
   styleEpoch: number;
-  /** M-IMAGES-1: caption DISPLAY toggle — false skips the caption
-   *  blocks' text ink (blank space: layout is engine-owned and stays
-   *  untouched — the NPC precedent, presentation-only). */
+  /** Caption DISPLAY toggle — false skips the caption blocks' text ink
+   *  (layout is engine-owned and stays untouched — presentation-only). */
   showCaptions: boolean;
-  /** M-IMAGES-2: the block's BASE wrap width (contentBox.width −
-   *  indentLeft − indentRight) — the engine's breakLines maxWidth
-   *  (layout.ts:392), and the object clamp's input. The inline paint
-   *  clamp uses the SAME fitDownImage primitive on the SAME value —
-   *  never a re-derivation. #74 — the COLUMN's base wrap under
-   *  columns (the engine broke the block at the column's width). */
+  /** The block's BASE wrap width (contentBox.width − indents) — the
+   *  engine's breakLines maxWidth, and the object clamp's input. The
+   *  inline paint clamp uses the SAME fitDownImage primitive on the
+   *  SAME value — never a re-derivation. #74 — under columns this is
+   *  the COLUMN's base wrap. */
   wrapWidth: number;
   /**
-   * #74 COLUMNS — the group's COLUMN frame (content-box-relative):
-   * the decor surfaces (blockquote/code tints, the reference border,
-   * the rule line) and the align container span the COLUMN. Absent ≡
-   * the content box (single-column — bit-identical paint). The group
-   * is per-column (PaginatedView keys blockId+column), so ONE frame
-   * covers the whole paint call.
+   * #74 — the group's COLUMN frame (content-box-relative): the decor
+   * surfaces (blockquote/code tints, the reference border, the rule
+   * line) and the align container span the COLUMN. Absent ≡ the
+   * content box (single-column — bit-identical paint). The group is
+   * per-column (PaginatedView keys blockId+column).
    */
   columnFrame?: { left: number; width: number };
-  /** M-IMAGES-2.1: the bitmap resolver (media/bitmapCache) — the
-   *  inline paint's LAST seam (M-IMAGES-2 shipped it undefined: the
-   *  gray placeholder fired unconditionally). Absent → placeholder. */
+  /** The bitmap resolver (media/bitmapCache). Absent → placeholder. */
   resolveBitmap?: (sha: string) => HTMLImageElement | undefined;
-  /** M-IMAGES-2.2: terminal-failure probe (the failed box vs the
+  /** Terminal-failure probe (the failed box vs the
    *  pending tint). */
   bitmapFailed?: (sha: string) => boolean;
-  /** M-IMAGES-2.1: bumps when ANY bitmap lands — rides boxKey so the
-   *  inline paint repaints ONCE on arrival (the arrival law). */
+  /** Bumps when ANY bitmap lands — rides boxKey so the
+   *  inline paint repaints ONCE on arrival. */
   bitmapEpoch: number;
   /**
-   * M-HEADER-FOOTER-2: MUTED ink — the INACTIVE band look (grayed
-   * while the selection sits outside the band containers). Passed to
-   * paintLines' extras; rides boxKey (a mute flip repaints, the
-   * styleEpoch precedent).
+   * MUTED ink — the INACTIVE band look (grayed while the selection
+   * sits outside the band containers). Passed to paintLines' extras;
+   * rides boxKey (a mute flip repaints).
    */
   muted?: boolean;
   /**
-   * M-REFS: the reference-table FIELD BORDER's selection fact — true
+   * The reference-table FIELD BORDER's selection fact — true
    * only while the caret sits inside this container (PaginatedView
    * computes it per selection projection). Rides boxKey: entering/
-   * leaving the table repaints the block once, the mute precedent.
+   * leaving the table repaints the block once.
    */
   referenceBorder?: boolean;
   /**
-   * M-REFS-8: the container's sidecar entries (leaderLen per row) —
-   * the PAINTER's leader tag: gap-filling dots drawn after each
+   * The container's sidecar entries (leaderLen per row) — the
+   * PAINTER's leader tag: gap-filling dots drawn after each
    * row's refLeader span at the span's own measured style. Rides
    * boxKey via the paint hint's identity (the sidecar array changes
    * ⇒ the conversion changed ⇒ new lines anyway).
    */
   referenceEntries?: import('@/lib/paginated/adapter').ReferenceSidecarEntry[];
   /**
-   * M-PAGEFIELD: the per-page field resolution — THIS page's 1-based
+   * The per-page field resolution — THIS page's 1-based
    * number and the document's total. Field runs draw the resolution
    * instead of the measured placeholder. Both props are stable per
-   * canvas (the group is per page; the total rides the relayout).
+   * canvas (the total rides the relayout).
    */
   pageNumber: number;
   pageTotal: number;
+  /** The empty-document placeholder (first block of an empty doc only). */
+  placeholder?: string;
 }
 
 /**
- * The per-block-per-page paint surface. DPR-scaled canvas; one
- * fillText per LineSegment so bold/italic survive wrapping.
- *
- * DIRTY-BLOCK REPAINT, NO REBUILD PER KEYSTROKE: the
- * engine shares frozen LineBox objects zero-copy across layout calls,
- * so reference equality IS the dirty bit.
- *
- * DAMAGE-ONLY RASTER: on a single-block text edit, the
- * damage is from the first changed line to the end of the block's
- * fragment on this page (a re-wrap moves everything below). Only that
- * region is cleared and redrawn; identical lines above the edit keep
- * their pixels. Falls back to full repaint on canvas resize, first-line
- * edits, or style changes (the fallback cost = the old behavior).
+ * The per-block-per-page paint surface: DPR-scaled canvas, one
+ * fillText per LineSegment (bold/italic survive wrapping). The engine
+ * shares frozen LineBox objects zero-copy across layout calls, so
+ * reference equality IS the dirty bit. DAMAGE-ONLY RASTER: a text edit
+ * clears/redraws only from the first changed line down; full repaint
+ * on resize, first-line edits, or style changes.
  */
-export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, columnFrame, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal }: BlockCanvasProps) {
+export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metrics, left, top, width, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, columnFrame, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal, placeholder }: BlockCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevLinesRef = useRef<readonly LineBox[] | null>(null);
   const prevTextRef = useRef('');
@@ -128,32 +114,25 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
 
     const decorKey = runDecor.map((d) => `${d.color}|${d.highlight}|${d.underline}|${d.strike}`).join(';');
     const paintKey = paint ? JSON.stringify(paint) : '';
-    // M-REFS HARDENING (the stale-ink class-killer): the key carries a
-    // CONTENT FINGERPRINT of the line set (count + first/last ranges),
-    // not just object references — a line-set change forces the
-    // repaint even when the engine handed back reused frozen
-    // references, so the bitmap can never outlive the geometry it
-    // was painted from (the reported "text gone from the model but
-    // still painted / condensed into one line" class).
+    // STALE-INK HARDENING: the key carries a CONTENT FINGERPRINT of the
+    // line set (count + first/last ranges), not just references — a
+    // line-set change forces the repaint even when the engine reused
+    // frozen references, so the bitmap never outlives its geometry.
     const lineFingerprint = `${lines.length}:${lines[0]?.rangeStart ?? 0}-${lines[lines.length - 1]?.rangeEnd ?? 0}`;
     const boxKey = `${left}|${top}|${width}|${height}|${align}|${decorKey}|${npc === true ? 'npc' : ''}|${paintKey}|ep${styleEpoch}|cap${showCaptions ? '1' : '0'}|bmp${bitmapEpoch}|muted${muted ? '1' : '0'}|ln${lineFingerprint}|ref${referenceBorder ? '1' : '0'}`;
-    // boxKey carries the registry epoch: ANY definition edit breaks
-    // the boxKey comparison and forces the repaint below — even when
-    // the engine spliced (same LineBox references, blocksWalked = 0)
-    // and only paint-tier facts (decor color) changed. `height` rides
-    // the key too (the full extent — a shrunk block with otherwise
-    // identical facts must repaint or the old bitmap squishes behind
-    // the smaller CSS size, the reported "2 lines condensed into 1").
+    // boxKey carries the registry epoch (any definition edit forces the
+    // repaint, even a spliced same-references change) and `height` (a
+    // shrunk block must repaint or the old bitmap squishes behind the
+    // smaller CSS size).
     const unchanged =
       prevBoxRef.current === boxKey &&
       prevTextRef.current === text &&
       prevLinesRef.current !== null &&
       prevLinesRef.current.length === lines.length &&
       lines.every((l, i) => l === prevLinesRef.current![i]);
-    // M-REFS-7 — THE GHOST DEBUG SEAM (definitive): logs EVERY effect
-    // run INCLUDING the unchanged SKIPs (round 6's log missed skips —
-    // an empty log with live typing means the EFFECT isn't running at
-    // all, i.e. the relayout pipeline is dead, which is the ghost).
+    // THE GHOST DEBUG SEAM: logs EVERY effect run INCLUDING the
+    // unchanged SKIPs — an empty log with live typing means the effect
+    // isn't running at all (the relayout pipeline is dead).
     const dbgAll = (globalThis as { __tensorPaintDebug?: { log: unknown[] } }).__tensorPaintDebug;
     if (dbgAll) {
       dbgAll.log.push({
@@ -196,8 +175,6 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // (The PAINT decisions log above; the boxKey rode the round-6 log.)
-
     try {
       if (damageFrom > 0) {
         // Damage-only: clear from the first changed line's top to the
@@ -205,33 +182,31 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
         const damageTop = lines[damageFrom].rect.y - first.rect.y;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, damageTop, width, height - damageTop);
-        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines.slice(damageFrom), runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
         // Receipt: px² actually rasterized (cleared + repainted region).
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * (height - damageTop);
       } else {
         // Full repaint (canvas resize, edit at line 0, style change, or
-        // initial mount) — same as the previous behavior.
+        // initial mount).
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
         // Receipt: full canvas.
         __w.__benchPaints!.paints[__w.__benchPaints!.paints.length - 1].px2 = width * height;
       }
     } catch (err) {
-      // THE STALE-INK GUARD (the reported ghost class): a thrown paint
-      // must NEVER leave a half-cleared bitmap behind refs that make
-      // the next render SKIP — that is exactly "the model moved on but
-      // the canvas still shows the old text until the next keystroke".
-      // One full-repaint retry IN THE SAME FRAME (a transient resolver
-      // race is the plausible cause); if even that fails, reset the
-      // refs so the next render repaints fully. Loud either way.
+      // THE STALE-INK GUARD: a thrown paint must NEVER leave a
+      // half-cleared bitmap behind refs that make the next render SKIP
+      // (stale ink until the next keystroke). One full-repaint retry in
+      // the same frame; if even that fails, reset the refs so the next
+      // render repaints fully.
       console.error('[BlockCanvas] paint failed — retrying full repaint', err);
       try {
         canvas.width = newW;
         canvas.height = newH;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal } });
+        paintLines(ctx, lines, runs, text, first.rect.y, metrics, { align, contentWidth: columnFrame ? columnFrame.width : width, columnLeft: columnFrame?.left, runDecor, npc, paint, markerStyle, showCaptions, objectMaxWidth: wrapWidth, resolveBitmap, bitmapFailed, muted, referenceBorder, referenceEntries, fieldPage: { number: pageNumber, total: pageTotal }, placeholder });
       } catch (retryErr) {
         console.error('[BlockCanvas] repaint retry failed — full repaint armed for next render', retryErr);
         prevLinesRef.current = null;
@@ -245,18 +220,17 @@ export const BlockCanvas = memo(function BlockCanvas({ lines, runs, text, metric
     prevTextRef.current = text;
     prevBoxRef.current = boxKey;
   // showCaptions + wrapWidth + bitmapEpoch ride the repaint KEY —
-  // each flips the paint when it changes (the arrival repaint).
-  // M-PAGEFIELD: pageNumber/pageTotal ride too — a virtualized canvas
-  // can be REUSED across pages (the per-page group's identity is the
-  // block, not the page), and a total change re-measures the fields.
+  // each flips the paint when it changes. pageNumber/pageTotal ride
+  // too: a virtualized canvas can be REUSED across pages (the group's
+  // identity is the block, not the page), and a total change
+  // re-measures the fields.
   }, [lines, runs, text, metrics, left, top, width, height, first.rect.y, align, runDecor, npc, paint, markerStyle, styleEpoch, showCaptions, wrapWidth, columnFrame, resolveBitmap, bitmapFailed, bitmapEpoch, muted, referenceBorder, referenceEntries, pageNumber, pageTotal]);
 
   return (
     <canvas
       ref={canvasRef}
       data-block-id={lines[0].blockId}
-      // M-HEADER-FOOTER-2: band canvases carry their band identity (test
-      // surface + future per-band ink routing).
+      // Band canvases carry their band identity (test surface).
       data-band={lines[0].band}
       role="presentation"
       className="absolute"

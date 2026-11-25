@@ -4,17 +4,9 @@ import { TableMap } from '@tiptap/pm/tables';
 import { CELL_MIN_TRACK } from '@tensor-editor/engine';
 
 /**
- * M-TABLES — the table attr writers (the paginated drag handles AND the
- * M-T3c side panel both dispatch through here — one writer family, no
- * forks). Column widths ride the stock `colwidth` cell attr; row
- * minimums ride the M-T3c `minHeight` row attr.
- *
- * The colwidth array is SPARSE by spanned-column position: entry j
- * names the j-th spanned column (null = flexible — the engine's
- * remaining-width share). ONE transaction writes the whole column —
- * the engine's track derivation THROWS on per-column conflicts, so
- * the column cells must move together (the same invariant
- * prosemirror-tables' own columnResizing plugin keeps in the DOM).
+ * The table attr writers (drag handles AND the side panel). The colwidth
+ * array is SPARSE by spanned position (null = flexible); ONE transaction
+ * writes the whole column — the engine THROWS on per-column conflicts.
  */
 export function setColumnWidth(editor: Editor, tablePos: number, col: number, width: number | null): boolean {
   const table: PMNode | null = editor.state.doc.nodeAt(tablePos);
@@ -42,9 +34,9 @@ export function setColumnWidth(editor: Editor, tablePos: number, col: number, wi
 }
 
 /**
- * M-T3c — "Distribute evenly": clears EVERY cell's colwidth. All
- * columns become flexible → the engine's equal-share derivation lays
- * them out identically wide (the true "evenly" in the flexible model).
+ * "Distribute evenly": clears EVERY cell's colwidth — all columns
+ * flexible, the engine's equal-share derivation lays them out
+ * identically wide.
  */
 export function clearAllColumnWidths(editor: Editor, tablePos: number): boolean {
   const table: PMNode | null = editor.state.doc.nodeAt(tablePos);
@@ -63,11 +55,9 @@ export function clearAllColumnWidths(editor: Editor, tablePos: number): boolean 
 }
 
 /**
- * M-T4 — the FIXED-NEIGHBOR probe: the column's fixed width (the first
- * covering cell's colwidth entry), or null when the column is
- * FLEXIBLE. Mirrors the engine's per-column derivation (it takes the
- * first non-null; conflicts throw — so "any" === "all" in a consistent
- * doc).
+ * The column's fixed width (the first covering cell's colwidth entry),
+ * or null when FLEXIBLE — mirrors the engine's per-column derivation
+ * (it takes the first non-null; conflicts throw).
  */
 function columnFixedWidth(editor: Editor, table: PMNode, tablePos: number, col: number): number | null {
   let fixed: number | null = null;
@@ -85,12 +75,9 @@ function columnFixedWidth(editor: Editor, table: PMNode, tablePos: number, col: 
 }
 
 /**
- * M-T4 — the INTERIOR boundary drag, Word semantics: the dragged
- * column takes the new width and its RIGHT NEIGHBOR pays the delta —
- * the table's total width NEVER changes from an interior drag. A
- * flexible neighbor absorbs automatically (plain setColumnWidth); a
- * FIXED neighbor is written too, clamped at the track floor (the drag
- * then stops short — the neighbor can't pay more than it has).
+ * The interior boundary drag, Word semantics: the right NEIGHBOR pays
+ * the delta (total width never changes); a fixed neighbor is clamped
+ * at the track floor.
  */
 export function setColumnWidthWord(
   editor: Editor,
@@ -134,13 +121,9 @@ export function setColumnWidthWord(
 }
 
 /**
- * M-T4 — the RIGHT-BORDER drag: the table's outermost right edge is
- * the TABLE border, not a column boundary — dragging it scales EVERY
- * track proportionally (the previous behavior set only the last
- * column's width, and the still-flexible columns re-inflated to fill
- * the content box: the "backwards spacing" bug — the table could never
- * shrink). Every column becomes fixed; the caller clamps the new
- * total to [cols × CELL_MIN_TRACK, the table box].
+ * The RIGHT-BORDER drag: the outer right edge is the TABLE border —
+ * dragging it scales EVERY track proportionally (all become fixed).
+ * The caller clamps the total to [cols × CELL_MIN_TRACK, the table box].
  */
 export function setTableTracks(editor: Editor, tablePos: number, widths: number[]): boolean {
   const table: PMNode | null = editor.state.doc.nodeAt(tablePos);
@@ -172,9 +155,8 @@ export function setTableTracks(editor: Editor, tablePos: number, widths: number[
 }
 
 /**
- * M-T3c — the row's minimum height (Word's Row Height "at least"):
- * null = auto (pure content height); a positive number floors the row.
- * ONE transaction per commit.
+ * The row's minimum height ("at least"): null = auto; a positive
+ * number floors the row. ONE transaction per commit.
  */
 export function setRowMinHeight(editor: Editor, tablePos: number, rowIndex: number, height: number | null): boolean {
   const table: PMNode | null = editor.state.doc.nodeAt(tablePos);
@@ -194,13 +176,9 @@ export function setRowMinHeight(editor: Editor, tablePos: number, rowIndex: numb
 }
 
 /**
- * M-FLOW — the row's split control (Word's "Allow row to break across
- * pages" checkbox, stored under the OOXML w:cantSplit spelling):
- * null = unset = the row MAY split at the cell line grid (Word's AND
- * GDocs' default); true = atomic (moves wholly). The MODEL is binary
- * null|true — a write of `false` normalizes to null (they layout
- * identically; the parseHTML side still tolerates a literal false
- * from hand-written HTML). ONE transaction per commit.
+ * The row's split control ("Allow row to break across pages"): null =
+ * the row MAY split (default); true = atomic. The MODEL is binary —
+ * `false` normalizes to null (parseHTML still tolerates a literal false).
  */
 export function setRowCantSplit(
   editor: Editor,

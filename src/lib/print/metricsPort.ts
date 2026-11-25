@@ -1,11 +1,8 @@
 import type { TextStyle } from '@tensor-editor/engine';
 
 /**
- * M-PRINT — the metrics PORT for the print walk. The real
- * implementation is the on-screen singleton (lib/paginated/metrics.ts
- * — getRealMetrics); the seam exists so tests drive the walk with
- * deterministic doubles (the FakeMetrics precedent) and the
- * renderer never imports canvas-adjacent module state.
+ * The metrics port for the print walk: the seam lets tests use
+ * deterministic doubles and keeps the renderer off canvas state.
  */
 
 export interface TextMetricsPort {

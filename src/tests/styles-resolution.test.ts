@@ -11,10 +11,10 @@ import {
 import type { StyleDefinition } from '@/lib/styles/types';
 
 /**
- * M-STYLES STEP 5 + addendum 4: the cascade precedence matrix, per
- * property, including the new ones (fontVariant, textTransform), for
- * THE one resolution function. Weak → strong:
- *   baseStyle < paragraph style < paragraph attrs < charStyle < direct marks
+ * The cascade precedence matrix, per property (fontVariant and
+ * textTransform included), for the one resolution function. Weak →
+ * strong: baseStyle < paragraph style < paragraph attrs < charStyle <
+ * direct marks
  */
 
 const BASE = baselineRunStyle({ fontFamily: 'system-ui', fontSize: 16 });

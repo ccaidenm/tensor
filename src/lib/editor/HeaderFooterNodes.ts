@@ -1,29 +1,9 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 
 /**
- * M-HEADER-FOOTER-2 — the doc-level header/footer container nodes.
- *
- * DESIGN (the unified-pipeline ruling): header/footer content lives in
- * the SAME TipTap document as the body — `doc: [headerBlock?, ...body…,
- * footerBlock?]` — so the ONE hidden input view (L3) owns all keyboard
- * input, IME, and the selection model, and the ONE engine pipeline
- * paints, hit-tests, and caret-projects it identically to body text.
- * The old separate small Editors (headerFooterStore's region editors)
- * are deleted with this milestone.
- *
- * CONTENT: 'block+' (multi-paragraph). The ADAPTER routes these nodes
- * OUT of the body flow into `doc.bands` (never in flow order) while
- * their paragraphs' AdapterBlocks join `blocks` (real PM positions —
- * the paint/caret/hit-test sidecar) AND `bandBlocks` (the band-membership
- * sidecar). The ENGINE re-emits them per page in the margin strips
- * (band-tagged LineBoxes).
- *
- * ATTRS: `variant` — 'default' (the every-page region) or 'first' (the
- * page-1 region under differentFirstPage). Enables/differentFirstPage
- * persist in .wpdoc metadata (document-wide settings, not node content).
- *
- * PAGELESS: renders natively (the content children, no special chrome)
- * — the fallback path's own contract.
+ * Doc-level header/footer containers — same PM document, so the one
+ * hidden view owns input and the one engine pipeline paints the
+ * bands; the adapter routes them out of body flow into `doc.bands`.
  */
 
 export interface HeaderFooterNodeOptions {
@@ -50,14 +30,9 @@ function createHeaderFooterNode({ name, tag, legacyTag }: HeaderFooterNodeOption
             'data-variant': attrs.variant === 'first' ? 'first' : 'default',
           }),
         },
-        // #58 SECTIONS — the section OVERRIDE tag: a container tagged
-        // with a sectionBreak's sectionId feeds THAT section's bands
-        // (Word's "this section's own header"); UNTAGGED containers are
-        // the doc default every non-overriding section inherits ("link
-        // to previous" by construction). The adapter resolves the tag
-        // to a section index; a stale tag (the break deleted) resolves
-        // to the doc default — content preserved. The merge-on-delete
-        // law drops tagged containers WITH their break (one undo step).
+        // #58 — the section OVERRIDE tag: a container tagged with a
+        // break's sectionId feeds THAT section; untagged = the doc
+        // default. A stale tag resolves to the doc default.
         sectionId: {
           default: null,
           parseHTML: (el: HTMLElement) => el.getAttribute('data-section-id'),
@@ -90,13 +65,9 @@ export const FooterBlock = createHeaderFooterNode({
 });
 
 /**
- * #58 — the FINAL section's band-override identity. The breaks carry
- * sections 0..n-1's ids (the preceding-section spelling); the FINAL
- * section rides the store's pageSetup — and its BAND override needs a
- * key too: a container tagged with this reserved id feeds the FINAL
- * section only (the adapter maps it to the last index; the docx export
- * routes it to the final sectPr). Uncolliding with the generated
- * `sec-…` ids by construction.
+ * #58 — the FINAL section's band-override key: the breaks carry
+ * sections 0..n-1's ids, and this reserved id (uncolliding with
+ * generated `sec-…`) feeds the final section only.
  */
 export const FINAL_SECTION_ID = 'sec-final';
 

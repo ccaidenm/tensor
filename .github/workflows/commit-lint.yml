@@ -1,0 +1,34 @@
+name: Commit conventions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint commit range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+            ARGS="--from $BASE --to HEAD"
+          else
+            BEFORE="${{ github.event.before }}"
+            # first push to a fresh branch has no "before" — lint parent..head
+            [ "$BEFORE" = "0000000000000000000000000000000000000000" ] && BEFORE="${{ github.sha }}^"
+            ARGS="--from $BEFORE --to ${{ github.sha }}"
+          fi
+          npx commitlint $ARGS --verbose

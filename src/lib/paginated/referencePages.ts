@@ -3,7 +3,7 @@ import type { LineBox } from '@tensor-editor/engine';
 import { pmPosToBlockOffset } from './positionMap';
 
 /**
- * M-REFS — THE PAGE RESOLVER (the two-pass fixpoint, shell-side): a
+ * THE PAGE RESOLVER (the two-pass fixpoint, shell-side): a
  * reference entry's page number is a fact about a LATER block's
  * placement, and the engine's walk is strictly forward — so the SHELL
  * resolves numbers between layout passes (the ruled design):

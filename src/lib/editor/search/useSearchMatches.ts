@@ -12,9 +12,8 @@ interface SearchMatchesState {
 const EMPTY_STATE: SearchMatchesState = { matches: [], currentIndex: -1, regexError: null, groupCount: 0 };
 
 /**
- * Reactive read of the SearchExtension's storage. Storage itself is kept in
- * sync with PM plugin state via the extension's onTransaction hook; this
- * hook just re-syncs whenever a transaction fires.
+ * Reactive read of the SearchExtension's storage (kept in sync with
+ * PM plugin state by the extension's onTransaction hook).
  */
 export function useSearchMatches(editor: Editor | null): SearchMatchesState {
   const [state, setState] = useState<SearchMatchesState>(EMPTY_STATE);
@@ -46,20 +45,16 @@ export function useSearchMatches(editor: Editor | null): SearchMatchesState {
 }
 
 /**
- * Scrolls the currently-highlighted match into view whenever it changes.
- * Shared between the popup and the Advanced sidebar so both stay in sync
- * with whichever one drove the navigation.
+ * Scrolls the currently-highlighted match into view — shared by the
+ * popup and the Advanced sidebar.
  */
 export function useScrollToCurrentSearchMatch(currentIndex: number, matchCount: number) {
   useEffect(() => {
     if (currentIndex < 0 || matchCount === 0) return;
     const el = document.querySelector('.tensor-search-match-current');
-    // Match decorations live in the PM view — in paginated mode that
-    // is the hidden input-only view (L3), whose geometry is meaningless;
-    // scrollIntoView against it would scroll the desk to nonsense
-    // coordinates. Skip there (pageless and the paginated fallback render
-    // the view visibly, where native scroll is correct). The paginated
-    // search path scrolls the current match by painted coordinates.
+    // Match decorations live in the PM view — the paginated hidden
+    // input-only view's geometry is meaningless (scrollIntoView would
+    // scroll to nonsense); the paginated path scrolls by painted coords.
     if (el?.closest('.pm-input-only')) return;
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [currentIndex, matchCount]);

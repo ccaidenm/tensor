@@ -3,27 +3,10 @@ import { NodeSelection } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 
 /**
- * M-IMAGES-2 — the wrap conversions. THE MECHANICS RECEIPT (quoted in
- * InlineImageNode.ts): block and inline are DIFFERENT PM SHAPES —
- * conversion is a node-kind SWITCH (replaceWith), never a position
- * transform. All attrs copy BOTH WAYS (align/keepNext/radius ride
- * inert on the inline node) so block→inline→block returns geometry
- * EXACTLY (the return-exact pin). float rides as an INERT CARRIER on
- * the inline node too (the adapter never reads it inline): float →
- * inline → float returns the EXACT offset — mode switches never move
- * the image.
- *
- * THE 2.1 FIX RECEIPT (the reported "wrap switch mangles the doc"):
- * the old inline→block computed the insert position from the
- * PRE-delete paragraph size — `editor.state.doc` (the pre-transform
- * doc) was read AFTER `tr.delete` had run on the transaction, so the
- * insert landed one position past the (now shorter) paragraph: every
- * switch left TWO empty paragraphs behind and teleported the image to
- * the doc's end, and a last-block image threw RangeError. Both
- * conversions are now SINGLE-STEP replaceWith over a FULLY computed
- * position set — no cross-step position arithmetic — and each selects
- * its new node (the toolbar stays in image mode across the switch;
- * setWrapMode's float commit re-resolves straight off the selection).
+ * The wrap conversions: block and inline are different PM shapes —
+ * a switch is a replaceWith, never a position transform; all attrs
+ * copy both ways, so mode switches never move the image, and each
+ * conversion selects its new node (the toolbar stays in image mode).
  */
 
 type Attrs = Record<string, unknown>;
@@ -50,21 +33,19 @@ function carryAttrs(attrs: Attrs): Attrs {
     align: attrs.align ?? 'left',
     keepNext: attrs.keepNext === true,
     radius: attrs.radius ?? 0,
-    // M-A11Y — the decorative marking survives mode switches (the
-    // alt/keepNext carrier law: everything the user decided rides).
+    // The decorative marking survives mode switches.
     decorative: attrs.decorative === true,
-    // The float offset rides BOTH directions (inert on the inline
-    // node — the adapter never reads it inline): float → inline →
-    // float returns the EXACT offset (mode switches never move the
-    // image — the E-IMG-3 ruling).
+    // The float offset rides both directions, inert on the inline
+    // node (the adapter never reads it inline): float → inline →
+    // float returns the exact offset.
     float: attrs.float ?? null,
   };
 }
 
-/** The image's caption, scanning FORWARD: empty paragraphs (insert-
- *  split husks — including ones left by the pre-2.1 conversion bug)
- *  are skipped; the first styleId-'caption' paragraph before any other
- *  content wins. Small window — captions live next to their image. */
+/** The image's caption, scanning forward: empty paragraphs (insert-
+ *  split husks) are skipped; the first styleId-'caption' paragraph
+ *  before any other content wins (small window — captions live
+ *  beside their image). */
 function findCaptionAfter(doc: PMNode, fromPos: number): { node: PMNode; pos: number } | null {
   let pos = fromPos;
   for (let i = 0; i < 4; i++) {
@@ -82,10 +63,9 @@ export function convertBlockToInline(editor: Editor): void {
   const sel = selectedImageNode(editor);
   if (!sel || sel.kind !== 'image') return;
   const doc = editor.state.doc;
-  // M-IMAGES-2.2 — the caption FOLLOWS the image through the switch:
-  // found ADJACENT it rides the replaceWith's own mapping (the new
-  // paragraph is one slot wider — the caption lands right beneath);
-  // found behind husk paragraphs it is MOVED beneath (delete + insert).
+  // The caption follows the image through the switch: adjacent, it
+  // rides the replaceWith's own mapping; behind husk paragraphs, it
+  // is moved beneath (delete + insert).
   const found = findCaptionAfter(doc, sel.pos + sel.nodeSize);
   const tr = editor.state.tr;
   // Replace [pos, pos+nodeSize) with a paragraph wrapping the inline
@@ -100,7 +80,7 @@ export function convertBlockToInline(editor: Editor): void {
     tr.delete(mapped, mapped + found.node.nodeSize);
     tr.insert(newParaEnd, found.node);
   }
-  // The NEW inline node is selected (one step: the paragraph's child
+  // The new inline node is selected (one step: the paragraph's child
   // sits at pos+1) — the toolbar stays in image mode across the
   // switch, and Backspace deletes the object as the user expects.
   tr.setSelection(NodeSelection.create(tr.doc, sel.pos + 1));
@@ -108,12 +88,9 @@ export function convertBlockToInline(editor: Editor): void {
 }
 
 /**
- * inline image → block (EXTRACTED IN PLACE — the paragraph splits
- * around the object): [before-text] / image / [after-text]. A
- * paragraph that held ONLY the object yields the image alone (no
- * empty husk); halves keep the source textblock's TYPE + attrs (the
- * text keeps its style; duplicate blockIds are re-minted by the
- * BlockIdExtension pass — its pinned later-node law).
+ * inline image → block, extracted in place: [before-text] / image /
+ * [after-text]. An object-only paragraph yields the image alone (no
+ * empty husk); halves keep the source textblock's type + attrs.
  */
 export function convertInlineToBlock(editor: Editor): void {
   const sel = selectedImageNode(editor);
@@ -139,18 +116,13 @@ export function convertInlineToBlock(editor: Editor): void {
   if (afterSize > 0) {
     parts.push(para.type.create(para.attrs, para.content.cut(beforeSize + sel.nodeSize)));
   }
-  // M-IMAGES-2.2 — THE CAPTION FOLLOWS: a caption paragraph bonded to
-  // the source paragraph must end up RIGHT BENEATH the image. The
-  // mid-paragraph split would otherwise strand it after the after-half
-  // ([p[hello], image, p[world], caption]) — detached from the image
-  // it describes, and the keepNext bond (which the carried attrs
-  // preserve) vacuous without adjacency. Found behind husk paragraphs
-  // it is gathered too; when the split leaves it already adjacent,
-  // nothing moves.
+  // The caption follows: bonded to the source paragraph, it must end
+  // up right beneath the image — the split would otherwise strand it
+  // after the after-half (the keepNext bond is vacuous without adjacency).
   const found = findCaptionAfter(doc, contentEnd + 1);
   const tr = editor.state.tr;
   tr.replaceWith(paraStart, paraStart + para.nodeSize, parts);
-  // The NEW block image's position: after the before-half's whole node
+  // The new block image's position: after the before-half's whole node
   // (beforePara = content + open/close tokens).
   const beforeParaSize = beforeSize > 0 ? para.content.cut(0, beforeSize).size + 2 : 0;
   const imgPos = paraStart + beforeParaSize;
@@ -167,10 +139,9 @@ export function convertInlineToBlock(editor: Editor): void {
   editor.view.dispatch(tr);
 }
 
-/** Set the wrap mode on the SELECTED image (any kind):
- *  'inline' → block→inline (or no-op);
- *  'front'/'behind' → inline→block first if needed, then float z
- *  (dx/dy preserved — mode switches never move the image). */
+/** Set the wrap mode on the selected image (any kind): 'inline' →
+ *  block→inline (or no-op); 'front'/'behind' → inline→block first if
+ *  needed, then float z (dx/dy preserved). */
 export function setWrapMode(
   editor: Editor,
   mode: 'inline' | 'front' | 'behind'
@@ -185,8 +156,8 @@ export function setWrapMode(
   let attrs = sel.attrs;
   if (sel.kind === 'inlineImage') {
     convertInlineToBlock(editor);
-    // Re-resolve (the positions moved — the conversion SELECTED the
-    // new block node, so this reads it straight off the selection):
+    // Re-resolve — the conversion selected the new block node, so
+    // this reads it straight off the selection:
     const next = selectedImageNode(editor);
     if (!next || next.kind !== 'image') return;
     attrs = next.attrs;
@@ -203,10 +174,9 @@ export function setWrapMode(
   editor.view.dispatch(tr);
 }
 
-/** Float drag commit: dx/dy are ANCHOR-RELATIVE — the drag delta adds
- *  to the current offset (the engine re-derives + clamps the placed
- *  rect; the shell never clamps). A drag on an unfloated image
- *  FLOATS it (front, Word behavior). */
+/** Float drag commit: dx/dy are anchor-relative — the drag delta
+ *  adds to the current offset (the engine clamps the placed rect;
+ *  the shell never clamps). Dragging an unfloated image floats it. */
 export function commitFloatDrag(
   editor: Editor,
   pos: number,

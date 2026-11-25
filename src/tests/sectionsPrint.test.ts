@@ -7,11 +7,9 @@ import type { PrintPage } from '@/lib/print/types';
 import { createLayoutEngine, type LayoutOptions } from '@tensor-editor/engine';
 
 /**
- * #58 SECTIONS — the PRINT/PDF sweep (Phase 4): a mixed-geometry
- * document (A4 section 0 + Letter section 1) walks through the SAME
- * engine (one geometry source) and the print renderer + PDF
- * synthesizer consume the PER-PAGE facts. The #34 field ink-shift
- * (the page-number string) resolves per page across the boundary.
+ * #58 — the print/PDF sweep over sections: a mixed-geometry doc (A4 +
+ * Letter) walks through the ONE engine; print + PDF consume the
+ * per-page facts; the #34 field ink-shift resolves per page.
  */
 
 /** Deterministic metrics: advance = chars × 8, ascent 12, descent 4. */
@@ -219,7 +217,7 @@ describe('sections × pdf — mixed page sizes synthesize natively', () => {
   });
 });
 
-// ─── #48 — page backgrounds through the PDF ──────────────────────────────
+// #48 — page backgrounds through the PDF
 
 describe('#48 — page backgrounds through print + PDF', () => {
   it('a PrintPage background becomes a full-page PDF fill UNDER the content (drawn first)', async () => {

@@ -19,12 +19,8 @@ import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { parseTableDims, TABLE_DIM_CAP } from '@/lib/editor/tableInsert';
 
 /**
- * M-TABLES — the pageless-mode table layer. The document model is the
- * TipTap table family (TableKit) plus Tensor's borderStyle /
- * backgroundColor attrs; these tests pin the behaviors the issue's
- * acceptance criteria name for M-T1 (the paginated engine's TableBlock
- * is M-T2 — until then a table doc in Pages mode falls back to the
- * pageless render with the banner).
+ * The table layer. The document model is the TipTap table family
+ * (TableKit) plus Tensor's borderStyle / backgroundColor attrs.
  */
 
 function setPageless() {
@@ -71,7 +67,7 @@ function caretIntoFirstCell(editor: Editor) {
   });
 }
 
-describe('M-TABLES: model + pageless', () => {
+describe('model + pageless', () => {
   it('insertTable creates the schema shape (header row + body rows) and blockId is minted on the table node', async () => {
     const { editor } = renderTensor();
     await act(async () => {
@@ -79,14 +75,12 @@ describe('M-TABLES: model + pageless', () => {
     });
     const table = looseJSON(editor).content?.find((n) => n.type === 'table');
     expect(table).toBeTruthy();
-    // createTable: rowsCount rows TOTAL, the first is the header when
-    // withHeaderRow — 3 rows = 1 header + 2 body.
+    // createTable: 3 rows = 1 header + 2 body.
     expect(table!.content).toHaveLength(3);
     expect(table!.content![0].type).toBe('tableRow');
     expect(table!.content![0].content![0].type).toBe('tableHeader');
     expect(table!.content![1].content![0].type).toBe('tableCell');
-    // Engine identity: the table node is blockId-bearing (M-TABLES —
-    // one engine TableBlock, one id at the table node).
+    // One engine TableBlock — one id at the table node.
     expect(typeof table!.attrs!.blockId).toBe('string');
     expect((table!.attrs!.blockId as string).length).toBeGreaterThan(0);
     // Inner paragraphs are ID-bearing too.
@@ -113,12 +107,10 @@ describe('M-TABLES: model + pageless', () => {
     });
     const cell = looseJSON(editor).content![0].content![0].content![0];
     expect(cell.attrs!.backgroundColor).toBe('#ff8800');
-    // Pageless DOM: the td renders BOTH the style (display) and the
-    // data marker (clipboard round-trip + test hook).
+    // The td renders both the style and the data marker (clipboard round-trip + test hook).
     const td = document.querySelector('.ProseMirror td') as HTMLElement;
     expect(td.getAttribute('data-cell-background')).toBe('#ff8800');
     expect(td.style.backgroundColor).toBe('rgb(255, 136, 0)');
-    // null clears back to transparent.
     await act(async () => {
       editor.commands.setCellBackground(null);
     });
@@ -137,7 +129,6 @@ describe('M-TABLES: model + pageless', () => {
     });
     const cells = cellPositions(editor);
     expect(cells).toHaveLength(4);
-    // CellSelection across the top row's two cells, then merge.
     await act(async () => {
       editor.commands.setCellSelection({ anchorCell: cells[0], headCell: cells[1] });
     });
@@ -148,16 +139,13 @@ describe('M-TABLES: model + pageless', () => {
     const row0 = looseJSON(editor).content![0].content![0].content!;
     expect(row0).toHaveLength(1);
     expect(row0[0].attrs!.colspan).toBe(2);
-    // mergeCells APPENDS each cell's content as blocks — the two
-    // paragraphs survive as two paragraphs inside the merged cell
-    // (prosemirror-tables merges the FRAGMENTS; it never concatenates
-    // text runs mid-paragraph).
+    // mergeCells appends each cell's content as blocks — prosemirror-tables
+    // merges the FRAGMENTS; it never concatenates text runs mid-paragraph.
     expect(row0[0].content).toHaveLength(2);
     expect(row0[0].content![0].content![0].text).toBe('a');
     expect(row0[0].content![1].content![0].text).toBe('b');
-    // Split back into the original two-cell structure. splitCell keeps
-    // the merged content in the first cell and fills the companions
-    // with empty paragraphs — the STRUCTURE is what restores.
+    // splitCell keeps the merged content in the first cell and fills the
+    // companions with empty paragraphs — the STRUCTURE is what restores.
     await act(async () => {
       editor.commands.splitCell();
     });
@@ -213,19 +201,17 @@ describe('M-TABLES: model + pageless', () => {
     });
     const table = looseJSON(editor).content![0];
     expect(table.attrs!.borderStyle).toBe('none');
-    // The NodeView re-stamps the marker on every attrs change (the
-    // stock resizable TableView never re-applies node attrs — the
-    // subclass exists for exactly this).
+    // The NodeView re-stamps the marker on every attrs change (the stock
+    // resizable TableView never re-applies node attrs).
     const el = document.querySelector('.ProseMirror table') as HTMLElement;
     expect(el.getAttribute('data-table-border')).toBe('none');
-    // Default is 'all'.
     await act(async () => {
       editor.commands.setTableBorderPreset('all');
     });
     expect(looseJSON(editor).content![0].attrs!.borderStyle).toBe('all');
   });
 
-  it('Pages mode (M-T2): a table doc lays out in the paginated view — no fallback, engine-painted lines', async () => {
+  it('Pages mode: a table doc lays out in the paginated view — no fallback, engine-painted lines', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -237,13 +223,10 @@ describe('M-TABLES: model + pageless', () => {
       );
     });
     await settleLayout();
-    // No pageless fallback: the engine handles the table.
     expect(document.querySelector('[data-testid="paginated-fallback"]')).toBeNull();
     expect(document.querySelector('[data-testid="paginated-stack"]')).toBeTruthy();
-    // The painted cell lines: the block canvases exist for the table
-    // (one per page) — the deepest render assertion the jsdom harness
-    // supports; geometry correctness is pinned engine-side
-    // (engine/tests/table.test.ts).
+    // The block canvases are the deepest render assertion the jsdom
+    // harness supports; geometry is pinned engine-side (engine/tests/table.test.ts).
     const canvases = document.querySelectorAll('[data-testid="paginated-stack"] canvas');
     expect(canvases.length).toBeGreaterThan(0);
     // The doc model is untouched (the .wpdoc surface rides PM).
@@ -251,7 +234,7 @@ describe('M-TABLES: model + pageless', () => {
   });
 });
 
-describe('M-TABLES: Pages mode interactions', () => {
+describe('Pages mode interactions', () => {
   /** The engine's content-relative rect of a cell line, resolved
    *  against the LIVE editor's doc (the same pmDocToSemantic the view
    *  runs — one projection, no test fork). */
@@ -302,7 +285,6 @@ describe('M-TABLES: Pages mode interactions', () => {
     });
     await settleLayout();
     const { line, contentX, contentY } = cellLineRect(editor, 1);
-    // Click a few px inside the second cell's first line's text band.
     const stack = document.querySelector('[data-testid="paginated-stack"]') as HTMLElement;
     fireEvent.mouseDown(stack, {
       button: 0,
@@ -311,7 +293,6 @@ describe('M-TABLES: Pages mode interactions', () => {
     });
     const head = editor.state.selection.head;
     const $head = editor.state.doc.resolve(head);
-    // The caret's parent paragraph carries the SECOND cell's text.
     expect($head.parent.textContent).toBe('second cell');
   });
 
@@ -330,7 +311,6 @@ describe('M-TABLES: Pages mode interactions', () => {
     const handles = document.querySelectorAll('[data-testid="table-col-handle"]');
     expect(handles.length).toBeGreaterThanOrEqual(1);
     const first = handles[0] as HTMLElement;
-    // The table node + the column's cells' current widths.
     const tableJson = looseJSON(editor).content!.find((n) => n.type === 'table')!;
     const before = tableJson.content!.map((row) => row.content![0].attrs!.colwidth);
     fireEvent.pointerDown(first, { clientX: 500, button: 0 });
@@ -350,7 +330,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(afterA.every((w, i) => (beforeA[i] ?? 312) + 50 === w)).toBe(true);
   });
 
-  it('M-T4: dragging the table\'s RIGHT border scales the whole table inward (Word parity — the table can finally shrink)', async () => {
+  it('dragging the table\'s RIGHT border scales the whole table inward (Word parity — the table can finally shrink)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -388,7 +368,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(rect1.x + rect1.width).toBe(524);
   });
 
-  it('M-T4: an interior drag against a FIXED neighbor keeps the total constant (the neighbor pays)', async () => {
+  it('an interior drag against a FIXED neighbor keeps the total constant (the neighbor pays)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -425,7 +405,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(r1.x + r1.width).toBe(300);
   });
 
-  it('M-T2 fixes: a click in an EMPTY cell routes the caret to THAT cell (the separator-law round trip)', async () => {
+  it('a click in an EMPTY cell routes the caret to THAT cell (the separator-law round trip)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -455,7 +435,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(ownerCell).toBe(positions[2]);
   });
 
-  it('M-T2 fixes: a multi-cell selection over EMPTY cells paints the cell-selection overlay', async () => {
+  it('a multi-cell selection over EMPTY cells paints the cell-selection overlay', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -476,7 +456,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('M-T2 fixes: merging empty cells removes the inner boundary (one union rect, no double stroke)', async () => {
+  it('merging empty cells removes the inner boundary (one union rect, no double stroke)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pageless' } },
@@ -493,7 +473,6 @@ describe('M-TABLES: Pages mode interactions', () => {
       editor.commands.setCellSelection({ anchorCell: positions[0], headCell: positions[1] });
       editor.commands.mergeCells();
     });
-    // The merged cell: colspan 2.
     const row0 = looseJSON(editor).content![0].content![0].content!;
     expect(row0).toHaveLength(1);
     expect(row0[0].attrs!.colspan).toBe(2);
@@ -516,7 +495,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(row0Rects[0].rect.width).toBe(GEOMETRY.contentWidth);
   });
 
-  it('M-T2 fixes: borders stroke every boundary exactly once (no per-cell double draw)', async () => {
+  it('borders stroke every boundary exactly once (no per-cell double draw)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -528,25 +507,19 @@ describe('M-TABLES: Pages mode interactions', () => {
     });
     await settleLayout();
     const ops = ((globalThis as { __paintOps?: { op: string; args: unknown[]; fillStyle?: string }[] }).__paintOps ?? []);
-    // The cell layer's strokes only: the border hairline color (caret
-    // and selection rects paint in other colors), 1px on one axis.
-    // The paint harness ACCUMULATES ops across repaint runs, so the
-    // strokes are DEDUPED by the exact rect — identical re-paints
-    // collapse; a genuine per-cell double draw would leave DISTINCT
-    // rects at the same boundary (row-sized fragments instead of one
-    // full-span stroke) — the regression this pins.
+    // The cell layer's strokes only (the border hairline color, 1px
+    // on one axis). The paint harness ACCUMULATES ops across repaint
+    // runs, so dedupe by exact rect; a double draw leaves DISTINCT
+    // row-sized fragments.
     const strokes = ops.filter(
       (o) =>
         o.op === 'fillRect' &&
         o.fillStyle === '#d4d4d8' &&
         ((o.args[2] as number) === 1 || (o.args[3] as number) === 1),
     );
-    // Collapse the repaint runs (each identical full repaint is
-    // legitimate), then assert the UNIQUE stroke set: every boundary
-    // is ONE full-span rect — all verticals share the same y/height,
-    // all horizontals the same x/width. A per-cell double draw would
-    // leave row/column-sized FRAGMENTS at the inner boundaries (the
-    // "1px thicker" symptom) — fragment sets fail this.
+    // Collapse the repaint runs, then assert the UNIQUE stroke set:
+    // every boundary is ONE full-span rect — verticals share y/height,
+    // horizontals x/width.
     const unique = new Map<string, { op: string; args: unknown[] }>();
     for (const o of strokes) unique.set(o.args.join(','), o);
     const v = [...unique.values()].filter((o) => (o.args[2] as number) === 1);
@@ -557,7 +530,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(new Set(h.map((o) => `${o.args[0]},${o.args[2]}`)).size).toBe(1);
   });
 
-  it('M-T3: merging cells VERTICALLY (rowspan) drops the internal border across the merged region', async () => {
+  it('merging cells VERTICALLY (rowspan) drops the internal border across the merged region', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -567,9 +540,8 @@ describe('M-TABLES: Pages mode interactions', () => {
       editor.commands.setContent('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>');
     });
     await settleLayout();
-    // Clear the PRE-merge paint run's ops (the accumulated harness
-    // keeps every run; run 1's full-width inner boundary would pollute
-    // the post-merge assertion).
+    // Clear the pre-merge paint ops — run 1's full-width inner boundary
+    // would pollute the post-merge assertion (the harness keeps every run).
     ((globalThis as { __paintOps?: unknown[] }).__paintOps as unknown as { length: number }[]).length = 0;
     // Merge column 0's two cells vertically: (0,0) + (1,0) → rowspan 2.
     const positions = cellPositions(editor);
@@ -611,7 +583,6 @@ describe('M-TABLES: Pages mode interactions', () => {
         '<p>before</p><table><tr><td>a</td><td>b</td></tr></table><p>after</p>',
       );
     });
-    // Park the caret inside the table's first cell.
     const positions: number[] = [];
     editor.state.doc.descendants((node, pos) => {
       if (node.type.name === 'tableCell') positions.push(pos);
@@ -623,7 +594,6 @@ describe('M-TABLES: Pages mode interactions', () => {
     await act(async () => {
       insertTableAtSelection(editor, { rows: 2, cols: 2, withHeaderRow: false });
     });
-    // The doc: p, table, table, p — TWO top-level tables, never nested.
     const kinds = editor.getJSON().content!.map((n) => n.type);
     expect(kinds).toEqual(['paragraph', 'table', 'table', 'paragraph']);
     const first = looseJSON(editor).content![1];
@@ -647,12 +617,9 @@ describe('M-TABLES: Pages mode interactions', () => {
       );
     });
     await settleLayout();
-    // The stack must be the paginated render (no fallback).
     expect(document.querySelector('[data-testid="paginated-fallback"]')).toBeNull();
-    // Cell layers on ≥ 2 pages (the table fragments).
     const layers = document.querySelectorAll('[data-testid="table-cell-layer"]');
     expect(layers.length).toBeGreaterThanOrEqual(2);
-    // A cell selection paints its cells' slices.
     await act(async () => {
       const positions: number[] = [];
       editor.state.doc.descendants((node, pos) => {
@@ -664,7 +631,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('M-T3a: the gutter pin is an indicator — pinned rows only; click unpins (caret restored), re-pin via the menu/panel paths', async () => {
+  it('the gutter pin is an indicator — pinned rows only; click unpins (caret restored), re-pin via the menu/panel paths', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -676,7 +643,7 @@ describe('M-TABLES: Pages mode interactions', () => {
       );
     });
     await settleLayout();
-    // Pinned leading row → the FILLED pin shows.
+    // A leading header row is pinned — the filled pin shows.
     const pinOn = document.querySelector('[data-testid="table-header-pin-on"]') as HTMLElement | null;
     expect(pinOn).toBeTruthy();
     // Park the caret in the 'before' paragraph — the unpin must restore it.
@@ -688,15 +655,12 @@ describe('M-TABLES: Pages mode interactions', () => {
       fireEvent.click(pinOn!);
     });
     await settleLayout();
-    // Row 0 flipped to a body cell — and the pin VANISHES (the M-T4
-    // indicator ruling: no outline pin on unpinned rows).
+    // Row 0 flipped to a body cell — the pin vanishes on unpinned rows.
     const row0 = looseJSON(editor).content![1].content![0].content!;
     expect(row0[0].type).toBe('tableCell');
     expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeNull();
-    // The caret never visibly jumped.
     expect(editor.state.selection.head).toBe(headBefore);
-    // Re-pin through the context menu's spelling (the same command the
-    // panel runs): park the caret in row 0, toggleHeaderRow.
+    // Re-pin via the same command the panel runs: caret in row 0, toggleHeaderRow.
     await act(async () => {
       editor.commands.setTextSelection(1);
       const positions: number[] = [];
@@ -712,7 +676,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(document.querySelector('[data-testid="table-header-pin-on"]')).toBeTruthy();
   });
 
-  it('M-T4 polish: the toolbar\'s table group carries a separator to its right when a strip follows', async () => {
+  it('the toolbar\'s table group carries a separator to its right when a strip follows', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -733,7 +697,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     const next = properties.parentElement!.nextElementSibling;
     expect(next?.getAttribute('data-slot')).toBe('separator');
     // A table-shaped selection (CellSelection) shows the table group
-    // ALONE — no dangling separator after it.
+    // alone — no dangling separator after it.
     const positions: number[] = [];
     editor.state.doc.descendants((node, pos) => {
       if (node.type.name === 'tableCell') positions.push(pos);
@@ -748,7 +712,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(properties2.parentElement!.nextElementSibling).toBeNull();
   });
 
-  it('M-T4 polish: the toolbar carries Merge⇄Split for a multi-cell CellSelection (and never for a bare caret)', async () => {
+  it('the toolbar carries Merge⇄Split for a multi-cell CellSelection (and never for a bare caret)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -763,7 +727,6 @@ describe('M-TABLES: Pages mode interactions', () => {
     await settleLayout();
     expect(document.querySelector('[data-testid="toolbar-merge"]')).toBeNull();
     expect(document.querySelector('[data-testid="toolbar-split"]')).toBeNull();
-    // A multi-cell selection: the toolbar rides with Merge.
     const positions = cellPositions(editor);
     await act(async () => {
       editor.commands.setCellSelection({ anchorCell: positions[0]!, headCell: positions[1]! });
@@ -775,7 +738,6 @@ describe('M-TABLES: Pages mode interactions', () => {
       fireEvent.click(merge!);
     });
     await settleLayout();
-    // Merged: one colspan-2 cell — and the toolbar flipped to Split.
     const row0 = looseJSON(editor).content![0].content![0].content!;
     expect(row0).toHaveLength(1);
     expect(row0[0].attrs!.colspan).toBe(2);
@@ -784,7 +746,7 @@ describe('M-TABLES: Pages mode interactions', () => {
     expect(document.querySelector('[data-testid="toolbar-merge"]')).toBeNull();
   });
 
-  it('M-T4: the context menu reads the CLICK, not the stale selection (image selected, right-click lands in the table → table variant)', async () => {
+  it('the context menu reads the CLICK, not the stale selection (image selected, right-click lands in the table → table variant)', async () => {
     const state = useConfigStore.getState();
     useConfigStore.setState({
       config: { ...state.config, editor: { ...state.config.editor, defaultPageLayout: 'Pages' } },
@@ -804,7 +766,7 @@ describe('M-TABLES: Pages mode interactions', () => {
       if (n.type.name === 'image') { imagePos = p; return false; }
       return true;
     });
-    // The STALE state: the image is selected (e.g. its menu was open).
+    // The stale state: the image is selected (e.g. its menu was open).
     act(() => {
       editor.commands.setNodeSelection(imagePos);
     });
@@ -819,7 +781,6 @@ describe('M-TABLES: Pages mode interactions', () => {
         clientY: contentY + rect.y + 5,
       });
     });
-    // The menu re-opened on the CLICK: the table variant, not image.
     expect(document.querySelector('[data-testid="ctx-insert-row-below"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="ctx-image-caption"]')).toBeNull();
     // And the mirror: a stale caret in text, right-click ON the image
@@ -842,7 +803,7 @@ describe('M-TABLES: Pages mode interactions', () => {
   });
 });
 
-describe('M-T3b: palette typed table specs', () => {
+describe('palette typed table specs', () => {
   it('parses N×M in every accepted spelling and rejects non-specs', () => {
     expect(parseTableDims('4x4')).toEqual({ rows: 4, cols: 4 });
     expect(parseTableDims('4 x 4')).toEqual({ rows: 4, cols: 4 });
@@ -896,7 +857,7 @@ describe('M-T3b: palette typed table specs', () => {
   });
 });
 
-describe('M-TABLES: .wpdoc round-trip', () => {
+describe('.wpdoc round-trip', () => {
   it('a table docJSON (merged cells, colwidths, shading, borderStyle) validates against the schema and round-trips through assembleDocumentFile unchanged', async () => {
     const { editor } = renderTensor();
     await act(async () => {
@@ -910,8 +871,7 @@ describe('M-TABLES: .wpdoc round-trip', () => {
       editor.commands.setCellBackground('#e2f0d9');
       editor.commands.setTableBorderPreset('outer');
     });
-    // Give the wide cell an explicit colwidth (the resizable table's
-    // stored geometry — the M-T2 engine reads it as track data).
+    // Give the wide cell an explicit colwidth — the engine reads it as track data.
     const wideCell = cellPositions(editor)[0];
     await act(async () => {
       editor.view.dispatch(

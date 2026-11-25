@@ -40,17 +40,12 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       isItalic: ctx.editor?.isActive('italic') ?? false,
       isUnderline: ctx.editor?.isActive('underline') ?? false,
       isStrike: ctx.editor?.isActive('strike') ?? false,
-      // M-IMAGES: image-ness (both shapes) — the STRIP is gone (all
-      // image ops moved to the document context menu); the flag stays
-      // as the text strip's gate (an image NodeSelection shows no
-      // text tools).
+      // Image-ness (both shapes) gates the text strip — an image
+      // NodeSelection shows no text tools (ops live in the context menu).
       isImage: (ctx.editor?.isActive('image') ?? false) || (ctx.editor?.isActive('inlineImage') ?? false),
-      // M-TABLES: in-table state. tableOnlySelection = the selection
-      // SHAPE is table-shaped (a CellSelection across cells, or a
-      // NodeSelection on the table node itself) — text tools are then
-      // meaningless and the strip shows table ops alone. With a text
-      // selection (or a bare caret) inside a cell, both strips show:
-      // cell content stays editable while the table ops sit alongside.
+      // tableOnlySelection: the selection SHAPE is table-shaped (a
+      // CellSelection, or a NodeSelection on the table node) — table ops
+      // only. Text/caret in a cell: both strips (cell stays editable).
       isTable: ctx.editor?.isActive('table') ?? false,
       tableOnlySelection: (() => {
         const state = ctx.editor?.state;
@@ -59,33 +54,29 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
         if (sel instanceof CellSelection) return true;
         return sel instanceof NodeSelection && sel.node.type.name === 'table';
       })(),
-      // M-T4 polish: a multi-cell CellSelection carries its own header
-      // action in the toolbar (contextual completeness — "all the
-      // things they'd need for whatever they're focused on"). A bare
-      // caret in a cell never sees it: merge is meaningless on one cell.
+      // A multi-cell CellSelection carries its own Merge⇄Split action;
+      // a bare caret never sees it (merge is meaningless on one cell).
       isCellSelection: ctx.editor?.state.selection instanceof CellSelection,
       hasMergedCells: ctx.editor?.state ? selectionHasMergedCells(ctx.editor.state) : false,
     }),
   });
 
-  // The SINGLE clearance (see FloatingToolbarPosition.gap) — above:
-  // the toolbar's bottom sits `gap` above the anchor top; below: its
-  // top sits `gap` below the anchor bottom.
+  // The single clearance (position.gap): 'above' lifts the bottom gap
+  // over the anchor top; 'below' drops the top gap under the anchor bottom.
   const translateY =
     position.placement === 'above'
       ? `translateY(calc(-100% - ${position.gap}px))`
       : `translateY(${position.gap}px)`;
 
-  // M-T4 polish — the strip gates, spelled once: text formatting for
-  // text selections (hidden for image selections and table-shaped
-  // selections); the image strip for image selections (link/comment/
-  // clear formatting only — the image OPS live in the context menu).
+  // Strip gates: text formatting only for text selections (hidden for
+  // image/table-shaped ones); image strip = link/comment/clear only.
   const showTextStrip = !!attrs && !attrs.isImage && !(attrs.isTable && attrs.tableOnlySelection);
   const showImageStrip = !!attrs?.isImage;
 
   return (
     <div
         data-floating-toolbar
+        data-testid="floating-toolbar"
         onMouseDown={(e) => e.preventDefault()}
         className="absolute z-30 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
         style={{
@@ -94,17 +85,13 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
           transform: translateY,
         }}
       >
-        {/* M-T4 — the table strip slimmed to the panel handoff: the
-            STRUCTURAL ops moved to the document context menu
-            (right-click); the side panel owns fine-tuning. The strip
-            keeps riding alongside text formatting while the caret is
-            in a cell (the tableOnlySelection gate below still owns
-            the table-shaped replacement). */}
+        {/* The table strip: structural ops live in the document context
+            menu, the side panel owns fine-tuning; the strip rides alongside
+            text formatting while the caret is in a cell. */}
         {attrs?.isTable && (
           <>
-            {/* M-T4 polish — the CELL-SELECTION header action: Merge⇄Split
-                rides the toolbar when it's actionable (a multi-cell
-                selection), the same toggle the context menu runs. */}
+            {/* Merge⇄Split when actionable (a multi-cell selection) — the
+                same toggle the context menu runs. */}
             {attrs.isCellSelection && (
               <IconButton
                 label={attrs.hasMergedCells ? 'Split Cells' : 'Merge Cells'}
@@ -125,9 +112,8 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
               icon={<TableProperties size={14} />}
               onClick={() => useSidebarStore.getState().open('table', 'right')}
             />
-            {/* M-T4 polish: the separator when a strip FOLLOWS — never a
-                dangling divider after a table-only (CellSelection)
-                toolbar. */}
+            {/* Separator only when a strip follows — no dangling divider
+                after a table-only toolbar. */}
             {(showTextStrip || showImageStrip) && (
               <Separator orientation="vertical" className="mx-1 h-6" />
             )}
@@ -193,12 +179,10 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
       <Separator orientation="vertical" className="mx-1 h-6" />
 
       <LinkButton editor={editor} />
-      {/* #COMMENTS — dispatches the ONE command body (the registry's
-          law: the toolbar, Ctrl+Alt+M, and the palette share
-          EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED (the user's
-          ruling): a bare caret anchors the word it sits in. (This
-          strip only renders for text contexts — the image strip's
-          own stub stays disabled, non-text anchors out of scope.) */}
+      {/* Shares the ONE command body (toolbar, Ctrl+Alt+M, palette:
+          EDITOR_COMMAND_MAP.addComment). ALWAYS ENABLED — a bare caret
+          anchors the word it sits in. The image strip's stub stays
+          disabled (non-text anchors out of scope). */}
       <IconButton
         label="Insert Comment"
         icon={<MessageSquarePlus size={16} />}
@@ -209,13 +193,10 @@ export function FloatingToolbar({ editor, position, containerTop, containerLeft 
           </>
         )}
 
-        {/* M-T4 polish — the IMAGE strip: the toolbar still appears over
-            an image selection (it previously rendered empty after the
-            image ops moved to the context menu), carrying the actions
-            that make sense on a selected image: Hyperlink (images can
-            be link targets, Word parity), the Comment placeholder, and
-            Clear Formatting (unsetAllMarks — harmless on a bare image,
-            meaningful on a marked inline one). */}
+        {/* The IMAGE strip: actions that make sense on a selected image —
+            Hyperlink (images can be link targets), the Comment placeholder,
+            Clear Formatting (harmless on a bare image, meaningful on a
+            marked inline one). */}
         {showImageStrip && (
           <>
             <LinkButton editor={editor} />

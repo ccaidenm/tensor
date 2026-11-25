@@ -2,14 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { useConfigStore } from '@/lib/config/store';
 
 /**
- * THE network surface of M-FONTS-B — the only module that talks to
- * fetch_url (the Rust reqwest command; the linkMetadata path
- * precedent — same client, same UA policy, system-proxy).
- *
- * The privacy gate lives HERE, at the entry, so no call site can
- * forget it: with allowFontCatalogs OFF every function refuses before
- * any IPC. jsdom note: tests mock this module (or the invoke), and
- * the no-silent-network test asserts the gate with an invoke spy.
+ * The only module that talks to fetch_url (the Rust reqwest command —
+ * same client, same UA policy, system proxy). The privacy gate lives
+ * here at the entry so no call site can forget it.
  */
 
 export class CatalogsOfflineError extends Error {
@@ -42,6 +37,6 @@ export async function catalogFetchText(url: string, ua?: string): Promise<string
 }
 
 /** Google's css2 API serves woff2 (not ttf) only to modern-browser
- *  UAs — the one documented UA override. */
+ *  UAs. */
 export const BROWSER_UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';

@@ -1,14 +1,11 @@
 // ─── TENSOR-NATIVE PRINTING — the OS dialog's replacement ──────────────
 //
-// THE POSTURE (M-PRINT #43, the beast's body): Chrome replaced the
-// OS print dialog with its own because the document knows more than
-// the OS — page size, orientation, margins, content. Tensor's walk
-// already synthesizes a geometrically exact PDF (pdfExport), so the
-// native print pipeline is:
+// THE POSTURE (#43): the document knows more than the OS — page
+// size, orientation, margins, content — and the walk already
+// synthesizes a geometrically exact PDF (pdfExport), so the
+// pipeline is:
 //     the walk → PDF bytes → temp file → CUPS job
-// and LANDSCAPE INHERITS NATIVELY (the PDF carries the page dims —
-// the original motivation for replacing the OS dialog, which lost
-// orientation on the way through).
+// with LANDSCAPE INHERITING NATIVELY (the PDF carries the page dims).
 //
 // THE CRATE (printers 2.3): unix (CUPS) + windows (winspool). Its
 // `print_file` submits through CUPS with raw job properties —

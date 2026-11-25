@@ -7,10 +7,9 @@ interface StyleDialogStore extends StyleDialogState {
   close: () => void;
 }
 
-/** Global home of the style create/edit dialog so any surface (Styles
- *  dropdown, command palette) can open it — the dialog itself renders
- *  exactly once, from App, fed by this store. `open` (bool) is the
- *  dialog visibility; `openDialog` is the action. */
+/** Global home of the style dialog so any surface (dropdown,
+ *  palette) can open it — it renders exactly once, from App, fed
+ *  by this store. */
 export const useStyleDialogStore = create<StyleDialogStore>((set) => ({
   open: false,
   editingId: null,

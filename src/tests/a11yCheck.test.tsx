@@ -12,9 +12,9 @@ import { getCommand } from '@/lib/commands/registry';
 import { renderTensor, settleLayout } from './harness';
 
 /**
- * M-A11Y — the checker UI suite: the docked panel (mount → scan →
- * grouped rows → jump), the Review tab trigger, and the alt-text fix
- * loop. The scan-rule suite lives in a11yScan.test.tsx.
+ * The checker UI suite: the docked panel (mount → scan → grouped rows →
+ * jump), the Review tab trigger, and the alt-text fix loop. The
+ * scan-rule suite lives in a11yScan.test.tsx.
  */
 
 function insertNode(editor: Editor, node: PMNode, pos: number): void {
@@ -44,7 +44,7 @@ function textPos(editor: Editor, text: string): number {
 }
 
 
-describe('M-A11Y: the Accessibility Check panel', () => {
+describe('the Accessibility Check panel', () => {
   beforeEach(() => {
     useSidebarStore.getState().close();
   });
@@ -224,7 +224,7 @@ describe('M-A11Y: the Accessibility Check panel', () => {
   });
 });
 
-describe('M-A11Y: the Review tab trigger', () => {
+describe('the Review tab trigger', () => {
   beforeEach(() => {
     useSidebarStore.getState().close();
   });
@@ -246,7 +246,7 @@ describe('M-A11Y: the Review tab trigger', () => {
     const command = getCommand('accessibilityCheck');
     expect(command).toBeDefined();
     expect(command!.title).toBe('Check Accessibility');
-    // No menuEventId: palette-only, zero Rust surface (the orphan law).
-    expect(command!.menuEventId).toBeUndefined();
+    // #100 — the menu field is GONE with the native menu: palette-only,
+    // zero Rust surface.
   });
 });

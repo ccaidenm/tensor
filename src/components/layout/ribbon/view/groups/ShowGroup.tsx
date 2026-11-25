@@ -1,33 +1,23 @@
-import { Ruler, PanelTop, Droplet, Superscript, SquareDashed, MessageSquareText } from 'lucide-react';
+import { Ruler, PanelTop, Droplet, SquareDashed, MessageSquareText } from 'lucide-react';
 import { RibbonGroup } from '../../../RibbonGroup';
 import { IconButton } from '../../../IconButton';
 import { useConfigStore } from '@/lib/config/store';
 import { useViewMode } from '@/lib/document/useViewMode';
-// M-PRINT (#43): View > Print Preview — the preview modal's menu entry
-// (the palette command + Ctrl+P are its siblings; one registry body).
 
 export function ShowGroup() {
-  // M-IMAGES-1: the Captions DISPLAY toggle (the NPC precedent) —
-  // presentation-only ink, both modes; the model (and ToF's caption
-  // reads) is untouched.
+  // Captions display toggle — presentation-only ink; the model is untouched.
   const showCaptions = useConfigStore((s) => s.config.editor.showCaptions);
   const setShowCaptions = useConfigStore((s) => s.setShowCaptions);
-  // M-HEADER-FOOTER: the bands DISPLAY toggle (the captions precedent
-  // again — presentation-only; the settings round-trip in .wpdoc
-  // regardless). Pages mode only (no page geometry to band otherwise).
+  // Headers/footers display toggle — presentation-only (settings
+  // round-trip in .wpdoc); pages mode only.
   const showHeadersFooters = useConfigStore((s) => s.config.editor.showHeadersFooters);
   const setShowHeadersFooters = useConfigStore((s) => s.setShowHeadersFooters);
-  // #WATERMARK: the display toggle (the captions NPC precedent).
   const showWatermark = useConfigStore((s) => s.config.editor.showWatermark);
   const setShowWatermark = useConfigStore((s) => s.setShowWatermark);
-  // #COMMENTS — the boundary-content toggle (the rewired "Show Margins"
-  // stub): the outside space around the sheets (the comments gutter).
   const showBoundaryContent = useConfigStore((s) => s.config.editor.showBoundaryContent);
   const setShowBoundaryContent = useConfigStore((s) => s.setShowBoundaryContent);
-  // M-RULER: the ruler is a PAGINATED-mode surface (it rules real page
-  // geometry) — like the page-setup controls, it disables (never
-  // disappears) in pageless mode. The single button toggles BOTH bars
-  // (the command palette owns the per-axis granularity).
+  // The ruler rules real page geometry — it disables (never disappears)
+  // in pageless. The button toggles both bars (per-axis lives in the palette).
   const showHorizontalRuler = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const showVerticalRuler = useConfigStore((s) => s.config.editor.showVerticalRuler);
   const setBothRulers = useConfigStore((s) => s.setBothRulers);
@@ -48,11 +38,9 @@ export function ShowGroup() {
         disabled={isPageless}
         onClick={() => setBothRulers(!(showHorizontalRuler || showVerticalRuler))}
       />
-      {/* #COMMENTS — the rewired "Show Margins" stub: BOUNDARY CONTENT
-          — the outside space around the sheets (the comments gutter
-          today; whatever lands there later). A persisted view setting
-          like the ruler toggles, ON by default; both modes (pageless
-          has boundary space too). Hiding never reflows the document. */}
+      {/* Boundary content — the outside space around the sheets (the
+          comments gutter). A persisted view setting, on by default,
+          both modes; hiding never reflows the document. */}
       <IconButton
         label="Show Boundary Content"
         icon={<SquareDashed size={16} />}
@@ -66,21 +54,14 @@ export function ShowGroup() {
         onClick={() => setShowHeadersFooters(!showHeadersFooters)}
         disabled={isPageless}
       />
-      {/* #WATERMARK — the display toggle (the captions NPC precedent):
-          view-only ink; the document's watermark setting never moves.
-          Pages mode only — pageless has no sheets to paint. */}
+      {/* Watermark display — view-only ink (the document's watermark
+          setting never moves); pages mode only. */}
       <IconButton
         label="Show Watermarks"
         icon={<Droplet size={16} />}
         active={showWatermark}
         onClick={() => setShowWatermark(!showWatermark)}
         disabled={isPageless}
-      />
-      <IconButton
-        label="Show Footnotes & Endnotes"
-        icon={<Superscript size={16} />}
-        onClick={() => {}}
-        disabled
       />
     </RibbonGroup>
   );

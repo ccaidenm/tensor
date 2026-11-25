@@ -11,7 +11,7 @@ import { disabledCategoriesFor } from '@/lib/editor/spell/categories';
 import type { LTMatch } from '@/lib/editor/spell/types';
 
 /**
- * The CHECKING PIPELINE (controller): debounce, block-diffed rechecks
+ * The checking pipeline (controller): debounce, block-diffed rechecks
  * (identity cache — the adapter trick), the LT offset → PM position
  * mapping, dictionary/session filtering, and the staleness guards.
  * `invoke` is mocked; no Rust, no LanguageTool.
@@ -321,10 +321,10 @@ describe('SpellController', () => {
   });
 });
 
-// M-REFS-7 — the LEADER DOTS are INK, never language: the refLeader-
-// marked spans (the ToC rows' dots) are excluded from the check text —
-// LanguageTool flags '....' as grammar noise and the rows are
-// generator-owned. Marked INDEX TERMS are NOT excluded (real words).
+// The LEADER DOTS are INK, never language: refLeader-marked spans
+// (the ToC rows' dots) are excluded from the check text (LanguageTool
+// flags '....' as noise; the rows are generator-owned); marked index
+// terms are NOT excluded (real words).
 describe('the leader dots are excluded from the spell text', () => {
   it('buildPiece skips refLeader-marked spans', async () => {
     const { buildPiece } = await import('@/lib/editor/spell/controller');

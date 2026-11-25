@@ -13,14 +13,8 @@ import { useMediaStore } from '@/lib/media/store';
 import { create } from 'zustand';
 import { useDocumentStore } from '@/lib/document/store';
 
-/**
- * M-IMAGES-1.5 — the image dialogs. The external-URL DOWNLOAD dialog
- * is GONE (the dead code path removed): an http(s) image paste is
- * refused with a toast, zero network calls (the fonts privacy
- * precedent, hardened). What remains:
- *  - ALT TEXT: metadata, not display — writes the node's alt attr
- *    (the hidden PM view's <img alt> is the a11y surface).
- */
+// The alt-text dialog. Alt text is metadata, not display — it writes the
+// node's alt attribute, the a11y surface of the hidden PM view's <img>.
 
 interface AltTextStore {
   isOpen: boolean;
@@ -28,12 +22,10 @@ interface AltTextStore {
   pos: number | null;
   alt: string;
   src: string | null;
-  /** M-A11Y — the decorative state of the image being edited. */
+  /** The decorative state of the image being edited. */
   decorative: boolean;
-  /** The decorative state is OPTIONAL at open (default off): callers
-   * without an image in hand (the checker's flagged rows — flagged
-   * images are never decorative by definition) open the dialog with
-   * the toggle off. */
+  /** decorative defaults to off when omitted — callers opening from the
+   * checker's flagged rows have no decorative state in hand. */
   open: (pos: number, alt: string, src: string | null, decorative?: boolean) => void;
   close: () => void;
   setAlt: (alt: string) => void;
@@ -73,8 +65,7 @@ export function AltTextDialog() {
         .command(({ tr, dispatch }) => {
           if (dispatch) {
             tr.setNodeAttribute(pos, 'alt', alt);
-            // M-A11Y — the decorative marking rides the SAME commit as
-            // the alt (one undo step for the whole decision).
+            // Decorative rides the same commit as the alt — one undo step.
             tr.setNodeAttribute(pos, 'decorative', decorative);
           }
           return true;
@@ -103,11 +94,8 @@ export function AltTextDialog() {
           disabled={decorative}
           autoFocus
         />
-        {/* M-A11Y — DECORATIVE (Word's own alt-text pane pattern): the
-            explicit intent spelling — a divider or mood shot needs no
-            description, screen readers skip it by design, and the
-            checker's list stops asking. The description field greys
-            out: decorative and described are mutually exclusive. */}
+        {/* Decorative images need no description — screen readers skip them,
+            and decorative/described are mutually exclusive, hence the grey-out. */}
         <label className="flex items-center justify-between gap-3">
           <span className="flex flex-col">
             <span className="text-sm">Mark as decorative</span>

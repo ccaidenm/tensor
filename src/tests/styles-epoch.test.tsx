@@ -6,14 +6,11 @@ import { useConfigStore } from '@/lib/config/store';
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 
 /**
- * M-STYLES STEP 5 — THE FLAGSHIP EPOCH TESTS. A definition edit is a
- * registry mutation: the epoch bumps, the adapter cache rebuilds, and
- * every user of the style restyles in BOTH modes. In paginated mode
- * the engine's lastStats (surfaced on the __benchRelayouts seam)
- * shows exactly the re-walk the epoch caused — layout-relevant edits
- * re-break (blocksWalked > 0), paint-only edits splice
- * (blocksWalked = 0) and the BlockCanvas epoch key repaints anyway
- * (amendment 1, test 2b — the flagship twin).
+ * The epoch tests: a definition edit is a registry mutation — the
+ * epoch bumps, the adapter cache rebuilds, every user of the style
+ * restyles in BOTH modes. Layout-relevant edits re-break
+ * (blocksWalked > 0); paint-only edits splice (blocksWalked = 0) and
+ * still repaint via the BlockCanvas epoch key.
  */
 
 type BenchRelayouts = {
@@ -189,9 +186,9 @@ describe('THE EPOCH TEST (flagship): edit a definition → all users restyle, bo
     expect(ops.length).toBe(2);
     for (const op of ops) expect(op.font).toContain('20px');
 
-    // ...and the EMPTY line restyles too: it measures under baseStyle
-    // (P1 ruling), so its line box is the 20px font's. Pure check:
-    // the same doc, adapter + engine directly, before vs after.
+    // ...and the EMPTY line restyles too: it measures under baseStyle,
+    // so its line box is the 20px font's. Pure check: the same doc,
+    // adapter + engine directly, before vs after.
     const { createLayoutEngine } = await import('@tensor-editor/engine');
     const { FakeMetrics } = await import('./fakeMetrics');
     const { resolveNormalBase } = await import('@/lib/styles/resolve');

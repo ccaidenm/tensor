@@ -16,16 +16,13 @@ import { renderTensor, settleLayout } from './harness';
 import { FakeEquationMetrics, FakeMetrics } from './fakeMetrics';
 
 /**
- * M-EQ — the equation suite: insert, render, the assisted-input bubble,
- * the paginated projection (placed[] paint), the clipboard marker, the
- * .wpdoc round-trip, and the insert surfaces (ribbon/shortcut/palette).
- * jsdom notes: KaTeX renderToString is pure string generation (works
- * without CSS/fonts); the paginated dims ride the FakeEquationMetrics
- * injection (jsdom measures DOM rects as zeros).
+ * The equation suite: insert, render, bubble, projection paint,
+ * clipboard marker, .wpdoc round-trip, and the insert surfaces.
+ * jsdom notes: KaTeX renderToString is pure string generation;
+ * the paginated dims ride FakeEquationMetrics (jsdom measures 0s).
  */
 
-// M-IMAGES-0 container simulator (same wire contract as wpdoc.test —
-// the equation rides document.json; NO media involved).
+// .wpdoc container simulator (same wire contract as wpdoc.test; no media).
 const wpdocFiles = vi.hoisted(() => new Map<string, { kind: 'v2'; document: string; media: { id: string; ext: string; bytesB64: string }[] }>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -46,14 +43,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   }),
 }));
 
-// M-EQ-2: MathLive cannot run in jsdom (real layout, custom-element
-// upgrade, webfonts) — the loader is mocked to FAIL, which drives the
-// bubble's graceful fallback to the Source textarea. The WYSIWYG
-// surface's own behavior is upstream (MathLive's); what IS tested here
-// is the React glue around it: the fallback law, the palette's
-// source-splice path, and the commit paths (attrs, color, scale).
-// The SANITIZER is the real one (pure string math — the document
-// boundary is exactly what must hold in every environment).
+// MathLive cannot run in jsdom — the loader is mocked to FAIL, driving
+// the bubble's fallback to the Source textarea. Only the React glue is
+// tested here; the sanitizer stays real (the document boundary must
+// hold in every environment).
 vi.mock('@/lib/equations/wysiwyg', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/equations/wysiwyg')>()),
   loadMathLive: () => Promise.reject(new Error('MathLive unavailable in jsdom tests')),
@@ -116,7 +109,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. Insertion: one command, every surface ───────────────────────────
+// 1. Insertion
 
 describe('insertion', () => {
   it('insertEquation creates an EMPTY equation, NodeSelections it, mints a blockId', () => {
@@ -127,8 +120,6 @@ describe('insertion', () => {
     });
     const eq = findEquation(editor);
     expect(eq).not.toBeNull();
-    // The just-inserted state: empty latex (the placeholder face), the
-    // Word display-equation alignment default, an id for the engine.
     expect(eq!.attrs.latex).toBe('');
     expect(eq!.attrs.align).toBe('center');
     expect(typeof eq!.attrs.blockId).toBe('string');
@@ -139,8 +130,7 @@ describe('insertion', () => {
   });
 
   it('all three insert surfaces share the ONE command: ribbon, Alt+=, palette', async () => {
-    // Registry: the shortcut exists, is editor-context, Insert category,
-    // Alt+= (Word's convention), and the dev conflict check is clean.
+    // Alt+= is Word's convention.
     const def = SHORTCUTS.find((s) => s.id === 'insertEquation');
     expect(def).toBeDefined();
     expect(def!.context).toBe('editor');
@@ -148,8 +138,6 @@ describe('insertion', () => {
     expect(def!.keys).toBe('alt+=');
     expect(getEffectiveKeybinding({}, 'insertEquation')).toBe('alt+=');
     expect(findShortcutConflicts()).toEqual([]);
-    // The dispatch map: the shortcut and the palette both land on
-    // editor.commands.insertEquation (the one command path).
     expect(EDITOR_COMMAND_MAP.insertEquation).toBeDefined();
     const cmd = getCommand('insertEquation');
     expect(cmd).toBeDefined();
@@ -169,7 +157,7 @@ describe('insertion', () => {
   });
 });
 
-// ─── 2. Rendering: the projection states ────────────────────────────────
+// 2. Rendering
 
 describe('rendering', () => {
   it('EMPTY latex renders the placeholder; LATEX renders KaTeX HTML; INVALID renders the invalid face', async () => {
@@ -181,25 +169,18 @@ describe('rendering', () => {
     });
     await settleLayout();
     let eq = findEquation(editor)!;
-    // Empty → the dashed placeholder (never a blank block, never KaTeX
-    // error text — the broken-glyph law).
     expect(document.querySelector('[data-testid="equation-placeholder"]')).not.toBeNull();
     expect(document.querySelector('.katex-error')).toBeNull();
 
     setLatex(editor, eq.pos, 'x=\\frac{1}{2}');
     eq = findEquation(editor)!;
     await settleLayout();
-    // Valid → the KaTeX projection (the .katex markup exists).
     expect(document.querySelector('[data-testid="equation-render"] .katex')).not.toBeNull();
-    // The KaTeX OUTPUT is a pure function of the source (the issue's
-    // law): the fraction renders as nested spans, no raw source text.
     expect(document.querySelector('[data-testid="equation-render"]')!.innerHTML).toContain('katex');
 
-    // Invalid → the styled invalid face with the SOURCE visible.
     setLatex(editor, eq.pos, '\\frac{1}{');
     await settleLayout();
     expect(document.querySelector('[data-testid="equation-invalid"]')).not.toBeNull();
-    // ...and the parse validation the bubble surfaces:
     expect(parseEquation('\\frac{1}{')).toMatch(/Expected group|Unexpected end/i);
     expect(parseEquation('x^{2}')).toBeNull();
   });
@@ -214,14 +195,13 @@ describe('rendering', () => {
     const eq = findEquation(editor)!;
     setLatex(editor, eq.pos, 'E=mc^{2}');
     await settleLayout();
-    // KaTeX's htmlAndMathml output ships a visually-hidden MathML copy
-    // — the hidden PM view renders it (opacity 0, NOT aria-hidden), so
-    // screen readers reach the formula (the M5 Orca law's equation arm).
+    // KaTeX ships a visually-hidden MathML copy — the hidden PM view
+    // renders it so screen readers reach the formula.
     expect(document.querySelector('.pm-input-only .katex-mathml')).not.toBeNull();
   });
 });
 
-// ─── 3. The paginated projection ────────────────────────────────────────
+// 3. Paginated projection
 
 describe('paginated', () => {
   it('projects to an engine EquationBlock: latex only, fontSize = doc default, align honored', () => {
@@ -240,8 +220,8 @@ describe('paginated', () => {
       align: string;
     };
     expect(block.latex).toBe('\\sum_{i=1}^{n} a_i');
-    // THE DIMS RULING: no width/height ride the projection — derived
-    // facts come from the EquationMetrics port at layout time.
+    // No width/height ride the projection — dims derive from
+    // the EquationMetrics port at layout time.
     expect('width' in block).toBe(false);
     expect('height' in block).toBe(false);
     expect(block.fontSize).toBe(16);
@@ -270,7 +250,6 @@ describe('paginated', () => {
     // The echo contract: paint data is the shell's to resolve.
     expect(placed[0]!.latex).toBe('abcdefghij');
     expect(placed[0]!.fontSize).toBe(16);
-    // In flow: never in lines[].
     expect(result.lines.every((l) => l.blockId !== placed[0]!.blockId)).toBe(true);
 
     // The live view paints it (the DOM overlay, crisp — not canvas).
@@ -288,12 +267,10 @@ describe('paginated', () => {
       editor.commands.insertEquation();
     });
     await settleLayout();
-    // EMPTY (just inserted) → the dashed placeholder in the layer.
     let painted = document.querySelector('[data-testid="equation-painted"]');
     expect(painted?.getAttribute('data-resolved')).toBe('empty');
     expect(painted?.querySelector('.tensor-equation-placeholder')).not.toBeNull();
 
-    // INVALID → the styled invalid face, never KaTeX's red error text.
     const eq = findEquation(editor)!;
     setLatex(editor, eq.pos, '\\frac{1}{');
     await settleLayout();
@@ -324,7 +301,7 @@ describe('paginated', () => {
   });
 });
 
-// ─── 4. The clipboard marker (the M-IMAGES-2.2 law) ────────────────────
+// 4. Clipboard marker
 
 describe('clipboard marker', () => {
   it('serializes to its OWN marker and parses back; external math never parses in', () => {
@@ -343,7 +320,6 @@ describe('clipboard marker', () => {
     // NO rendered math in the serialization — display-only projection.
     expect(html).not.toContain('katex');
 
-    // Round-trip: setContent of its own HTML re-parses the node exactly.
     act(() => {
       editor.commands.setContent(html);
     });
@@ -351,8 +327,7 @@ describe('clipboard marker', () => {
     expect(reparsed.attrs.latex).toBe('x^{2}+y^{2}=z^{2}');
     expect(reparsed.attrs.align).toBe('center');
 
-    // EXTERNAL math is refused by construction: a web page's <math>
-    // (MathML) has no marker — it parses in as nothing.
+    // External MathML has no marker — it parses in as nothing.
     act(() => {
       editor.commands.setContent('<p>ext</p><math><mi>x</mi></math>');
     });
@@ -360,7 +335,7 @@ describe('clipboard marker', () => {
   });
 });
 
-// ─── 5. The .wpdoc round-trip ───────────────────────────────────────────
+// 5. .wpdoc round-trip
 
 describe('wpdoc round-trip', () => {
   it('insert → save → reopen: the latex source rides document.json intact; NO media involved', async () => {
@@ -380,16 +355,12 @@ describe('wpdoc round-trip', () => {
     } as const;
     await saveWpdoc('/x/eq.wpdoc', file);
     const opened = await openWpdoc('/x/eq.wpdoc');
-    // The attrs (the node's ONLY document data) survive byte-identical:
     expect(opened.docJSON).toEqual(file.docJSON);
     const node = (opened.docJSON as { content: { type: string; attrs?: Record<string, unknown> }[] }).content
       ?.find((n) => n.type === 'equation');
     expect(node?.attrs?.latex).toBe('\\int_{0}^{\\infty} e^{-x^{2}}\\,dx');
-    // No media — the equation is pure text data in the container:
     expect(wpdocFiles.get('/x/eq.wpdoc')!.media).toEqual([]);
 
-    // Reopened into a live editor: still editable (the acceptance's
-    // "intact AND still editable" bar).
     act(() => {
       editor.commands.setContent(opened.docJSON as Parameters<typeof editor.commands.setContent>[0]);
     });
@@ -405,7 +376,7 @@ describe('wpdoc round-trip', () => {
   });
 });
 
-// ─── 6. The assisted-input bubble ───────────────────────────────────────
+// 6. Assisted-input bubble
 
 describe('editor bubble (assisted input)', () => {
   it('insertEquation opens the bubble; typing the source live-applies to the node; Escape closes', async () => {
@@ -415,9 +386,8 @@ describe('editor bubble (assisted input)', () => {
       editor.commands.focus();
       editor.commands.insertEquation();
     });
-    // The MathLive loader rejects in jsdom — the bubble falls back to
-    // the Source textarea (the fallback law). One settle covers the
-    // async fallback flip.
+    // The MathLive loader rejects → the bubble falls back to the Source
+    // textarea; one settle covers the async fallback flip.
     await settleLayout(80);
     // The reactive path opened it (the selection IS the open trigger).
     const bubble = document.querySelector('[data-equation-bubble]');
@@ -425,25 +395,21 @@ describe('editor bubble (assisted input)', () => {
     const source = document.querySelector('[data-testid="equation-bubble-source"]') as HTMLTextAreaElement;
     expect(source).not.toBeNull();
 
-    // Live-apply: typing in the source writes the node's attrs
-    // immediately (no Save step to lose work behind).
+    // Live-apply: typing writes the node's attrs immediately (no Save step).
     await act(async () => {
       fireEvent.change(source, { target: { value: '\\frac{a}{b}' } });
     });
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{a}{b}');
-    // The document is the live preview (no preview pane): the node
-    // view re-renders the committed projection.
+    // The document is the live preview (no preview pane).
     expect(document.querySelector('[data-testid="equation-render"] .katex')).not.toBeNull();
 
-    // The palette (the no-LaTeX-knowledge path): a template button
-    // splices its skeleton into the source at the cursor.
+    // A template button splices its skeleton into the source at the cursor.
     const fraction = document.querySelector('[data-testid="equation-template-fraction"]') as HTMLButtonElement;
     expect(fraction).not.toBeNull();
     await act(async () => {
       fireEvent.click(fraction);
     });
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{a}{b}\\frac{a}{b}');
-    // A symbol button (the Symbols tab) inserts its latex source:
     await act(async () => {
       fireEvent.click(document.querySelector('[data-testid="equation-bubble-tab-symbols"]')!);
     });
@@ -454,15 +420,13 @@ describe('editor bubble (assisted input)', () => {
     });
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{a}{b}\\frac{a}{b}\\alpha');
 
-    // The parse error surfaces in the bubble (never in the document):
-    // the ONE in-bubble failure signal — the preview pane is gone, so
-    // the line shows ONLY while the source does not parse.
+    // The parse error surfaces in the bubble, only while the source
+    // does not parse.
     await act(async () => {
       fireEvent.change(source, { target: { value: '\\sqrt{' } });
     });
     expect(document.querySelector('[data-testid="equation-bubble-error"]')).not.toBeNull();
 
-    // Escape closes; the node keeps the last committed latex.
     await act(async () => {
       fireEvent.keyDown(bubble!, { key: 'Escape' });
     });
@@ -480,15 +444,14 @@ describe('editor bubble (assisted input)', () => {
     const eq = findEquation(editor)!;
     setLatex(editor, eq.pos, 'a^{2}');
     await settleLayout(80);
-    // Close the insertion-time bubble first, then re-select the node —
-    // the same state a user's click produces (PaginatedView resolves
-    // the click to setNodeSelection; the bubble's open arm is HERE).
+    // Close the insertion bubble, then re-select — the same state a
+    // user's click produces.
     await act(async () => {
       fireEvent.keyDown(document.querySelector('[data-equation-bubble]')!, { key: 'Escape' });
     });
     expect(document.querySelector('[data-equation-bubble]')).toBeNull();
-    // Move the selection AWAY (the user clicked elsewhere), then click
-    // back into the equation — a NodeSelection change is the open arm.
+    // Move the selection away, then click back in — a NodeSelection
+    // change is the open arm.
     await act(async () => {
       editor.commands.focus();
       editor.commands.setTextSelection(1);
@@ -504,7 +467,7 @@ describe('editor bubble (assisted input)', () => {
   });
 });
 
-// ─── 7. Catalog + render surface sanity ─────────────────────────────────
+// 7. Catalog + render surface
 
 describe('catalogs and render surface', () => {
   it('the catalogs are non-empty, named, and every entry parses', () => {
@@ -535,30 +498,28 @@ describe('catalogs and render surface', () => {
   });
 });
 
-// ─── 8. The over-tall sentinel through the projection ───────────────────
+// 8. Over-tall sentinel
 
 describe('sentinel', () => {
-  it('an equation taller than the content box throws the SENTINEL (the fallback family)', () => {
+  it('EquationTooTallError is the SENTINEL class the shell\'s fallback catch dispatches on', () => {
     const { editor } = renderTensor('<p>tall</p>');
     act(() => {
       editor.commands.focus();
       editor.commands.insertEquation();
     });
     const eq = findEquation(editor)!;
-    // fontSize 16 × 1.6 = 25.6px tall — never over-tall through the
-    // fake at doc defaults; drive the port directly to pin the class
-    // the shell's catch dispatches on.
+    // 25.6px is never over-tall at doc defaults — drive the port
+    // directly to pin the class the shell's catch dispatches on.
     expect(EquationTooTallError).toBeDefined();
     const err = new EquationTooTallError('x');
     expect(err.name).toBe('EquationTooTallError');
     expect(err instanceof Error).toBe(true);
-    // (The engine suite pins the throw itself; here the projection-side
-    // export is the contract: PaginatedView's catch family.)
+    // The engine suite pins the throw; here the export class is the contract.
     void eq;
   });
 });
 
-// ─── 9. Selection → equation (M-EQ-2) ───────────────────────────────────
+// 9. Selection → equation
 
 describe('selection to equation', () => {
   it('selecting plain text and inserting converts it: the selection becomes the equation source', async () => {
@@ -573,11 +534,8 @@ describe('selection to equation', () => {
       editor.commands.insertEquation();
     });
     const eq = findEquation(editor)!;
-    // The captured text IS the starting source — the WYSIWYG surface
-    // is where it gets restructured into styled math.
+    // The captured text IS the starting source.
     expect(eq.attrs.latex).toBe('1/2+2=3a');
-    // The text was consumed (attrs are not text content — the doc's
-    // text carries no trace of the selection).
     expect(editor.state.doc.textContent).not.toContain('1/2+2=3a');
     expect(editor.state.selection.constructor.name).toBe('NodeSelection');
   });
@@ -594,7 +552,7 @@ describe('selection to equation', () => {
   });
 });
 
-// ─── 10. Style attrs: color (paint-only) + scale (layout) ───────────────
+// 10. Style attrs
 
 describe('style attrs', () => {
   it('color: paint-only attr — null default, data-color serialization, node-view application', async () => {
@@ -609,8 +567,6 @@ describe('style attrs', () => {
     expect(eq.attrs.color).toBeNull();
     expect(editor.getHTML()).not.toContain('data-color');
 
-    // Set a color: the attr rides, the node view paints it explicitly,
-    // and the marker serializes it (clipboard + export).
     act(() => {
       editor.chain().command(({ tr }) => {
         tr.setNodeMarkup(eq.pos, undefined, {
@@ -628,14 +584,12 @@ describe('style attrs', () => {
     const nodeView = document.querySelector('[data-equation-node]') as HTMLElement;
     expect(nodeView?.style.color).toBe('rgb(220, 38, 38)');
 
-    // Round-trip through the marker:
     const html = editor.getHTML();
     act(() => {
       editor.commands.setContent(html);
     });
     expect(findEquation(editor)!.attrs.color).toBe('#dc2626');
 
-    // Back to null: no data-color, inherit (no inline color).
     act(() => {
       editor.chain().command(({ tr }) => {
         tr.setNodeMarkup(eq.pos, undefined, {
@@ -678,7 +632,6 @@ describe('style attrs', () => {
     const adapted = pmDocToSemantic(editor.state.doc, BASE);
     const block = adapted.doc.blocks.find((b) => b.kind === 'equation') as { fontSize: number };
     expect(block.fontSize).toBe(24);
-    // The serialization rides (clipboard + export):
     expect(editor.getHTML()).toContain('data-scale="1.5"');
   });
 
@@ -692,13 +645,12 @@ describe('style attrs', () => {
     const eq = findEquation(editor)!;
     setLatex(editor, eq.pos, 'x');
     await settleLayout();
-    // No color attr → the layer paints the DOCUMENT default (#000000 —
-    // the canvas text's own default), never chrome --foreground.
+    // No color attr → the layer paints the DOCUMENT default,
+    // never chrome --foreground.
     let painted = document.querySelector('[data-testid="equation-painted"]') as HTMLElement;
     expect(painted.style.color).toBe('rgb(0, 0, 0)');
 
-    // An explicit color attr paints through the map (the imageRadii
-    // precedent — paint facts derived from the PM doc, not the engine).
+    // An explicit attr paints through the map (derived from the PM doc).
     act(() => {
       editor.chain().command(({ tr }) => {
         tr.setNodeMarkup(eq.pos, undefined, {
@@ -719,16 +671,13 @@ describe('style attrs', () => {
     for (const group of MATH_TEMPLATES) {
       for (const tpl of group.templates) {
         if (tpl.mf) {
-          // The inline-editing form: a caret placeholder at minimum —
-          // the palette's "click, caret lands inside the new slot"
-          // contract.
+          // The inline-editing form needs a caret placeholder at minimum.
           expect(tpl.mf).toMatch(/#\?|#@/);
         }
       }
     }
-    // Spot-pins: the fraction takes the SELECTION as the numerator and
-    // lands the caret in the denominator (the "click fraction and edit
-    // it inline" ruling); sqrt wraps the selection.
+    // The fraction takes the SELECTION as numerator, caret in the
+    // denominator; sqrt wraps the selection.
     const fraction = MATH_TEMPLATES[0]!.templates.find((t) => t.name === 'fraction')!;
     expect(fraction.mf).toBe('\\frac{#@}{#?}');
     const sqrt = MATH_TEMPLATES[0]!.templates.find((t) => t.name === 'square root')!;
@@ -736,7 +685,7 @@ describe('style attrs', () => {
   });
 });
 
-// ─── 11. The MathLive → document boundary (M-EQ-2) ──────────────────────
+// 11. MathLive → document boundary
 
 describe('mathlive boundary', () => {
   it('sanitizeMathliveLatex: editing tokens never reach the document latex', () => {
@@ -775,17 +724,14 @@ describe('mathlive boundary', () => {
       editor.commands.insertEquation();
     });
     await settleLayout(80);
-    // (MathLive is mocked out here — the Source textarea is the
-    // surface; the boundary is the SAME one the field rides.)
+    // (MathLive is mocked — the Source textarea rides the same
+    // boundary as the field.)
     const source = document.querySelector('[data-testid="equation-bubble-source"]') as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(source, { target: { value: '\\frac{1}{\\placeholder{}}' } });
     });
-    // The node's committed latex is the SANITIZED document latex…
+    // The committed latex is the SANITIZED document latex.
     expect(findEquation(editor)!.attrs.latex).toBe('\\frac{1}{}');
-    // …so the document renders math (no raw-source invalid face), the
-    // bubble shows NO error line, and there is NO preview pane (the
-    // document is the preview).
     expect(document.querySelector('[data-testid="equation-invalid"]')).toBeNull();
     expect(document.querySelector('[data-testid="equation-bubble-error"]')).toBeNull();
     expect(document.querySelector('[data-testid="equation-bubble-preview"]')).toBeNull();
@@ -793,7 +739,7 @@ describe('mathlive boundary', () => {
   });
 });
 
-// ─── 12. The style-highlight refresh (the stale-open-state fix) ────────
+// 12. Style-highlight refresh
 
 describe('style highlight refresh', () => {
   it('clicking S moves the highlight off M (attrs refresh while the bubble is pinned)', async () => {
@@ -807,7 +753,6 @@ describe('style highlight refresh', () => {
 
     const scaleS = document.querySelector('[data-testid="equation-scale-S"]')!;
     const scaleM = document.querySelector('[data-testid="equation-scale-M"]')!;
-    // M (the default) starts active:
     expect(scaleM.getAttribute('aria-pressed')).toBe('true');
     expect(scaleS.getAttribute('aria-pressed')).toBe('false');
 
@@ -816,10 +761,8 @@ describe('style highlight refresh', () => {
       fireEvent.pointerUp(scaleS, { pointerId: 1 });
       fireEvent.click(scaleS);
     });
-    // The attr commits…
     expect(findEquation(editor)!.attrs.scale).toBe(0.75);
-    // …and the HIGHLIGHT MOVES (state refreshes mid-interaction —
-    // the stale-open-time-snapshot bug's pin):
+    // The highlight refreshes mid-interaction (the stale-snapshot pin):
     expect(scaleS.getAttribute('aria-pressed')).toBe('true');
     expect(scaleM.getAttribute('aria-pressed')).toBe('false');
   });
@@ -845,7 +788,7 @@ describe('style highlight refresh', () => {
   });
 });
 
-// ─── 13. The bubble's chrome shape (M-EQ-2 polish) ─────────────────────
+// 13. Bubble chrome
 
 describe('bubble chrome', () => {
   it('the footer is a REAL footer: edge-to-edge (the DialogFooter negative-margin pattern), no preview pane, no close X', async () => {
@@ -857,39 +800,34 @@ describe('bubble chrome', () => {
     });
     await settleLayout(80);
 
-    // NO preview pane (the document is the live preview — the user
-    // ruling) and NO header X (Done/Escape/click-away own closing):
+    // No preview pane; no header X (Done/Escape/click-away own closing):
     expect(document.querySelector('[data-testid="equation-bubble-preview"]')).toBeNull();
     const header = document.querySelector('[data-testid="equation-bubble-header"]')!;
     expect(header.querySelector('button')).toBeNull();
 
-    // The footer: the app's DialogFooter pattern (ui/dialog.tsx) —
-    // negative margins (-mx-3 -mb-3) escaping the root's p-3 so the
-    // rule and the muted band run edge-to-edge, rounded to the
-    // bubble's bottom corners.
+    // DialogFooter pattern (ui/dialog.tsx): -mx-3/-mb-3 escape the
+    // root's p-3 to run edge-to-edge, rounded to the bottom corners.
     const footer = document.querySelector('[data-testid="equation-bubble-footer"]') as HTMLElement;
     expect(footer).not.toBeNull();
     expect(footer.className).toContain('-mx-3');
     expect(footer.className).toContain('-mb-3');
     expect(footer.className).toContain('border-t');
     expect(footer.className).toContain('rounded-b-lg');
-    // The bubble's own padding is p-3 — the pinned escape values:
+    // The bubble's own padding is p-3:
     const bubble = document.querySelector('[data-equation-bubble]') as HTMLElement;
     expect(bubble.className).toContain('p-3');
 
-    // THE FLOATING PANEL (the drag-over-the-ribbon fix): the bubble
-    // renders through a BODY portal at fixed position + max z — it
-    // escapes the editor's scroll container, whose overflow clip (not
-    // any z-index) is what put a dragged bubble under the ribbon.
+    // Body portal at fixed position + max z — escapes the editor's
+    // scroll container, whose overflow clip put a dragged bubble
+    // under the ribbon.
     expect(document.body.contains(bubble)).toBe(true);
     expect(bubble.parentElement).toBe(document.body);
     expect(bubble.className).toContain('fixed');
     expect(bubble.className).toContain('z-[45]');
 
-    // The input surface (the Source textarea in this fallback
-    // environment — the field wrapper carries the same recipe) speaks
-    // the shadcn Input treatment: border-input + the --ring accent on
-    // focus, never the UA focus ring MathLive's host draws by default.
+    // The input surface takes the shadcn Input treatment: border-input
+    // + the --ring accent on focus, never the UA focus ring MathLive's
+    // host draws by default.
     const source = document.querySelector('[data-testid="equation-bubble-source"]') as HTMLTextAreaElement;
     expect(source.className).toContain('border-input');
     expect(source.className).toContain('focus-visible:ring-ring/50');
@@ -897,7 +835,7 @@ describe('bubble chrome', () => {
   });
 });
 
-// ─── 14. The drag handle (M-EQ-2 polish) ────────────────────────────────
+// 14. Drag handle
 
 describe('drag handle', () => {  it('dragging the header moves the bubble by the pointer delta; the style toolbar is not a handle', async () => {
     const { editor } = renderTensor('<p>drag</p>');

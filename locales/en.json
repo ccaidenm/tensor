@@ -1,0 +1,40 @@
+{
+  "app": {
+    "name": "Tensor"
+  },
+  "about": {
+    "info": {
+      "title": "Info",
+      "version": "Version {version} · {license}"
+    },
+    "links": {
+      "title": "Links",
+      "github": {
+        "label": "View on GitHub",
+        "description": "Source code, releases, and issue tracker"
+      },
+      "bug": {
+        "label": "Report a Bug"
+      },
+      "feature": {
+        "label": "Request a Feature"
+      },
+      "contributors": {
+        "label": "Contributors",
+        "description": "Everyone who has helped build Tensor"
+      },
+      "license": {
+        "label": "Tensor's License"
+      }
+    },
+    "licenses": {
+      "title": "Third-Party Licenses",
+      "intro": "Tensor is built with {count} open-source packages — thank you to their authors and maintainers! Tensor couldn't be built without you.",
+      "show": "Show licenses",
+      "hide": "Hide licenses",
+      "filter": "Filter by package or license…",
+      "repo": "Repo",
+      "noMatches": "No matches."
+    }
+  }
+}

@@ -25,10 +25,9 @@ interface SearchPluginState {
   caseSensitive: boolean;
   useRegex: boolean;
   regexError: string | null;
-  /** total capture groups in the current pattern (regex mode only) — used to
-   *  warn when a replacement references a group that doesn't exist, e.g. the
-   *  classic "$1 with no parentheses in the pattern silently inserts nothing"
-   *  trap. Independent of match count so it's available even with 0 matches. */
+  /** total capture groups in the current pattern (regex mode only) — used
+   *  to warn when a replacement references a nonexistent group, even
+   *  with 0 matches. */
   groupCount: number;
   matches: SearchMatch[];
   currentIndex: number;
@@ -60,10 +59,9 @@ function getGroupCount(pattern: string, flags: string): number {
 }
 
 /**
- * Walks the doc's text content into one flat string, inserting a '\n'
- * between separate textblocks (paragraphs/headings/etc) so matches don't
- * silently span across them. posMap[i] gives the real ProseMirror position
- * of character i in that string.
+ * Walks the doc's text into one flat string, inserting '\n' between
+ * textblocks so matches don't span them; posMap[i] is character i's
+ * real ProseMirror position.
  */
 function buildDocIndex(doc: PMNode): { text: string; posMap: number[] } {
   let text = '';

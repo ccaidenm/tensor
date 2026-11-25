@@ -20,7 +20,7 @@ import {
 
 // METRICS CONSTANTS (auditable geometry): FakeMetrics at fontSize 16
 // gives ascent 0.8×16 = 12.8, descent 0.2×16 = 3.2, so the glyph box
-// is exactly 16px. BOTTOM-ONLY LEADING (M6 ruling — spec of record):
+// is exactly 16px. BOTTOM-ONLY LEADING (spec of record):
 // a 2.0 line box is exactly 32px tall with the baseline at ascent =
 // 12.8 from the box top — ALL 16px of leading lives BELOW the glyphs
 // (a line box's top-left is always text; above-line space belongs to
@@ -68,7 +68,7 @@ async function settle() {
   await settleLayout();
 }
 
-// ─── Attr path: LineSpacingButton's command → PM attr → adapter ─────────
+// Attr path: LineSpacingButton's command → PM attr → adapter
 
 describe('line spacing attr path', () => {
   it('setLineHeight("2") (the UI command) reaches the engine as multiplier 2', async () => {
@@ -146,7 +146,7 @@ describe('line spacing attr path', () => {
   });
 });
 
-// ─── Geometry: engine LineBox per the E1 half-leading spec ───────────────
+// Geometry: engine LineBox per the E1 half-leading spec
 
 describe('line spacing geometry (E1 half-leading)', () => {
   it('2.0 block: height (ascent+descent)×2, baseline at ascent — all leading below (M6 ruling)', () => {
@@ -198,7 +198,7 @@ describe('line spacing geometry (E1 half-leading)', () => {
   });
 });
 
-// ─── Overlays: caret, selection, hitTest — the full leading box ───────────
+// Overlays: caret, selection, hitTest — the full leading box
 
 describe('leading-box overlays', () => {
   // One 2-line 2.0 block: lines at content y 0 and 32.
@@ -249,8 +249,8 @@ describe('leading-box overlays', () => {
   });
 
   it('hitTest: clicks anywhere in the box — glyph band at top, leading below — resolve to that line', () => {
-    // M6 ruling geometry: baseline 12.8 → ink from y 0 (12.8−12.8)
-    // to y 16 (12.8+3.2); the whole 16px leading is BELOW, y 16..32.
+    // Geometry: baseline 12.8 → ink from y 0 (12.8−12.8) to y 16
+    // (12.8+3.2); the whole 16px leading is BELOW, y 16..32.
     const top = hitTest(result, [block], FakeMetrics, PAGE_GAP, CB.x + 2, CB.y + 4);
     const belowLeading = hitTest(result, [block], FakeMetrics, PAGE_GAP, CB.x + 2, CB.y + 28);
     expect(top).toMatchObject({ blockId: 'a', offset: 0 });
@@ -261,7 +261,7 @@ describe('leading-box overlays', () => {
   });
 });
 
-// ─── Shell DOM: the painted overlays on a real 2.0 block ─────────────────
+// Shell DOM: the painted overlays on a real 2.0 block
 
 describe('line spacing shell integration', () => {
   it('caret and selection on a 2.0 block paint the full 32px leading box', async () => {
@@ -293,7 +293,7 @@ describe('line spacing shell integration', () => {
   });
 });
 
-// ─── Block-tier spacing (M6): spaceBefore/spaceAfter ────────────────────
+// Block-tier spacing (M6): spaceBefore/spaceAfter
 
 describe('block spacing attr path + geometry (M6)', () => {
   it('PM attrs map through the adapter onto the engine block', async () => {
@@ -365,7 +365,7 @@ describe('block spacing attr path + geometry (M6)', () => {
   });
 });
 
-// ─── Pagination: a 2.0 block fragmenting across a page boundary ───────────
+// Pagination: a 2.0 block fragmenting across a page boundary
 
 describe('line spacing × pagination', () => {
   it('fragment’s last line keeps its full leading; the next page starts at y=0', () => {

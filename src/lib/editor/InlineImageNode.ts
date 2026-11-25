@@ -3,26 +3,9 @@ import { ReactNodeViewRenderer } from '@tiptap/react';
 import { InlineImageNodeView } from '@/components/editor/InlineImageNodeView';
 
 /**
- * M-IMAGES-2 — the INLINE image node (E-IMG-2).
- *
- * WHY A SEPARATE NODE (the mechanics receipt): block and inline are
- * DIFFERENT PM SHAPES — different `group` (top-level block content vs
- * `inline`, allowed only INSIDE a textblock), different content
- * models (atom-in-flow vs atom-in-text), different schema slots. A
- * node-kind SWITCH (replace block image ↔ inline image inside a
- * paragraph) is the only honest conversion; there is no "position
- * transform" that turns one shape into the other.
- *
- * The node mirrors the block image's attrs (src media:// ref, REQUIRED
- * width/height, alt) plus the inert carry-overs (align, keepNext,
- * radius, float) so the block ↔ inline round-trip returns geometry
- * EXACTLY (the conversion copies all attrs both ways; the adapter
- * ignores the inert ones inline). The token is ONE PM position per
- * object — the engine's U+FFFC contract.
- *
- * Baseline seating is the ENGINE's law (bottom-at-baseline, the CSS
- * default); the node view renders at the natural/clamped size and the
- * text baseline sits it — no shell math.
+ * The INLINE image node — separate from the block node because block
+ * and inline are different PM shapes. Mirrors the block image's attrs
+ * so block ↔ inline round-trips geometry exactly; ONE PM position.
  */
 export const InlineImageNode = Node.create({
   name: 'inlineImage',
@@ -41,23 +24,18 @@ export const InlineImageNode = Node.create({
       align: { default: 'left' },
       keepNext: { default: false },
       radius: { default: 0 },
-      // The float CARRIER (wrap.ts's carryAttrs): a floated image
-      // wrapped inline and floated again keeps its exact offset —
-      // mode switches never move the image (E-IMG-3). NEVER read
-      // inline: the adapter's InlineImageRun ignores it, and in-flow
-      // objects have no float placement of their own.
+      // The float CARRIER: a floated image wrapped inline and floated
+      // again keeps its exact offset — never read inline (in-flow
+      // objects have no float placement of their own).
       float: { default: null },
-      // M-A11Y — DECORATIVE (the block image's twin): presentational,
-      // content-free ink; exempt from the alt-text rule.
+      // DECORATIVE (the block image's twin): exempt from the alt-text rule.
       decorative: { default: false },
     };
   },
 
-  // M-IMAGES-2.2 — the CLIPBOARD-SCOPED round-trip (the twin of
-  // ImageNode's): renderHTML emits span[data-tensor-inline-image] +
-  // attrs; parseHTML matches ONLY that marker (external <img> HTML
-  // never parses in — the original M-IMAGES-1 law stands). Internal
-  // copy/cut/drag/paste of text CONTAINING objects now round-trips.
+  // The clipboard-scoped round-trip (ImageNode's twin): renderHTML
+  // emits span[data-tensor-inline-image]; parseHTML matches ONLY that
+  // marker — external <img> HTML never parses in.
   parseHTML() {
     return [
       {

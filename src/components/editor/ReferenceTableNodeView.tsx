@@ -5,29 +5,17 @@ import { navigateToReferenceTarget } from '@/lib/references/navigate';
 import { entriesForKind, refIdOf, scanCollections, type ReferenceKind } from '@/lib/references/scan';
 
 /**
- * M-REFS — the reference-table node view (RESTORED round 7, the user's
- * ruling: the container's look is the React surface's — "I don't wanna
- * change the rendering of the text"): the bordered field frame around
- * REAL content (NodeViewContent renders the generator's row paragraphs
- * — plain body text, natively selectable, the dots span included).
- *
- * THE BORDER is selection-driven (the user's GDocs ruling): the gray
- * box shows only while the user is IN the table (NodeSelection ON it
- * or the caret strictly inside its content); transparent at rest — no
- * layout shift. THE ONE custom arm: Ctrl/Cmd+click NAVIGATES (the
- * clicked row's refId maps through the scan to its target); plain
- * clicks are NATIVE text behavior — a caret in entry text.
- *
- * The store's version bumps re-render this view on doc changes (the
- * debounced seam); the CONTENT itself is PM-synced (NodeViewContent's
- * contentDOM — PM's own DOM management).
+ * The reference-table node view: NodeViewContent renders the generator's
+ * rows as real, natively selectable content. The gray border is
+ * selection-driven — only while IN the table; transparent at rest, no
+ * layout shift. Ctrl/Cmd+click navigates the row's target; plain clicks
+ * are native text. Store version bumps re-render; content is PM-synced.
  */
 export function ReferenceTableNodeView({ node, editor, selected, getPos }: ReactNodeViewProps) {
   useReferenceStore((s) => s.version);
   const { kind, depth } = node.attrs as { kind: ReferenceKind; depth: number };
   const entries = entriesForKind(scanCollections(editor.state.doc), kind, depth);
-  // THE FIELD BORDER'S SELECTION FACT: NodeSelection ON the block, or
-  // the caret strictly inside its content.
+  // The border shows on NodeSelection on the block, or a caret strictly inside its content.
   const bordered = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -77,16 +65,14 @@ export function ReferenceTableNodeView({ node, editor, selected, getPos }: React
       data-tensor-ref-table-view="true"
       data-kind={kind}
       data-bordered={bordered ? 'true' : 'false'}
-      // The GDocs field affordance (selection-driven): the gray border
-      // shows only while the user is IN the table; transparent at rest
-      // (no layout shift).
+      // Selection-driven field border: gray only while IN the table;
+      // transparent at rest (no layout shift).
       className={`tensor-ref-table not-prose my-2 rounded-md border px-3 py-2 ${
         bordered ? 'border-border/70' : 'border-transparent'
       } ${selected ? 'ring-2 ring-primary/40' : ''}`}
       onClick={onClick}
     >
-      {/* The rows are REAL content — PM-synced DOM inside the frame:
-          plain body text, natively selectable (the dots included). */}
+      {/* The rows are real PM-synced content — plain, natively selectable body text (the dots included). */}
       <NodeViewContent className="tensor-ref-table-entries" />
     </NodeViewWrapper>
   );

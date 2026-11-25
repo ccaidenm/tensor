@@ -1,11 +1,8 @@
 /**
- * M-MD — the local path shims for the markdown flows. Tiny string
- * operations instead of @tauri-apps/api/path: the api functions call
- * the Rust backend per call, which would drag the dialog/save flows
- * through invoke in tests (the wpdoc layer mocks invoke wholesale —
- * these flows shouldn't need that for path math) and adds an async
- * hop to pure string work. Both separators are handled — the file
- * dialogs hand back native paths.
+ * Local path shims for the markdown flows: pure string math instead of
+ * @tauri-apps/api/path (whose per-call Rust invoke drags the flows
+ * through mocked invokes in tests). Both separators are handled — the
+ * file dialogs hand back native paths.
  */
 
 function lastSeparator(path: string): number {

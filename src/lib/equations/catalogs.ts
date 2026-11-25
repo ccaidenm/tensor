@@ -1,13 +1,7 @@
 /**
- * M-EQ-0 — the assisted-input catalogs (the issue's "some
- * assisted/visual input path" ruling): the equation editor popover
- * renders THESE, never a raw-LaTeX-only entry path. Shapes mirror the
- * symbols.ts catalog convention (name-tagged entries, category groups)
- * so the SymbolButton and EquationButton popovers read identically.
- *
- * Entries carry LATEX SOURCE, not unicode glyphs — the palette buttons
- * render each entry through KaTeX (renderInlineMath), so what the user
- * clicks is exactly what the document gets.
+ * The assisted-input catalogs: the equation editor popover renders these,
+ * never a raw-LaTeX-only path. Entries carry LaTeX source (rendered
+ * through KaTeX), so what the user clicks is what the document gets.
  */
 
 export interface MathSymbolEntry {
@@ -21,11 +15,9 @@ export interface MathTemplate {
   /** LaTeX skeleton inserted verbatim — the user fills the arguments. */
   latex: string;
   name: string;
-  /** M-EQ-2: the MathLive WYSIWYG insertion form — `#@` = the current
-   *  selection (or nothing), `#?` = a placeholder the CARET lands in
-   *  (Tab hops slots): clicking the tile inserts the STRUCTURE into the
-   *  math field and the user edits it inline, never seeing LaTeX.
-   *  Absent = insert the plain `latex` form. */
+  /** The MathLive WYSIWYG insertion form — `#@` = the current selection,
+   *  `#?` = a placeholder the caret lands in (Tab hops slots); absent =
+   *  insert the plain `latex` form. */
   mf?: string;
 }
 

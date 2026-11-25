@@ -80,6 +80,17 @@
       ]
     },
     {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        {
+          "path": "$APPDATA/recovery"
+        },
+        {
+          "path": "$APPDATA/recovery/**"
+        }
+      ]
+    },
+    {
       "identifier": "fs:allow-mkdir",
       "allow": [
         {
@@ -142,6 +153,11 @@
     "dialog:default",
     "clipboard-manager:allow-read-text",
     "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-title",
+    "core:window:allow-start-dragging",
     {
       "identifier": "fs:allow-read-file",
       "allow": [
@@ -201,6 +217,7 @@
           "path": "$HOME/**"
         }
       ]
-    }
+    },
+    "core:window:allow-set-icon"
   ]
 }

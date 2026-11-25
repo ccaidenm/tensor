@@ -1,10 +1,8 @@
 interface TensorLogoProps {
   size?: number;
   className?: string;
-  /** Defaults to 'currentColor' so it inherits text color like any icon
-   *  (e.g. the orange Ribbon button), but can be overridden — e.g. the
-   *  About panel wants a fixed size and its natural fill, unaffected by
-   *  whatever text color context it's placed in. */
+  /** Defaults to 'currentColor' (inherits text color like any icon), but
+   *  can be overridden for fixed-fill contexts like the About panel. */
   color?: string;
 }
 

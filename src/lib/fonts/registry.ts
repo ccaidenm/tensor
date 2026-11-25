@@ -8,21 +8,9 @@ import type { CatalogId, CatalogDownload } from './catalogs/types';
 import { parseFontFamilyName } from './fontName';
 
 /**
- * M-FONTS-A — the installed-fonts registry. SHELL ONLY: fontFamily
- * already flows engine-side; this registry is what the shell's
- * measurement/paint one ruler (fontString) CONSUMES.
- *
- * Persistence (both halves of the styles/config precedents):
- *  - registry entries: appConfigDir()/fonts.json (uploaded only —
- *    bundled re-seed from code every launch)
- *  - font FILES: appDataDir()/fonts/ — uploads are COPIED there,
- *    never referenced in place (the recovery-dir precedent).
- *
- * registerFont(entry) is THE one registration primitive: FontFace per
- * file → document.fonts.add → await load → epoch bump. The epoch is
- * what PaginatedView re-gates on (fonts re-load before any measure)
- * and then recreates the engine for — the shell's stale-cache remedy
- * (see PaginatedView's font-epoch effect for the cache law).
+ * Shell-side installed-fonts registry — feeds fontString; the engine
+ * never registers fonts. Uploads are copied into appDataDir()/fonts/,
+ * never referenced in place. `epoch` is the relayout re-gate signal.
  */
 
 export interface FontFiles {
@@ -40,10 +28,8 @@ export interface FontEntry {
   id: string;
   family: string;
   displayName: string;
-  /** 'bundled' = ships with Tensor (Fontsource curated + Geist);
-   *  'system' = the OS's fallback families (no files);
-   *  'uploaded' = the user's uploads (files in appDataDir()/fonts/);
-   *  'catalog' = downloaded from an online catalog (M-FONTS-B). */
+  /** 'bundled' = ships with Tensor; 'system' = OS fallbacks (no
+   *  files); 'uploaded' = user uploads; 'catalog' = online catalog. */
   source: FontSource;
   /** For source 'catalog': WHICH catalog it came from (badge + chip). */
   catalog?: CatalogIdRef;
@@ -54,9 +40,7 @@ export interface FontEntry {
    *  Fontsource: per-face CSS specifiers (bundled.ts). System
    *  fallbacks: undefined — the OS resolves them. */
   files?: FontFiles;
-  /** Variable fonts (the Geist Variable precedent): 700 weights the
-   *  axis — there is no static bold file; see fontString's
-   *  two-worlds comment (metrics.ts). */
+  /** Variable fonts: 700 weights the axis — no static bold file. */
   variable?: boolean;
   status: 'ready' | 'error';
 }
@@ -80,18 +64,15 @@ interface FontRegistryState {
   /** Whether loadFromDisk ran (app bootstrap). */
   status: 'idle' | 'ready' | 'error';
   loadFromDisk: () => Promise<void>;
-  /** THE registration primitive: bytes → FontFace(s) →
-   *  document.fonts.add → await load. Returns false (and marks the
-   *  entry 'error') when a face fails to load. Idempotent per entry
-   *  id — re-registering replaces the faces. */
+  /** Bytes → FontFace(s) → document.fonts.add → load; returns false
+   *  (status 'error') when a face fails. Re-registering replaces. */
   registerFont: (entry: FontEntry) => Promise<boolean>;
   /** Upload flow (see upload.ts): copy the file into appDataDir()/
    *  fonts/, register, persist. */
   addUploaded: (input: { family: string; displayName: string; sourcePath: string }) => Promise<FontEntry | null>;
-  /** M-FONTS-B catalog install — ALL-OR-NOTHING: every face's bytes
-   *  are written into appDataDir()/fonts/ before anything registers;
-   *  any failure removes the partial files and returns null (no
-   *  orphaned files, no partial registry entries per family). */
+  /** Catalog install — all-or-nothing: every face's bytes are
+   *  written before anything registers; any failure removes the
+   *  partial files and returns null. */
   addCatalogFont: (input: {
     family: string;
     displayName: string;
@@ -113,13 +94,9 @@ async function fontsDirPath(): Promise<string> {
 }
 
 /**
- * M-FONTS-B: a genuine install also lands in the OS user fonts
- * directory (~/.local/share/fonts/tensor/ — fontconfig scans XDG
- * fonts recursively, so the family becomes available system-wide).
- * Tensor's OWN registration stays sourced from appDataDir()/fonts/
- * (never depends on fontconfig cache state); this copy is for the
- * rest of the PC. Uninstall removes both. Failures here degrade to
- * app-local-only — never fail the install.
+ * A genuine install also lands in ~/.local/share/fonts/tensor/ (fontconfig
+ * scans XDG recursively → system-wide); Tensor itself never depends on
+ * fontconfig — failures here degrade to app-local-only.
  */
 async function osFontsDirPath(): Promise<string> {
   return join(await homeDir(), '.local', 'share', 'fonts', 'tensor');
@@ -168,10 +145,8 @@ function faceSpecs(entry: FontEntry): { file: string; weight: string; style: str
   return specs;
 }
 
-/** Faces registered this session (family → FontFace[]), so uninstall
- *  can delete them and re-registration replaces cleanly. jsdom note:
- *  the test setup provides FontFace/document.fonts stubs — this code
- *  path is the REAL one, unmocked. */
+/** Faces registered this session (family → FontFace[]) so uninstall
+ *  can delete them; re-registration replaces cleanly. */
 const registeredFaces = new Map<string, FontFace[]>();
 
 async function buildFaces(entry: FontEntry): Promise<FontFace[]> {
@@ -194,8 +169,7 @@ async function buildFaces(entry: FontEntry): Promise<FontFace[]> {
   return faces;
 }
 
-/** The styles-registry warned-set precedent: one dev warning per
- *  family per session — never silent, never spammy. */
+/** One dev warning per family per session — never silent, never spammy. */
 const warnedUnavailableFamilies = new Set<string>();
 
 export function warnFontUnavailable(family: string): void {
@@ -209,13 +183,9 @@ export function warnFontUnavailable(family: string): void {
 }
 
 async function persistRegistry(entries: FontEntry[]): Promise<void> {
-  // Outside the Tauri webview (vitest/jsdom, plain browser) there is
-  // no appConfigDir — skip silently there (writeGlobalFile precedent).
+  // Outside the Tauri webview there is no appConfigDir — skip silently.
   if (!('__TAURI_INTERNALS__' in globalThis)) return;
   try {
-    // EVERYTHING the user installed persists — uploads AND catalog
-    // downloads (the M-FONTS-B fix: closing Tensor must not wipe
-    // downloaded fonts). Bundled/system re-seed from code.
     const file: FontsFile = {
       version: 1,
       entries: entries.filter((e) => e.source === 'uploaded' || e.source === 'catalog'),
@@ -250,9 +220,8 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
         const raw = await readTextFile(path);
         uploaded = (JSON.parse(raw) as FontsFile).entries ?? [];
       }
-      // Re-register every uploaded face from disk BEFORE the view's
-      // font gate settles — the relaunch flow must never measure with
-      // substitutes for a font that is installed.
+      // Re-register uploaded faces before the view's font gate
+      // settles — relaunch must never measure with substitutes.
       for (const entry of uploaded) {
         await get().registerFont(entry);
       }
@@ -271,8 +240,8 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
   registerFont: async (entry) => {
     let ok = true;
     try {
-      // Replace: uninstall old faces for the same family first
-      // (re-registration must not leak face duplicates).
+      // Delete old faces for the family first — re-registration
+      // must not leak face duplicates.
       for (const face of registeredFaces.get(entry.family) ?? []) {
         document.fonts?.delete(face);
       }
@@ -302,7 +271,7 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
     try {
       const dir = await fontsDirPath();
       if (!(await exists(dir))) await mkdir(dir, { recursive: true });
-      // COPIED into appDataDir()/fonts/ — never referenced in place.
+      // Copied into appDataDir()/fonts/ — never referenced in place.
       const id = nanoid(8);
       const base = sourcePath.split(/[\\/]/).pop() ?? 'font.ttf';
       const fileName = `${id}-${base.replace(/[^\w.-]/g, '_')}`;
@@ -317,9 +286,8 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
       };
       const ok = await get().registerFont(entry);
       if (!ok) return null;
-      // Genuine install: the OS copy rides the same bytes (read back
-      // from the app-local file, never the possibly-out-of-scope
-      // source path).
+      // The OS copy reads back from the app-local file — never the
+      // possibly-out-of-scope source path.
       await installToOs(family, [['regular', await readFile(await join(dir, fileName))]]);
       await persistRegistry(get().entries);
       return entry;
@@ -361,8 +329,6 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
       };
       const ok = await get().registerFont(entry);
       if (!ok) throw new Error('face registration failed');
-      // Genuine install: the same faces land in the OS user fonts dir
-      // (system-wide availability); failures degrade to app-local.
       await installToOs(
         family,
         faces
@@ -389,11 +355,9 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
   uninstall: async (id) => {
     const entry = get().entries.find((e) => e.id === id);
     if (!entry || (entry.source !== 'uploaded' && entry.source !== 'catalog')) return;
-    // The warned-set site (styles precedent): if the current document
-    // references the family, its text now renders with the system
-    // substitute — warn ONCE per family per session, never silent.
-    // Here in the STORE (not the dialog) so every uninstall surface
-    // warns identically.
+    // If the current document references the family its text now
+    // renders with the system substitute — warn once, and do it here
+    // (not the dialog) so every uninstall surface warns identically.
     const docJSON = useDocumentStore.getState().editor?.getJSON();
     if (docJSON && JSON.stringify(docJSON).includes(entry.family)) {
       warnFontUnavailable(entry.family);
@@ -417,21 +381,18 @@ export const useFontRegistryStore = create<FontRegistryState>((set, get) => ({
   },
 }));
 
-// ─── Upload staging (dialog-facing) ─────────────────────────────────────
+// ─── Upload staging ─────────────────────────────────────────────────────
 
 export interface StagedUpload {
   sourcePath: string;
   /** Parsed from the sfnt name table (.ttf/.otf); null for .woff2 —
-   *  the filename convention takes over (brotli decompression is not
-   *  free — the receipt that ruled the parser's scope). */
+   *  the filename convention takes over. */
   detectedFamily: string | null;
   /** Filename-derived fallback ('my-font.ttf' → 'My Font'). */
   fallbackName: string;
 }
 
-/** 'my-font.ttf' / 'MyFont.otf' → 'My Font'. Title-cases each word —
- *  the convention only names .woff2 (unparseable) uploads; the sfnt
- *  parser names real TTF/OTFs. */
+/** 'my-font.ttf' / 'MyFont.otf' → 'My Font'. */
 export function filenameToFamily(fileName: string): string {
   const stem = fileName.replace(/[\\/]/g, '/').split('/').pop() ?? '';
   const noExt = stem.replace(/\.(ttf|otf|woff2)$/i, '');
@@ -440,8 +401,8 @@ export function filenameToFamily(fileName: string): string {
   return spaced.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/** Read the picked file's metadata for the confirm dialog (bytes are
- *  re-read at copy time — the file is never referenced in place). */
+/** Read the picked file's metadata for the confirm dialog — bytes are
+ *  re-read at copy time, never referenced in place. */
 export async function detectUploadFamily(sourcePath: string): Promise<StagedUpload> {
   const fallbackName = filenameToFamily(sourcePath);
   try {

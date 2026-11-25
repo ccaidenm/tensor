@@ -4,25 +4,11 @@ import type { PageGeometry, TextMetrics } from '@tensor-editor/engine';
 import { resolveWatermark, type ResolvedImageWatermark } from '@/lib/paginated/watermark';
 
 /**
- * #WATERMARK — the on-screen page overlay: semi-transparent rotated
- * text ("DRAFT") or an image, centered on the sheet, BEHIND all
- * content. Mount order is the whole story: the layer is the FIRST
- * child inside the sheet (above the sheet's own background, below the
- * behind-floats ImageLayer and the text canvases) — behind everything
- * by construction, the paint-order law, no z-index anywhere.
- *
- * THE LAYER CONTRACT (every per-page layer's): pointer-events-none
- * absolute + aria-hidden — it paints only; hit-testing and selection
- * never see it (the selection/hit machinery walks the text canvases,
- * which sit above).
- *
- * DOM, NOT CANVAS (the EquationLayer ruling): rotation is a CSS
- * transform — there is no ctx.rotate anywhere in the codebase, and
- * DOM keeps the watermark crisp at every zoom/DPR for free (it lives
- * inside the scaled stack; no zoom compensation, the zoom law).
- * Pages mode only — a watermark is page-level ink; pageless has no
- * sheets and shows nothing (documented ruling, Word's web-layout
- * divergence noted).
+ * Semi-transparent rotated text/image centered on the sheet, BEHIND all
+ * content by mount order (the sheet's FIRST child, no z-index).
+ * pointer-events-none + aria-hidden: paints only, never hit-tested.
+ * CSS-transform rotation on DOM stays crisp at every zoom/DPR inside
+ * the scaled stack. Pages mode only.
  */
 
 function WatermarkImage({ spec }: { spec: ResolvedImageWatermark }) {

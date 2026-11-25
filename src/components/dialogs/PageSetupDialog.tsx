@@ -40,32 +40,9 @@ import {
 } from '@/lib/editor/sections';
 import { useViewMode } from '@/lib/document/useViewMode';
 
-/**
- * #58 — THE ONE PAGE SETUP DIALOG (the margins dialog grown up, the
- * section properties merged in): paper size (incl. custom), orientation,
- * margins — with an APPLY-TO scope:
- *   • Whole document — every section (one PM transaction + the store).
- *   • This section — the caret's section only (its break's attrs, or
- *     the store for the final one).
- *   • This point forward — inserts a section break at the caret
- *     (seeded with the current section's setup: nothing above changes)
- *     and applies to everything after (Word's spelling).
- *   • The SECTION CHIPS — always visible on a sectioned document;
- *     toggling any chip switches the scope to the chosen set (the
- *     "individual sections" power without a buried dropdown).
- * A UNIFORM document disables the section controls (never hides them —
- * the dialog holds its size); Whole document and This point forward
- * stay live (point-forward is how sectioning begins).
- * Pages cannot own a setup — a page's geometry IS its section's (the
- * engine's law); "this point forward" is the closest spelling to a
- * page-scoped wish.
- *
- * COMMIT-GATED (the margins dialog's law): presets and fields edit a
- * DRAFT; Apply writes EXACTLY ONE commit per scope. The draft re-seeds
- * from the SCOPE'S TARGET whenever the scope buttons change (what you
- * see is what will change); chip toggles do NOT re-seed (the drafted
- * values ride to the newly chosen sections).
- */
+// #58 — the page setup dialog with an apply-to scope. Presets and fields
+// edit a DRAFT; Apply writes exactly one commit per scope. The draft re-seeds
+// from the scope's target on scope change; chip toggles do not.
 
 type MarginKey = keyof Margins;
 
@@ -80,14 +57,10 @@ const SCOPES: Array<{ value: PageSetupScope; label: string }> = [
   { value: 'document', label: 'Whole document' },
   { value: 'section', label: 'Specific section' },
   { value: 'forward', label: 'This point forward' },
-  // #48 — the page-scoped DECOR layer: a page owns its background,
-  // never its geometry (the engine's law) — under this scope only
-  // the bucket stays live.
+  // #48 — a page owns its background, never its geometry: only the bucket stays live.
   { value: 'page', label: 'This page' },
 ];
 
-/** The margin fields' IDENTITY: a letter prefix (T/B/L/R) — no icons
- *  (the user's call); the box must still say which edge it owns. */
 const MARGIN_ICONS: Record<MarginKey, typeof ArrowUpToLine> = {
   top: ArrowUpToLine,
   bottom: ArrowDownToLine,
@@ -101,12 +74,10 @@ interface Draft {
   customWidth: string;
   customHeight: string;
   margins: Record<MarginKey, string>;
-  /** #58 — the TARGET's page background (per-section capable): a
-   *  break-owned section's setup carries its own; unset inherits the
-   *  doc default (the store's — the two-level band model). */
+  /** #58 — the target's page background; unset inherits the doc default. */
   pageColor: string;
-  /** M-FLOW — the DOCUMENT-LEVEL widow/orphan default (absent = ON,
-   * the engine's default; per-paragraph flow overrides). */
+  /** The document-level widow/orphan default (absent = ON;
+   *  per-paragraph flow overrides). */
   widowControl: boolean;
 }
 
@@ -156,7 +127,7 @@ function draftToSetup(draft: Draft, base: PageSetup, unit: MeasurementUnit): Pag
     orientation: draft.orientation,
     margins,
     pageColor: draft.pageColor,
-    // M-FLOW — the doc-level widow/orphan default rides every Apply.
+    // The doc-level widow/orphan default rides every Apply.
     widowControl: draft.widowControl,
     ...custom,
   };
@@ -167,8 +138,7 @@ export function PageSetupDialog() {
   const closePageSetup = useDocumentPropertiesStore((s) => s.closePageSetup);
   const pageSetup = useDocumentStore((s) => s.pageSetup);
   const editor = useDocumentStore((s) => s.editor);
-  // #48 — the page-style layer's target: the caret's page (the
-  // status bar's fact, 1-based) + the live map.
+  // #48 — the page-style layer's target: the caret's page (1-based) + the live map.
   const currentPage = useDocumentStore((s) => s.currentPage);
   const pageStyles = useDocumentStore((s) => s.pageStyles);
   const pageIndex = Math.max(0, currentPage - 1);
@@ -178,12 +148,9 @@ export function PageSetupDialog() {
   const [facts, setFacts] = useState<SectionFacts | null>(null);
   const [target, setTarget] = useState<SectionFacts | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  // THE DIALOG'S MODE TOGGLE (the pageless ruling): Paginated shows the
-  // paper/orientation/scopes machinery; Pageless shows the strip's
-  // fields (margins incl. Full + page background — no paper, no
-  // scopes, no sections). The toggle writes pageSetup.viewMode
-  // INSTANTLY (the View-tab toggle's own law — a mode switch is not a
-  // drafted field); the drafted margins ride across the switch.
+  // The dialog's mode toggle: it writes pageSetup.viewMode instantly
+  // (a mode switch is not a drafted field); the drafted margins ride
+  // across the switch.
   const resolvedMode = useViewMode();
   const setPageSetup = useDocumentStore((s) => s.setPageSetup);
   const [dialogMode, setDialogMode] = useState<'Pages' | 'Pageless'>(resolvedMode);
@@ -194,16 +161,12 @@ export function PageSetupDialog() {
   // The section-START type (Word's "Section start") — how the target
   // section begins. Seeds from the target's boundary on re-scope.
   const [startType, setStartType] = useState<'nextPage' | 'continuous'>('nextPage');
-  // #48 — the page-scoped DECOR layer (derived; the geometry controls
-  // gate on it, the bucket never does).
+  // #48 — the page-scoped decor layer: geometry gates on it, the bucket never does.
   const pageScope = scope === 'page';
-  // The geometry sections GATE on it (never hide — the dialog holds
-  // its size; pointer-events + opacity, the section-scope's disabled
-  // buttons' treatment).
+  // Gated, never hidden — the dialog holds its size.
   const geometryGate = pageScope ? 'pointer-events-none opacity-50' : undefined;
 
-  // OPEN: reset the scope + the chip set (the dialog's fresh start;
-  // a previous session's chip selection must not leak in).
+  // Fresh start on open — a previous session's chip selection must not leak in.
   useEffect(() => {
     if (!isOpen) return;
     setScope('document');
@@ -214,10 +177,8 @@ export function PageSetupDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Re-seed from the SCOPE'S TARGET: the caret's section facts fix the
-  // "Section N of M" caption; the draft reads the scope's target setup.
-  // Chip toggles do NOT re-seed (they only flip the scope — the drafted
-  // values ride to the newly chosen sections).
+  // Re-seed from the scope's target; chip toggles do NOT re-seed — the
+  // drafted values ride to the newly chosen sections.
   useEffect(() => {
     if (!isOpen) return;
     const caretFacts = sectionAtCaret(editor, pageSetup);
@@ -229,10 +190,8 @@ export function PageSetupDialog() {
           : caretFacts;
     setFacts(caretFacts);
     setTarget(targetFacts);
-    // #48 — 'page' seeds the bucket from the PAGE's own override
-    // ('' = inherit the section/doc chain); the modal dialog holds
-    // focus, so the caret can't move while open — seeding once per
-    // scope entry is the whole story.
+    // #48 — 'page' seeds the bucket from the page's own override ('' = inherit).
+    // The modal holds focus, so seeding once per scope entry suffices.
     setDraft(
       snapshot(
         targetFacts.setup,
@@ -242,9 +201,7 @@ export function PageSetupDialog() {
           : (pageSetup.pageColor ?? ''),
       ),
     );
-    // Entering 'section' unhides the chips and AUTO-SELECTS the
-    // section the caret sits in (the user's flow); the other scopes
-    // carry no chip selection.
+    // Entering 'section' auto-selects the caret's section; other scopes clear the chips.
     setSectionSet(scope === 'section' ? [caretFacts.index] : []);
     setStartType(
       targetFacts.startBreakPos != null && editor
@@ -288,11 +245,9 @@ export function PageSetupDialog() {
     );
   }
 
-  /** ONE commit per Apply (the scope's writer — applyPageSetup).
-   *  PAGELESS: the strip reads the STORE's margins (no sections render
-   *  in the continuous flow) — the commit is the store write ONLY, so
-   *  per-section setups ride untouched (a pageless margin edit never
-   *  clobbers a section override the user will see back in paginated). */
+  /** One commit per Apply (applyPageSetup). Pageless writes the store
+   *  ONLY — no sections render in the continuous flow, so per-section
+   *  setups ride untouched. */
   function apply() {
     const full = draftToSetup(draft!, target!.setup, unit);
     if (pagelessDialog) {
@@ -305,8 +260,7 @@ export function PageSetupDialog() {
       closePageSetup();
       return;
     }
-    // #48 — ONE PAGE STYLE: the bucket alone is live under this
-    // scope; '' = CLEAR the entry (back to the section/doc chain).
+    // #48 — only the bucket is live here; '' clears the page's entry.
     if (pageScope) {
       applyPageSetup('page', full, {}, {
         page: { index: pageIndex, background: draft!.pageColor || null },
@@ -335,26 +289,20 @@ export function PageSetupDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) closePageSetup(); }}>
-      {/* WIDER AT ALL TIMES (the two-column layout needs it; the old
-          sm:max-w-sm clipped the sectioned shape). The scroll guard
-          keeps short viewports usable. */}
+      {/* Wide for the two-column layout; the scroll guard keeps short viewports usable. */}
       <DialogContent className="sm:max-w-2xl max-h-[calc(100vh-4rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Page Setup</DialogTitle>
           <DialogDescription>
             {pagelessDialog
-              ? 'Margins and page background for the continuous pageless flow — changes apply when you press Done.'
-              : 'Modify the setup of your document — paper size, orientation, and margins. Changes apply when you press Done and are saved with the document.'}
+              ? 'Margins and page background for the continuous pageless flow.'
+              : 'Modify the setup of your document — paper size, orientation, and margins.'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          {/* LEFT — the LAYOUT MODE TOGGLE (the user's spot: above
-              "Apply to", same stacked-button treatment — the selected
-              mode wears the accent) + the scope (what the draft
-              applies to). PAGELESS: the paginated-only controls below
-              DISABLE (never hide — the dialog holds its size; the
-              ribbon's disabled-but-never-removed law). */}
+          {/* LEFT — layout mode toggle + the scope. Pageless disables the
+              paginated-only controls below (never hides). */}
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Layout mode</span>
@@ -370,8 +318,7 @@ export function PageSetupDialog() {
                       aria-pressed={selected}
                       onClick={() => {
                         setDialogMode(m);
-                        // INSTANT (the View-tab toggle's law): a mode
-                        // switch is not a drafted field.
+                        // Instant — a mode switch is not a drafted field.
                         setPageSetup({ ...pageSetup, viewMode: m === 'Pages' ? 'pages' : 'pageless' });
                       }}
                     >
@@ -393,17 +340,12 @@ export function PageSetupDialog() {
                   </span>
                 ) : null}
               </div>
-              {/* Stacked full-width: three long labels never fit a
-                  half-column on one line — the wrap/clip came free with
-                  flex-1. The SELECTED scope wears the accent (the
-                  group's answer); the others stay gray. */}
+              {/* Stacked full-width — the long labels need the whole half-column. */}
               <div className="flex flex-col gap-1" role="group" aria-label="Apply to">
                 {SCOPES.map((s) => {
-                  // A uniform doc disables the section-only scope;
-                  // PAGELESS disables them ALL (the strip reads the
-                  // store's margins — no sections render in the
-                  // continuous flow). Never hides — the dialog holds
-                  // its size.
+                  // A uniform doc disables the section scope; pageless
+                  // disables all (the strip reads the store's margins —
+                  // no sections in the flow).
                   const disabled = pagelessDialog || (!sectioned && s.value === 'section');
                   const selected = scope === s.value;
                   return (
@@ -423,10 +365,7 @@ export function PageSetupDialog() {
               </div>
             </div>
 
-            {/* THE SECTION STEP — revealed by 'Specific section' (the
-                chips auto-select the caret's section on entry; toggling
-                picks others — the drafted values ride along). The other
-                scopes keep it hidden. */}
+            {/* Shown only under 'Specific section'; the drafted values ride chip toggles. */}
             {scope === 'section' && (
               <div className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-muted-foreground">Section</span>
@@ -437,17 +376,14 @@ export function PageSetupDialog() {
                       <Button
                         key={k}
                         size="sm"
-                        // The accent answers "which sections"; the gray
-                        // chips are the un-chosen ones.
                         variant={chosen ? 'default' : 'secondary'}
                         className="h-7 w-9"
                         aria-pressed={chosen}
                         aria-label={`Section ${k + 1}`}
                         onClick={(e) => {
-                          // The app's modifier (Settings ▸ the trigger
-                          // preference — shift by default): clicking a
-                          // chip with it held selects ONLY that section
-                          // (deselects the rest).
+                          // With the app's select modifier held (Settings
+                          // preference, shift by default), a click selects
+                          // ONLY this section.
                           const trigger = useConfigStore.getState().config.pdfAlwaysAskTrigger;
                           const onlyThis =
                             trigger === 'ctrl' ? e.ctrlKey || e.metaKey : e.shiftKey;
@@ -468,12 +404,10 @@ export function PageSetupDialog() {
               </div>
             )}
 
-            {/* SECTION START — how the target section begins (Word's
-                "Section start"): a fresh page, or flowing on the same
-                one. The type lives on the boundary break BEFORE the
-                section; section 0 starts at the doc start — disabled.
-                'forward' inserts the boundary, so the choice applies
-                to it. #48: gated under the page scope. */}
+            {/* SECTION START — the type lives on the boundary break BEFORE
+                the section; section 0 (doc start) is disabled. 'forward'
+                inserts the boundary, so the choice applies to it.
+                #48: gated under the page scope. */}
             <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Section start</span>
               <span className="text-xs text-muted-foreground">
@@ -489,9 +423,7 @@ export function PageSetupDialog() {
                     <Button
                       key={o.value}
                       size="sm"
-                      // Muted gray when selected (the settings
-                      // toggles' treatment) — the START of a section
-                      // is a state, not the dialog's answer.
+                      // Muted gray when selected — a state, not the dialog's answer.
                       variant={startType === o.value ? 'secondary' : 'ghost'}
                       disabled={disabled}
                       className="h-7 flex-1"
@@ -511,18 +443,11 @@ export function PageSetupDialog() {
             </div>
           </div>
 
-          {/* RIGHT — the setup itself. PAGELESS: the paginated-only
-              controls DISABLE (never hide — the dialog holds its size);
-              the page background bucket and margins stay live. */}
+          {/* RIGHT — the setup. Pageless disables the paginated-only controls (never hides). */}
           <div className="flex flex-col gap-4">
-            {/* #48 — PAPER, one section: the size dropdown SPANS the
-                row, the background bucket stands alone at the far
-                right (tooltips on both; the old two-column "Background"
-                heading retired). The bucket edits the DRAFT; Done
-                applies it per the scope — the PAGE scope keeps ONLY
-                the bucket live (a page owns its background, never its
-                geometry — the engine's law). PAGELESS: the bucket alone
-                (the continuous flow has no paper). */}
+            {/* #48 — the bucket edits the DRAFT; Done applies it per the
+                scope. Page scope: only the bucket is live (a page owns its
+                background, never its geometry). Pageless: the bucket alone. */}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Paper</span>
               <div className="flex items-center gap-2">
@@ -532,10 +457,9 @@ export function PageSetupDialog() {
                 onValueChange={(value) => {
                   if (value == null) return;
                   if (value === 'custom') {
-                    // The SHARED custom-size dialog (the ribbon's
-                    // surface) opens in DRAFT mode: Done hands the pick
-                    // back into THIS draft (the scope decides where it
-                    // lands); Cancel changes nothing.
+                    // The shared custom-size dialog opens in DRAFT mode:
+                    // Done hands the pick back into this draft; Cancel
+                    // changes nothing.
                     useDocumentPropertiesStore.getState().openCustomSize({
                       seed: {
                         pageSize: draft.pageSize,
@@ -574,8 +498,7 @@ export function PageSetupDialog() {
                   <TooltipContent>Paper size</TooltipContent>
                 </Tooltip>
                 <SelectContent>
-                  {/* w-(--anchor-width) — the popup matches the trigger
-                      (the w-64 override read as an 80%-wide box). */}
+                  {/* w-(--anchor-width) — the popup matches the trigger width. */}
                   {Object.entries(PAGE_SIZES).map(([key, preset]) => (
                     <SelectItem key={key} value={key}>
                       {key} <span className="text-muted-foreground">({preset.inches})</span>
@@ -597,10 +520,7 @@ export function PageSetupDialog() {
               </div>
             </div>
 
-            {/* Orientation — a heading with the options below (the
-                dialog's own rhythm), the page glyphs aiding the scan.
-                #48: gated under the page scope. PAGELESS: DISABLED —
-                no sheets to orient. */}
+            {/* Orientation. #48: gated under the page scope; pageless disables it. */}
             <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Orientation</span>
               <div className="flex gap-1">
@@ -609,8 +529,7 @@ export function PageSetupDialog() {
                     key={o}
                     size="sm"
                     disabled={pagelessDialog}
-                    // Muted gray when selected (the settings toggles'
-                    // treatment) — never the accent.
+                    // Muted gray when selected, never the accent.
                     variant={draft.orientation === o ? 'secondary' : 'ghost'}
                     className="h-7 flex-1"
                     aria-pressed={draft.orientation === o}
@@ -622,11 +541,8 @@ export function PageSetupDialog() {
               </div>
             </div>
 
-            {/* M-FLOW — the document-level widow/orphan default (Word's
-                layout option; off = natural splits everywhere a
-                paragraph doesn't carry its own override). #48: gated
-                under the page scope. PAGELESS: DISABLED — the strip is
-                one continuous flow (the engine's pagination option). */}
+            {/* The document-level widow/orphan default. #48: gated under
+                the page scope; pageless disables it — one continuous flow. */}
             <div className={cn('flex items-center justify-between gap-2', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Widow/orphan control</span>
               <Switch
@@ -640,17 +556,12 @@ export function PageSetupDialog() {
               />
             </div>
 
-            {/* Margins — the CUSTOM row first (one ticker per edge,
-                icon + unit inside), the presets under it as human
-                one-liners ("1\" vertical, 0.75\" horizontal"). #48:
-                gated under the page scope. */}
+            {/* Margins — custom row first, presets under it. #48: gated under page scope. */}
             <div className={cn('flex flex-col gap-1', geometryGate)}>
               <span className="text-xs font-medium text-muted-foreground">Margins</span>
-              {/* ONE TooltipProvider for the ROW — base-ui's grouping
-                  shows the ADJACENT field's tooltip instantly (the
-                  400ms carry window), so hovering straight across the
-                  four never re-waits. Each field keeps its own tooltip
-                  ("Top margin"…). */}
+              {/* One TooltipProvider for the row — grouping shows the adjacent
+                  field's tooltip instantly, so hovering across the four
+                  never re-waits. */}
               <TooltipProvider delay={300} closeDelay={0}>
                 <div className="flex items-end justify-between gap-1.5">
                   {MARGIN_FIELDS.map(({ key, label }) => {

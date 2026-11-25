@@ -4,16 +4,9 @@ import { IconButton } from '../../IconButton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 /**
- * #58 — the Section Break insert (Word's Insert ▸ Section Breaks):
- * the type IS the choice —
- *   • Next Page: the following section starts on a fresh page (the
- *     default; the page-break look).
- *   • Continuous (same page): the sections share the page — the
- *     engine flows them together when their geometry is identical and
- *     upgrades to a page start when it differs (Word's documented law).
- * The split-dance command seeds the new break with the store's
- * pageSetup (the honest default: inserting changes nothing visually
- * until the user edits the new section's props in Page Setup).
+ * #58 — the Section Break insert. Continuous sections share the page,
+ * upgrading to a page start when geometry differs; the command seeds
+ * the new break with the store's pageSetup (insert changes nothing visually).
  */
 export function SectionBreakButton({ editor }: { editor: Editor }) {
   return (

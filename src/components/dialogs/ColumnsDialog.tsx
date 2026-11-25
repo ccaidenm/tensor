@@ -34,33 +34,9 @@ import {
   type SectionFacts,
 } from '@/lib/editor/sections';
 
-/**
- * #74 COLUMNS — THE ONE COLUMNS DIALOG ("More Columns…", the Page
- * Setup dialog's twin): the newsletter-style column spec with an
- * APPLY-TO scope reusing the exact machinery —
- *   • Whole document — every section (one PM transaction + the store).
- *   • This section — the caret's section only (chips; the final
- *     section rides the store).
- *   • This point forward — inserts a section break at the caret
- *     (seeded with the current section's setup) and applies after.
- * There is deliberately NO page scope: columns are GEOMETRY (the
- * engine's one-geometry-per-page law — a section's), never page decor.
- *
- * COMMIT-GATED (the margins dialog's law): presets and fields edit a
- * DRAFT; Done writes EXACTLY ONE commit per scope. The draft re-seeds
- * from the scope's target whenever the scope changes.
- *
- * THE WIDTH MODEL: the setup stores ABSOLUTE per-column widths in pt
- * (the store's canonical-unit law) which the engine consumes as
- * RELATIVE weights; "Equal column width" checked = no widths array
- * (equal split). The dialog shows the EFFECTIVE widths (each
- * column's share of the post-gap space) so the numbers mean what the
- * page shows — Word's dialog posture.
- *
- * The engine validates loudly at layout (integer count ≥ 1, a gap the
- * content box can divide) — the dialog's Done gate is a soft guard,
- * the engine the backstop.
- */
+// #74 — the columns dialog. No page scope: columns are per-section geometry.
+// Widths are stored absolute (pt) but consumed as relative weights; equal
+// means no widths array. Done writes exactly one commit per scope.
 
 const SCOPES: Array<{ value: PageSetupScope; label: string }> = [
   { value: 'document', label: 'Whole document' },
@@ -154,11 +130,11 @@ function snapshot(setup: PageSetup, unit: MeasurementUnit): Draft {
   };
 }
 
-/** The draft → the setup's columns spelling (null = one column).
- *  Invalid fields keep the target's values (the margins law). */
+/** The draft → the columns spec (null = one column). Invalid fields
+ *  keep the target's values. */
 function draftToColumns(draft: Draft, base: PageSetup, unit: MeasurementUnit): ColumnSetup | null {
   if (draft.count < 1) return base.columns ?? null;
-  if (draft.count === 1) return null; // One column ≡ no spec (the additive law)
+  if (draft.count === 1) return null; // one column ≡ no spec
   const gapPt = parseUnitToPt(draft.gap, unit, { allowZero: true });
   const columns: ColumnSetup = {
     count: draft.count,
@@ -172,8 +148,8 @@ function draftToColumns(draft: Draft, base: PageSetup, unit: MeasurementUnit): C
     if (widths.length === draft.count && widths.every((w) => w > 0)) {
       columns.widths = widths;
     }
-    // A widths parse failure falls back to equal (the engine's
-    // validation stays the loud backstop for impossible geometry).
+    // A widths parse failure falls back to equal; the engine's layout-time
+    // validation is the backstop for impossible geometry.
   }
   return columns;
 }
@@ -197,8 +173,8 @@ export function ColumnsDialog() {
     setSectionSet([]);
   }, [isOpen]);
 
-  // Re-seed from the SCOPE'S TARGET (the Page Setup dialog's law —
-  // what you see is what will change; chip toggles do not re-seed).
+  // Re-seed from the scope's target — what you see is what will change;
+  // chip toggles do not re-seed.
   useEffect(() => {
     if (!isOpen) return;
     const caretFacts = sectionAtCaret(editor, pageSetup);
@@ -225,9 +201,8 @@ export function ColumnsDialog() {
 
   const suffix = MEASUREMENT_UNITS[unit].suffix;
   const sectioned = facts.total > 1;
-  // The target's content box in POINTS (the store's canonical unit —
-  // the widths/gap the dialog speaks are pt at rest; toLayoutOptions
-  // returns the engine's px frame, converted here).
+  // The target's content box in pt — toLayoutOptions returns the engine's
+  // px frame, converted here.
   const contentPt = (() => {
     const lo = toLayoutOptions(target.setup);
     return pxToPt(lo.page.width - lo.margins.left - lo.margins.right);
@@ -241,9 +216,9 @@ export function ColumnsDialog() {
         ? {
             ...d,
             count,
-            // Grow/shrink the per-column widths with the count (equal
-            // shares of the post-gap space at the CURRENT gap) — the
-            // unequal editor always shows count fields.
+            // Grow/shrink the per-column widths with the count (equal shares
+            // of the post-gap space) — the unequal editor always shows
+            // count fields.
             widths: Array.from({ length: count }, (_, i) => {
               const parsed = parseUnitToPt(d.widths[i] ?? '', unit, { allowZero: false });
               return formatPt(
@@ -274,12 +249,12 @@ export function ColumnsDialog() {
     );
   }
 
-  /** ONE commit per Done (the scope's writer — applyPageSetup). */
+  /** One commit per Done, via applyPageSetup. */
   function apply() {
     const columns = draftToColumns(draft!, target!.setup, unit);
     const full: PageSetup = { ...target!.setup, columns };
-    // The PARTIAL rides the merge machinery: null clears (one column),
-    // a spec merges into the target's setup(s) + the store.
+    // The partial rides the merge machinery: null clears (one column),
+    // a spec merges into the target's setups + the store.
     const partial: Partial<PageSetup> = { columns };
     applyPageSetup(scope === 'section' && sectionSet.length === 0 ? 'document' : scope, full, partial, {
       sectionSet,
@@ -293,8 +268,7 @@ export function ColumnsDialog() {
         <DialogHeader>
           <DialogTitle>Columns</DialogTitle>
           <DialogDescription>
-            Flow text in multiple columns. Changes apply when you press Done and are saved with
-            the document.
+            Flow text in multiple columns.
           </DialogDescription>
         </DialogHeader>
 
@@ -365,8 +339,7 @@ export function ColumnsDialog() {
               </div>
             )}
 
-            {/* THE PREVIEW: the draft's column diagram over the target's
-                content box (Word's dialog draws one; divs suffice). */}
+            {/* The draft's column diagram over the target's content box. */}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Preview</span>
               <div
@@ -386,7 +359,7 @@ export function ColumnsDialog() {
                   return widths.map((w, i) => (
                     <div
                       key={i}
-                      className="h-full rounded-[2px] bg-primary/25"
+                      className="h-full rounded-xs bg-primary/25"
                       style={{
                         flexGrow: w / total,
                         marginRight: i < draft.count - 1 ? `${gapPx}px` : 0,
@@ -400,9 +373,6 @@ export function ColumnsDialog() {
 
           {/* RIGHT — the spec itself. */}
           <div className="flex flex-col gap-4">
-            {/* The preset row (Word's): One/Two/Three/Left/Right — the
-                picked preset drafts count + widths; Done applies per
-                the scope. */}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted-foreground">Presets</span>
               <div className="grid grid-cols-5 gap-1" role="group" aria-label="Column presets">
@@ -464,8 +434,6 @@ export function ColumnsDialog() {
               />
             </div>
 
-            {/* Word's checkbox: equal widths (checked) or per-column
-                width + spacing fields (unchecked). */}
             <label className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
               <span>Equal column width</span>
               <Checkbox

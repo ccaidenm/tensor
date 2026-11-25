@@ -3,36 +3,9 @@ import { catalogFetchBytes, catalogFetchText } from './http';
 import { normalizeFamilyKey } from './normalize';
 
 /**
- * Fontsource adapter — RE-PRICED as browsed catalog #3 (the M-FONTS-B
- * amendment replacing A's INSTALL-ONLY ruling): the tarball concern
- * dissolved once the jsDelivr file CDN is the download path.
- *
- * METADATA (receipt, fetched via the app's reqwest path):
- *   https://api.fontsource.org/v1/fonts — HTTP 200 application/json,
- *   538,887 bytes, an array of 2,100 entries:
- *   {"id":"42dot-sans","family":"42dot Sans","subsets":["korean","latin"],
- *    "weights":[300,400,...],"styles":["normal"],"defSubset":"latin",
- *    "variable":true,"lastModified":"2025-06-02","category":"sans-serif",
- *    "license":"OFL-1.1","type":"google"}
- * Boot prefetch when the toggle is ON — the Google-metadata consent
- * pattern, verbatim (session cache, client-side search + dedupe).
- *
- * FILES (receipt, same path): direct CDN URLs return real bytes —
- *   https://cdn.jsdelivr.net/npm/@fontsource/roboto/files/
- *   roboto-latin-400-normal.woff2 → HTTP 200 font/woff2, 21,884
- *   bytes, verified WOFF2. No tarball parsing, no new Rust command.
- *   Variable families ship as @fontsource-variable/<id>/files/
- *   <id>-latin-wght-normal.woff2 — mapping to A's FontEntry.variable.
- *
- * COVERAGE NOTE (the badge tooltip + issue-comment wording): most
- * Fontsource families dedupe against Google (two chips — harmless by
- * design); the adapter's value is the ~120 uniques Google doesn't
- * carry. Geist — Tensor's own bundled UI font — is the existence
- * proof and the continuity: A's bundled catalog ships via Fontsource
- * already.
- *
- * ISOLATION: jsDelivr/npm failures degrade to "source unavailable"
- * per the adapter-isolation rule — same posture as any third party.
+ * Fontsource: metadata = api.fontsource.org/v1/fonts (boot prefetch,
+ * session cache, client-side search); files = direct jsDelivr CDN URLs
+ * (cdn.jsdelivr.net/npm/@fontsource[/-variable]/<id>/files/…woff2).
  */
 
 const METADATA_URL = 'https://api.fontsource.org/v1/fonts';
@@ -69,19 +42,18 @@ export async function ensureFontsourceMetadata(): Promise<FontsourceFont[]> {
   }
 }
 
-/** The jsDelivr URL for one face — the receipt-verified pattern. */
+/** The jsDelivr URL for one face. */
 export function fontsourceFileUrl(font: FontsourceFont, weight: number, style: 'normal' | 'italic'): string {
   const scope = font.variable ? '@fontsource-variable' : '@fontsource';
-  // Variable packages carry the wght AXIS in the filename, not a
-  // weight (verified against the installed @fontsource-variable/geist
-  // package's own files: geist-latin-wght-normal.woff2).
+  // Variable packages carry the wght axis in the filename, not a
+  // weight (e.g. geist-latin-wght-normal.woff2).
   const weightOrAxis = font.variable ? 'wght' : String(weight);
   return `${CDN_BASE}/${scope}/${font.id}/files/${font.id}-${font.defSubset}-${weightOrAxis}-${style}.woff2`;
 }
 
 function toCatalogFont(f: FontsourceFont): CatalogFont {
-  // M-FONTS-B.1: slots built from the DECLARED weights/styles arrays
-  // — never the fixed 400/700 template.
+  // Slots built from the declared weights/styles arrays, never a
+  // fixed template.
   const declared = f.weights.flatMap((weight) =>
     f.styles.map((style) => ({ weight, style: style as 'normal' | 'italic' })),
   );
@@ -130,8 +102,8 @@ export function createFontsourceSource(): CatalogSource {
 
     async previewBytes(entry) {
       const font = entry.ref as FontsourceFont;
-      // The DECLARED regular slot (a family without 400 — or with a
-      // different only-weight — previews its real face).
+      // The declared regular slot — a family without 400 previews its
+      // real face.
       const weight = entry.slots?.regular ?? font.weights[0] ?? 400;
       return catalogFetchBytes(fontsourceFileUrl(font, weight, 'normal'));
     },
@@ -139,13 +111,13 @@ export function createFontsourceSource(): CatalogSource {
     async download(entry) {
       const font = entry.ref as FontsourceFont;
       const slots = entry.slots ?? pickSlots(font.weights.flatMap((weight) => font.styles.map((style) => ({ weight, style: style as 'normal' | 'italic' }))));
-      // The DECLARED regular slot — never a fixed 400 (M-FONTS-B.1).
+      // The declared regular slot — never a fixed 400.
       const files: CatalogDownload['files'] = {
         regular: await catalogFetchBytes(fontsourceFileUrl(font, slots.regular ?? font.weights[0] ?? 400, 'normal')),
       };
       // A variable family installs as ONE variable face (the wght
-      // axis covers bold — A's two-worlds rule); static families get
-      // exactly the slot faces they declare.
+      // axis covers bold); static families get exactly the slot
+      // faces they declare.
       if (font.variable) {
         if (slots.italic != null) {
           files.italic = await catalogFetchBytes(fontsourceFileUrl(font, slots.italic, 'italic'));
@@ -168,8 +140,7 @@ export function createFontsourceSource(): CatalogSource {
   };
 }
 
-/** TEST SEAM: drop the session metadata cache (isolation between
- *  tests; never called by app code). */
+/** Test seam: drop the session metadata cache (never called by app code). */
 export function resetForTests(): void {
   metadataCache = null;
   metadataPromise = null;

@@ -9,12 +9,8 @@ export interface FloatingToolbarPosition {
   bottom: number;
   placement: 'above' | 'below';
   /** Visual clearance (px) between the anchor edge and the toolbar —
-   *  applied ONCE (the translateY). M-IMAGES-1.5.5: the paginated
-   *  path used to subtract EDGE_PAD and translate by 8px again — a
-   *  double-clearance that made the text toolbar float too tall above
-   *  the selection. The calculation now differs by KIND: text uses the
-   *  room-checked placement with the tight gap; images force above
-   *  their top edge with the same rhythm. */
+   *  applied ONCE (the translateY). Text uses the room-checked
+   *  placement with the tight gap; images force above their top edge. */
   gap: number;
 }
 
@@ -22,11 +18,9 @@ const TOOLBAR_HEIGHT_ESTIMATE = 44;
 const VIEWPORT_EDGE_PADDING = 8;
 
 /**
- * M-TABLES: the cell element under the (collapsed) caret, or null.
- * Used to anchor the toolbar when the caret parks inside a table with
- * an empty selection — collapsed text rects are zero-width, so the
- * CELL's rendered box is the honest anchor (pageless surface only;
- * the paginated view computes its own positions from painted rects).
+ * The cell element under the (collapsed) caret, or null — collapsed
+ * text rects are zero-width, so the CELL's rendered box is the honest
+ * anchor (pageless only; the paginated view computes its own).
  */
 function caretTableCellElement(ed: Editor): HTMLElement | null {
   try {
@@ -54,9 +48,9 @@ export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
       const { state } = currentEditor;
       const { empty } = state.selection;
 
-      // M-EQ: an equation NodeSelection shows NO floating toolbar — the
-      // editor bubble is the equation's toolbar (it opens on the same
-      // selection; a text-format strip over an atom is noise).
+      // An equation NodeSelection shows NO floating toolbar — the
+      // editor bubble is the equation's toolbar (a text-format strip
+      // over an atom is noise).
       if (
         state.selection instanceof NodeSelection &&
         state.selection.node.type.name === 'equation'
@@ -88,15 +82,9 @@ export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
         return;
       }
 
-      // Use the real DOM selection's rendered geometry rather than
-      // coordsAtPos, which has proven unreliable specifically at line-start/
-      // soft-wrap boundaries (confirmed via direct measurement earlier).
-      // Also checked against the page-break coordsAtPos/posAtCoords
-      // discontinuity audit (see breakBoundaryCorrection.ts): this file has
-      // zero coordsAtPos/posAtCoords calls, so it can't hit that
-      // discontinuity directly - a "toolbar on the wrong line" symptom seen
-      // near a page break was traced to a since-fixed bug corrupting the DOM
-      // this file's getClientRects() measures, not a bug in this file.
+      // The real DOM selection's rendered geometry, not coordsAtPos —
+      // coordsAtPos is unreliable at line-start/soft-wrap boundaries
+      // (confirmed via direct measurement).
       const domSelection = window.getSelection();
       if (!domSelection || domSelection.rangeCount === 0) return;
 
@@ -138,11 +126,9 @@ export function useFloatingToolbar(editor: Editor | null, enabled: boolean) {
     }
 
     function handleSelectionUpdate() {
-      // While actively dragging, do NOT reposition — this is what caused
-      // both the erratic jumping and the interference with the browser's
-      // own drag-selection tracking when the mouse passed over the toolbar.
-      // Also covers non-mouse selection changes (keyboard selection via
-      // Shift+arrows), which should still update immediately.
+      // While actively dragging, do NOT reposition (it caused erratic
+      // jumping and interfered with the browser's drag-selection
+      // tracking); keyboard selection changes still update immediately.
       if (isDragging.current) return;
       computeAndSetPosition();
     }

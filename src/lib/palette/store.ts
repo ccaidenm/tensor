@@ -3,11 +3,9 @@ import { useDocumentStore } from '@/lib/document/store';
 
 interface PaletteStore {
   isOpen: boolean;
-  /** Whether the editor had focus at open time. Editor-context
-   *  commands surface only for such invocations; on close, focus is
-   *  returned to the editor (selection untouched — the palette is
-   *  overlay chrome and never writes PM state, so the caret comes
-   *  back exactly where it was). */
+  /** Whether the editor had focus at open time. Editor-context commands
+   *  surface only then; on close, focus returns to the editor (the
+   *  palette never writes PM state — the caret comes back where it was). */
   editorContext: boolean;
   open: () => void;
   close: () => void;
@@ -28,10 +26,8 @@ export const usePaletteStore = create<PaletteStore>((set, get) => ({
     const { editorContext } = get();
     set({ isOpen: false, editorContext: false });
     if (editorContext) {
-      // Deferred past the dialog's unmount (its own focus-restore runs
-      // in the same React commit and would otherwise win). The PM
-      // selection was never touched — focus() brings the caret back
-      // exactly where it was.
+      // Deferred past the dialog's unmount — its own focus-restore runs
+      // in the same React commit and would otherwise win.
       setTimeout(() => {
         useDocumentStore.getState().editor?.commands.focus();
       }, 0);

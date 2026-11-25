@@ -21,17 +21,15 @@ import { builtinDefinitionsById } from '@/lib/styles/builtins';
 import { lookupStyle } from '@/lib/styles/registry';
 import { normalizeTabStops } from '@/lib/editor/ParagraphExtensions';
 import { FINAL_SECTION_ID, regionOf, type HeaderFooterVariant } from '@/lib/editor/HeaderFooterNodes';
-// M-REFS: the collection scan — the referenceTable node's entries are
-// real paragraphs the GENERATOR maintains (the container model); the
-// adapter joins them to their navigation targets through the same
-// memoized one-walk scan every consumer shares.
+// The referenceTable's entries are real paragraphs the generator
+// maintains; the adapter joins them to targets via the shared scan.
 import {
   entriesForKind,
   scanCollections,
   type CollectionScan,
   type ReferenceKind,
 } from '@/lib/references/scan';
-// M-REFS: the two-pass resolver's map type (referencePages.ts).
+// The two-pass resolver's map type (referencePages.ts).
 import type { ReferencePagesMap } from './referencePages';
 import {
   baselineRunStyle,
@@ -45,52 +43,20 @@ import {
 export type { TextAlign } from './positionMap';
 
 /**
- * PM doc -> engine SemanticDoc. Pure conversion, no
- * measurement, no DOM reads (L1: the engine computes, never paints; the
- * shell paints, never computes — this is the shell->engine handoff).
+ * PM doc -> engine SemanticDoc: pure conversion, no measurement, no
+ * DOM reads (L1 — the engine computes, the shell paints; this is the
+ * shell->engine handoff). Unsupported kinds throw
+ * UnsupportedDocError — the ONLY class the PaginatedView fallback
+ * catches; everything else crashes loudly in dev.
  *
- * FULL EXISTING-BLOCK PARITY (M6.1): every block kind the schema can
- * hold projects into engine Blocks:
- *   - bulletList/orderedList recurse: each listItem's inner paragraph
- *     becomes a paragraph block with indentLeft = depth × 32 (px) and
- *     a paint-only listMarker hint (ordered index computed per-list —
- *     sibling deletion reindexes the remainder).
- *   - blockquote bodies project as paragraph blocks with indentLeft 32
- *     and a paint-only blockquote hint.
- *   - codeBlock projects onto the engine's codeBlock kind (source-line
- *     semantics in the engine's breaker), runs mapped per source line,
- *     monospace @ the document-default size (the pageless <pre> look).
- *   - horizontalRule projects as a single-line paragraph block with a
- *     rule paint hint — one LineBox, never fragments.
- *   - equation (M-EQ) projects onto the engine's equation kind: latex
- *     is the node's ONLY document data; dims are NOT sent — they are
- *     derived facts the engine asks the EquationMetrics PORT for at
- *     layout time (the adapter is pure and cannot measure — L1).
- *     fontSize is the resolved document-default run size (`base` — the
- *     same derivation every paragraph run carries).
- * Remaining kinds throw UnsupportedDocError — ONLY the true future
- * features (table, image, drawing). The PaginatedView's fallback
- * catches ONLY that sentinel; everything else crashes loudly in dev
- * (CONVENTIONS.md, the fallback audit).
- *
- * The pageBreak node is NOT part of the IR: it becomes
- * `flow.breakBefore: 'page'` on the FOLLOWING in-flow block (the
- * forced-break spelling the engine's structural tier consumes —
- * engine/src/types.ts FlowPolicy). M-FLOW: paragraphs and headings
- * now carry their OWN flow attrs too (keepNext/keepLines/
- * keepPrevious/widowControl/breakBefore/breakAfter), resolved
- * attr-over-style through resolveFlowTier and merged with the
- * pageBreak stamp; the image keepNext caption bond rides the same
- * field. A pending break passes THROUGH a floated block (floats
- * carry no flow — validateFloatFlow's law).
+ * The pageBreak node is not part of the IR: it becomes
+ * flow.breakBefore: 'page' on the following in-flow block (floated
+ * blocks pass it through — validateFloatFlow refuses flow on floats).
+ * Paragraphs and headings carry their own flow attrs, resolved
+ * attr-over-style through resolveFlowTier and merged with the stamp.
  */
 
-/**
- * The unsupported-kind sentinel. The pageless fallback catches ONLY
- * this class (CONVENTIONS.md): a document using a node the projection
- * does not support yet degrades gracefully — a real adapter/engine bug
- * is a different exception and must crash loudly in dev.
- */
+/** The unsupported-kind sentinel; the fallback catches ONLY this class. */
 /** #58 — the defensive page-setup fallback (a caller that skips the
  *  pageSetup arg; the real callers pass the store's per-call read). */
 const FALLBACK_PAGE_SETUP: PageSetup = {
@@ -118,13 +84,10 @@ export interface ListMarkerHint {
 }
 
 /**
- * SHELL-SIDE PAINT HINTS, attached to semantic blocks AND mirrored on
- * AdapterBlock.paint. The ENGINE IGNORES THEM: hashBlock stringifies
- * only {kind, runs, flow, spaceBefore, spaceAfter} and the walk never
- * reads them — they are paint facts. Consequence (deliberate): an
- * ordered reindex produces a NEW Block object with an UNCHANGED hash,
- * so the engine's splice keeps the cached placement — markers are ink,
- * never re-flow.
+ * Shell-side paint hints, mirrored on AdapterBlock.paint. hashBlock
+ * never sees them, so an ordered reindex produces a new Block object
+ * with an unchanged hash — the cached placement survives; markers
+ * are ink, never re-flow.
  */
 export interface BlockPaint {
   marker?: ListMarkerHint;
@@ -133,15 +96,10 @@ export interface BlockPaint {
   /** codeBlock backgrounds (the kind's paint face — carried here so the
    * painter stays hint-driven, one extras field for all block decor). */
   code?: boolean;
-  /** M-IMAGES-1: a styleId 'caption' paragraph — the DISPLAY toggle's
-   *  paint-side hook (document-derived fact; config stays out of the
-   *  projection). */
+  /** A styleId 'caption' paragraph — the display toggle's paint hook. */
   caption?: boolean;
-  /** M-REFS: a reference table block — the GDocs-style FIELD BORDER
-   * (a light gray rounded box around the block's per-page fragment,
-   * drawn by paintLines as pure ink; layout never reads it). (The
-   * leader toggle lives in the MODEL — the generator's refLeader
-   * span — not a paint hint: the dots are real runs now.) */
+  /** A reference-table block — the field border is pure paint ink;
+   *  the leader dots are real runs in the model, not a hint. */
   reference?: boolean;
 }
 
@@ -173,43 +131,29 @@ export interface AdapterBlock {
    * layout math never sees. */
   runDecor: RunDecor[];
   /**
-   * M-TABLES — present IFF this block is a table: the CELL-PARAGRAPH
-   * map, the PM↔table-text offset bridge. The table's runs/text are
-   * the CANONICAL concatenation (rows top-down, cells left-to-right,
-   * paragraphs in order); each entry names one cell paragraph's text:
-   * `relStart` = the paragraph's first text position relative to the
-   * TABLE node (pmStart = block.from + relStart), `textStart`/`textLen`
-   * = the paragraph's slice of the block text. The slices tile the
-   * block text exactly (no gaps) — PM's table cells are isolating, so
-   * every text selection lives inside one slice.
+   * Present IFF a table: the cell-paragraph map, the PM↔table-text
+   * offset bridge. Runs/text are the canonical concatenation (rows
+   * top-down, cells left-to-right); the slices tile the block text
+   * exactly, so every text selection lives inside one slice.
    */
   table?: { paragraphs: { relStart: number; textStart: number; textLen: number }[] };
   /**
-   * M-REFS — present IFF this block is a referenceTable: the
-   * ENTRY map, the hit-offset → navigation-target bridge (the
-   * table.paragraphs precedent). The block's runs/text are the
-   * entries' CANONICAL concatenation (entry text, then the tab +
-   * page-number runs when pages are resolved); each sidecar entry
-   * names one collection entry's text slice + its PM navigation
-   * targets (toc/figures: exactly one; index: one per occurrence).
-   * The placeholder (empty collection) carries ONE entry with ZERO
-   * targets — visible, never navigable.
+   * Present IFF a referenceTable: the entry map, the hit-offset →
+   * navigation-target bridge. Each sidecar entry names one entry's
+   * text slice + its PM targets (toc/figures: one; index: one per
+   * occurrence); the placeholder carries one target-less entry.
    */
   reference?: ReferenceSidecar;
 }
 
 /** One reference-table sidecar entry — see AdapterBlock.reference. */
 export interface ReferenceSidecarEntry {
-  /** The entry paragraph's PM position RELATIVE to the container node
-   *  (its text starts at relStart; pmStart = block.from + relStart) —
-   *  the caret/selection bridge into REAL entry text (the table
-   *  cell-map's shape, minus the grid). */
+  /** The paragraph's PM position relative to the container (pmStart =
+   *  block.from + relStart) — the caret bridge into real entry text. */
   relStart: number;
   /**
-   * M-REFS-8 — the LEADER SPAN's text length at this row's tail (the
-   * refLeader-marked dots; 0 = no leader). The PAINTER's tag: the
-   * gap-filling dots (extra ink at the leader run's own measured
-   * style) are drawn after the span's text, up to the page number —
+   * The leader span's text length at the row's tail (0 = none). The
+   * painter extends the dots with extra ink up to the page number —
    * never layout, never the block-text contract. */
   leaderLen: number;
   /** The child's REAL text slice of the canonical block text (the
@@ -225,10 +169,8 @@ export interface ReferenceSidecar {
   entries: ReferenceSidecarEntry[];
 }
 
-/** The sidecar entry whose text slice contains `offset` (the slices
- * tile the block text; binary search on textStart). Null when the
- * offset falls between slices — never happens today (no separators),
- * kept honest for the number-run layout. */
+/** The entry whose text slice contains `offset` (binary search on
+ * textStart); null between slices — never happens today. */
 export function referenceEntryAt(
   ref: ReferenceSidecar,
   offset: number
@@ -258,33 +200,23 @@ export interface AdapterResult {
   doc: SemanticDoc;
   blocks: AdapterBlock[];
   /**
-   * M-HEADER-FOOTER-2 — the BAND blocks (header/footer children), in
-   * document order. The SAME adapter objects ride `blocks` (they hold
-   * real PM positions — the paint/caret/hit-test sidecar's binary
-   * search needs them, and the walk emits them in `from` order); this
-   * sidecar carries the band MEMBERSHIP (muted ink, band hit-test
-   * routing, band-boundary selection clamps).
+   * Band blocks (header/footer children) in document order. The same
+   * objects ride `blocks` (they hold real PM positions); this sidecar
+   * carries the band membership.
    */
   bandBlocks: AdapterBlock[];
-  /** M-HEADER-FOOTER-2 — block ids that belong to bands (the set form). */
+  /** Block ids that belong to bands. */
   bandBlockIds: Set<string>;
   /**
-   * #58 SECTIONS — the resolved section-boundary table for the engine
-   * (LayoutOptions.sections). ABSENT when the doc carries no
-   * sectionBreak nodes (the additive law: the engine then runs ONE
-   * section of the layout opts — today's shape exactly). Each
-   * boundary is a SECTION START: afterBlock −1 carries section 0's
-   * geometry (the FIRST break's attrs — Word's preceding-section
-   * spelling resolved forward), each following boundary the NEXT
-   * break's attrs, and the implicit final section rides the layout
-   * opts (the doc defaults — the engine appends it).
+   * #58 — the resolved section-boundary table; absent when the doc
+   * has no sectionBreak nodes. Each boundary is a section START
+   * (afterBlock −1 = the doc start); the final section rides the
+   * layout opts.
    */
   sections?: SectionBoundary[];
   /**
-   * #58 — the NPC sidecar (formatting marks): every break atom with
-   * the block following it. VIEW-ONLY ink (the PaginatedView paints
-   * the badges when formatting marks are shown); the print/PDF walks
-   * never read it — markers never print.
+   * #58 — the NPC sidecar: every break atom with the block following
+   * it. View-only ink; markers never print.
    */
   breakFacts: {
     kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
@@ -294,31 +226,17 @@ export interface AdapterResult {
   }[];
 }
 
-/**
- * The default registry for call sites that predate M-STYLES: the code
- * builtins alone. Heading levels resolve through their built-in
- * definitions (the old HEADING_DEFAULTS values, verbatim) and
- * paragraphs carry styleId 'normal' (no properties) — behavior
- * identical to the pre-registry adapter.
- */
+/** Builtins only — identical to the pre-registry adapter. */
 const BUILTIN_REGISTRY: StyleRegistrySnapshot = {
   definitions: builtinDefinitionsById(),
   epoch: 0,
 };
 
-// Dropped-attr policy: these PM attributes/marks have no representation
-// in the semantic doc. NEVER silent — one dev warning per distinct
-// dropped-set (enumerating them), not per block and not per occurrence.
-// Painted (runDecor/align, NOT dropped): color, highlight,
-// underline, strike, textAlign left/center/right.
-// M-REFS: the indexEntry mark is RECOGNIZED-QUIET — invisible by
-// design (a reading-mode mark the scanner consumes document-side),
-// never a dropped-in-error warn. Its entries ride the referenceTable
-// blocks, not the paragraph runs it decorates.
-// #COMMENTS: the comment mark is RECOGNIZED-QUIET the same way — the
-// anchor is model data (threadId) consumed by the comment gutter and
-// exporters; a comment can never change pagination or line layout
-// (the run walk simply never reads it — no warn, no effect).
+// Dropped-attr policy: attrs/marks with no semantic-doc representation
+// warn once per distinct dropped-set in dev — never silent. color,
+// highlight, underline, strike, and left/center/right textAlign are
+// painted (runDecor/align), not dropped. indexEntry and comment marks
+// are recognized-quiet: model data the run walk never reads, no warn.
 const warnedDroppedSignatures = new Set<string>();
 
 const DEFAULT_HIGHLIGHT = '#fef08a';
@@ -333,26 +251,15 @@ function defaultListStyle(kind: 'bullet' | 'ordered'): string {
 }
 
 /**
- * The identity cache that makes the pipeline O(edit):
- * conversions are memoized on the PM NODE object. ProseMirror's
- * structural sharing guarantees a typing transaction rebuilds only the
- * edited node's path — sibling nodes are the same object references
- * across doc versions — so unchanged blocks reuse their semantic Block
- * and AdapterBlock BY REFERENCE. That is exactly the adapter contract
- * the engine's hash identity cache is keyed on: reference-stable
- * blocks → zero re-hashing, zero re-conversion. PM nodes are
- * immutable: a CHANGED paragraph is a new object, which misses here
- * and reconverts. A baseStyle change (font default) invalidates
- * everything via the generation tag, since cached runs embed
- * baseStyle-derived fields.
- *
- * SIBLING FACTS (indentLeft, the listMarker index, ...) are NOT part
- * of the node: an ordered reindex after a sibling deletion changes an
- * UNCHANGED node's marker. The cache therefore stores the projection
- * facts it was built under and reuses the cached objects ONLY when
- * they are equal — a reindexed item reconverts (O(changed) clones,
- * correct), while an edit inside item 7 leaves item 9's cached objects
- * reference-identical (pinned by tests, both directions).
+ * The identity cache: conversions memoized on the PM NODE object.
+ * PM's structural sharing means unchanged blocks keep their object
+ * references across doc versions, so they reuse their semantic Block
+ * and AdapterBlock by reference (zero re-hashing). A baseStyle or
+ * registry change invalidates everything via the generation tag.
+ * Sibling facts (indentLeft, marker index) are not part of the node:
+ * the cache stores them and reuses only when they are equal — a
+ * reindexed item reconverts; an edit in item 7 leaves item 9's cached
+ * objects identical.
  */
 interface CachedConversion {
   gen: number;
@@ -368,33 +275,24 @@ interface CachedConversion {
   /** Projection facts this conversion was built under (sibling-dependent). */
   indentLeft: number;
   paint?: BlockPaint;
-  /** M-PAGEFIELD: the warm total the field placeholders were measured
-   *  at (the fixpoint's input — a widened total re-converts). Undefined
-   *  on field-free blocks (undefined === undefined keeps their reuse). */
+  /** The warm page total the field placeholders were measured at;
+   *  undefined on field-free blocks. */
   fieldTotal?: number;
-  /** M-REFS: the scan object the referenceTable entries were built
-   * under (the doc-version fact — see Projection.scan). Undefined on
-   * every other kind (undefined === undefined keeps their reuse test
-   * byte-identical). */
+  /** The scan object a referenceTable's entries were built under;
+   *  undefined on every other kind. */
   scan?: CollectionScan;
-  /** M-REFS: the RESOLVED PAGE STRINGS for the entries (the two-pass
-   * resolver's output): one string per entry, aligned with the
-   * container's children. The conversion cache reuses only when the
-   * ARRAY is the same object (identity-stable resolver output — the
-   * scan precedent). Undefined on every other kind. */
+  /** The resolved page strings (one per entry, identity-stable);
+   *  undefined on every other kind. */
   refPages?: readonly string[];
-  /** M-REFS-9: the number display the conversion was built under
-   * (the preset fact — see Projection.numberDisplay). */
+  /** The number display the conversion was built under. */
   numberDisplay?: 'plain' | 'none';
 }
 
 const nodeCache = new WeakMap<PMNode, CachedConversion>();
 
-/** Float+flow refusal warning — once per session (the styles warned-
- * set precedent): the adapter STRIPS the flow from floated images so
- * the engine's validateFloatFlow never sees a violation from the
- * shell; the doc model still carries keepNext (the caption bond
- * returns if the float is removed). */
+/** Once-per-session warning: floated images carry no flow (the engine
+ * refuses float+keepNext); the caption bond returns if the float is
+ * removed. */
 const warnedFloatFlow = new Set<string>();
 function warnFloatFlowOnce(): void {
   if (warnedFloatFlow.has('float-flow')) return;
@@ -444,10 +342,8 @@ function warnDroppedAttrs(dropped: Set<string>): void {
   );
 }
 
-/** PM fontSize attr (a CSS string; the UI writes 'NNpx') → core px.
- * Pasted HTML may carry pt — the DATA BOUNDARY converts it to the
- * core's px (M6-PRE: pt at the chrome, px in the core; parseLineHeight
- * applies the same conversion for its absolute unit paths). */
+/** PM fontSize attr (CSS string; the UI writes 'NNpx') → core px;
+ * pasted pt converts at the data boundary (96/72). */
 function parseFontSize(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
   if (typeof value === 'string') {
@@ -460,18 +356,10 @@ function parseFontSize(value: unknown, fallback: number): number {
 }
 
 /**
- * PM lineHeight attr (a string — the schema stores CSS values) → the
- * engine's multiplier. CSS semantics, in declining order of how the
- * UI emits them (LineSpacingButton writes only unitless multipliers
- * '1'/'1.15'/'1.5'/'2' and arbitrary custom numeric strings):
- *   unitless 'NNN' | number → NNN            (multiplier, Word set)
- *   'NNN%'                  → NNN / 100      (pasted HTML)
- *   'NNNpx' | 'NNNpt'        → absolute → ÷fontSize (CSS: relative
- *                             to the element's own font size)
- *   'NNNem'                 → NNN            (already × fontSize)
- *   'normal' / junk / non-positive → undefined (single spacing)
- * Outside [0.25, 4] → undefined: a garbage multiplier ('25px' pasted
- * raw used to become 25×) must degrade to single, never to a wreck.
+ * PM lineHeight attr → the engine's multiplier. CSS semantics:
+ * unitless → multiplier; '%' → /100; 'px'/'pt' → absolute ÷fontSize;
+ * 'em' → as-is; 'normal'/junk → undefined. Outside [0.25, 4] →
+ * undefined: garbage must degrade to single spacing, never a wreck.
  */
 function parseLineHeight(value: unknown, fontSize: number): number | undefined {
   const MIN_LH = 0.25;
@@ -499,22 +387,12 @@ function isNonZero(value: unknown): boolean {
   return typeof value === 'number' && value !== 0;
 }
 
-// ─── Indent family mapping (M6.2) ─────────────────────────────────────────
-//
-// RECEIPTS (the units, reconciled at the ADAPTER — the conversion
-// site, per the STEP 1 ruling):
-//  - PM indentLeft/indentRight attrs are PX already (the ribbon input
-//    writes px, parseHTML reads px) → pass through 1:1.
-//  - The legacy `indent` attr is STEPS of 32px → folded in here
-//    (steps × 32, additive); the commands migrate it away on first
-//    press, so in practice at most one of the two is ever set.
-//  - firstLineIndent is px (may be negative — hanging), mapped 1:1.
-//
-// VALIDATION BEFORE THE ENGINE CAN THROW (engine layout.ts throws on
-// indentLeft + firstLineIndent < 0 — "the adapter must validate before
-// sending; this throw is the backstop"): rejected values fall back to
-// the NEAREST LEGAL one and warn once per distinct clamp in dev —
-// never silent, never a layout crash.
+// ─── Indent family mapping ────────────────────────────────────────
+// PM indentLeft/indentRight are px (pass through); the legacy `indent`
+// attr is steps of 32px, folded in additively; firstLineIndent is px
+// (may be negative). Values the engine would throw on clamp to the
+// nearest legal one and warn once in dev — never silent, never a
+// layout crash.
 
 const warnedIndentClamps = new Set<string>();
 
@@ -560,13 +438,11 @@ function ownIndentRight(node: PMNode): number {
 /** How a PM node projects into the engine's Block union. */
 interface Projection {
   kind: 'paragraph' | 'heading' | 'codeBlock' | 'image' | 'equation' | 'table' | 'referenceTable';
-  /** Block-tier left indent (px) — 0 for unindented blocks. Images
-   * don't wrap — the indent family is ignored for them (engine
-   * ImageBlock law). */
+  /** Block-tier left indent (px) — 0 for unindented blocks. */
   indentLeft: number;
   /** Paint hints (sibling facts — see CachedConversion). */
   paint?: BlockPaint;
-  // ─── M-IMAGES-1: the image projection fields (kind 'image') ────
+  // ─── Image projection fields (kind 'image') ──────────────────────
   /** OPAQUE ref — 'media://<sha256>'; echoes to placed[]. */
   src?: string;
   width?: number;
@@ -574,47 +450,34 @@ interface Projection {
   alt?: string;
   align?: 'left' | 'center' | 'right';
   keepNext?: boolean;
-  /** M-IMAGES-2: the anchored float echo (dx/dy/z). */
+  /** The anchored float echo (dx/dy/z). */
   float?: { dx: number; dy: number; z: 'front' | 'behind' } | null;
-  // ─── M-EQ: the equation projection fields (kind 'equation') ────
+  // ─── Equation projection fields (kind 'equation') ────────────────
   /** OPAQUE LaTeX source — the node's only document data. */
   latex?: string;
-  /** M-EQ-2: the font scale against the document default (folds into
-   *  the metrics fontSize key; default 1). */
+  /** Font scale against the document default (default 1). */
   scale?: number;
-  // ─── M-REFS: the referenceTable projection fields ─────────────────
+  // ─── referenceTable projection fields ─────────────────────────────
   /** The collection kind ('toc' | 'figures' | 'index'). */
   refKind?: ReferenceKind;
   /** The ToC's heading-depth option (node attr; other kinds ignore). */
   refDepth?: number;
-  /** The DOC-VERSION FACT the entries were built under — the memoized
-   * scan object (identity-stable while the doc is unchanged). A
-   * referenceTable node's PM object does NOT change when a heading is
-   * retitled, so the conversion cache reuses ONLY when the scan
-   * object is the same one (the sibling-fact pattern: list markers
-   * reconvert the same way). */
+  /** The doc-version fact the entries were built under: the node
+   * object survives a heading retitle, so reuse requires the same
+   * scan object. */
   scan?: CollectionScan;
-  /** M-REFS: the RESOLVED PAGE STRINGS for this container's entries
-   * (the two-pass resolver's output): one string per entry, aligned
-   * with the children. The conversion cache reuses only when the
-   * ARRAY is the same object (identity-stable resolver output). */
+  /** The resolved page strings, one per entry; reuse requires the
+   * same array object. */
   refPages?: readonly string[];
-  /** M-REFS-9: the number display ('plain' default | 'hyperlink' —
-   * the numbers carry their target for link styling | 'none' — no
-   * numbers). */
+  /** The number display: 'plain' (default) or 'none' (no numbers). */
   numberDisplay?: 'plain' | 'none';
 }
 
 /**
- * Pageless-look receipt (engine E2, tests/code-block.test.ts): the
- * pageless editor renders codeBlock as <pre><code> with NO font of its
- * own — the UA stylesheet's `pre { font-family: monospace }` applies
- * and the size INHERITS the container's document-default. Runs carry
- * exactly that. One run per source line ('\n' kept at the end of the
- * line it terminates): the engine's breakCodeLines honors the
- * separators (the '\n' belongs to no LineBox range) and measures blank
- * lines under the first run's style, so blank lines are exactly as
- * tall as their siblings.
+ * The pageless <pre> look: monospace at the document-default size,
+ * one run per source line ('\n' kept at the end of its line — the
+ * engine's breaker honors the separators and measures blank lines
+ * under the first run's style).
  */
 function codeRuns(node: PMNode, base: RunStyle): { runs: Run[]; text: string } {
   const style: TextStyle = { fontFamily: 'monospace', fontSize: base.fontSize };
@@ -638,14 +501,10 @@ function codeRuns(node: PMNode, base: RunStyle): { runs: Run[]; text: string } {
   return { runs, text };
 }
 
-/** The resolved RunStyle → the engine's TextStyle. bold/italic are
- * always-present booleans (the non-empty-run contract the tests
- * pin); lineHeight passes through verbatim — a direct attr's '1'
- * stays 1, an absent attr AND absent tier stays absent (the engine's
- * absent ≡ 1.0 bit-for-bit invariant), a style-provided value wins
- * when the attr is unset. fontVariant 'normal' is stripped (explicit
- * 'normal' hashes ≠ absent — engine tests/font-variant.test.ts pins
- * the seam ruling: the shell normalizes). */
+/** Resolved RunStyle → engine TextStyle. lineHeight passes through
+ * verbatim (absent stays absent — the engine's absent ≡ 1.0
+ * invariant); 'normal' fontVariant is stripped (explicit 'normal'
+ * must not hash differently from absent). */
 function textStyleOf(resolved: RunStyle, lineHeight: number | undefined, withBoldItalic = true): TextStyle {
   return {
     fontFamily: resolved.fontFamily,
@@ -657,15 +516,11 @@ function textStyleOf(resolved: RunStyle, lineHeight: number | undefined, withBol
 }
 
 /** The per-node conversion (the expensive part): runs, marks, decor,
- * text, align, spacing, indent, hints. Cached on the node object (see
- * CachedConversion for the sibling-fact reuse test). PM positions
- * (from/to) are deliberately NOT cached — they depend on preceding
- * siblings and are recomputed per call (cheap).
- *
- * M-STYLES: all style resolution flows through resolve.ts resolveRun /
- * resolveBlockTier (THE one function) with the registry snapshot —
- * baseStyle < paragraph style < charStyle < direct marks, per
- * property. */
+ * text, align, spacing, indent, hints. Cached on the node object;
+ * PM positions (from/to) are deliberately NOT cached — they depend
+ * on preceding siblings and are recomputed per call. All style
+ * resolution flows through resolve.ts.
+ */
 interface RunConversion {
   runs: Run[];
   runDecor: RunDecor[];
@@ -673,11 +528,9 @@ interface RunConversion {
 }
 
 /**
- * THE PROSE RUN WALK (M-TABLES extraction): one paragraph-like node's
- * children → runs/decor/text. inlineImage children map to
- * InlineImageRuns; any other non-text inline child throws the
- * sentinel. Shared by the flow tier AND table cell paragraphs — one
- * run mapping, no fork.
+ * One paragraph-like node's children → runs/decor/text. inlineImage
+ * children map to InlineImageRuns; other non-text inline children
+ * throw the sentinel. Shared by the flow tier and table cells.
  */
 function walkProseRuns(
   node: PMNode,
@@ -693,19 +546,12 @@ function walkProseRuns(
   let text = '';
   node.forEach((child) => {
       if (!child.isText || !child.text) {
-        // M-IMAGES-2 — INLINE OBJECTS (E-IMG-2): an inlineImage child
-        // maps to an InlineImageRun in the containing paragraph's
-        // runs — ONE position per object (the U+FFFC token appended to
-        // the block's concatenated text keeps the PM-offset identity:
-        // shell text/offsets stay source-coordinate-exact).
-        // M-PAGEFIELD — the page-number FIELD: an inline atom whose
-        // run text is the MEASURED PLACEHOLDER (the warm total's
-        // max-width digits — every page's number fits the slot); the
-        // shell's painter substitutes the per-page resolution at draw
-        // time (fieldKind rides the run — the engine treats the run
-        // as plain text). The style resolves from the paragraph tier
-        // (no marks on an atom) — the field renders in the running
-        // text's look.
+        // INLINE OBJECTS: an inlineImage child maps to an
+        // InlineImageRun (one U+FFFC token in the block text keeps
+        // the PM-offset identity). A pageField child's run text is
+        // the MEASURED PLACEHOLDER (the warm total's max-width
+        // digits); the painter substitutes the per-page value at
+        // draw time.
         if (child.type.name === 'pageField') {
           const kind = (child.attrs as { kind?: string }).kind === 'pages' ? 'pages' : 'page';
           const placeholder = fieldTotal != null ? String(fieldTotal) : '8';
@@ -752,9 +598,8 @@ function walkProseRuns(
       const textStyleMark = child.marks.find((m) => m.type.name === 'textStyle');
 
       // tiptap v3's FontFamily is a GLOBAL ATTRIBUTE on the textStyle
-      // mark (verified against extension-text-style's dist), not a
-      // separate mark — read it from there. (A standalone 'fontFamily'
-      // mark stays supported defensively for any custom schema.)
+      // mark, not a separate mark; a standalone 'fontFamily' mark is
+      // supported defensively.
       const standaloneFamilyMark = child.marks.find((m) => m.type.name === 'fontFamily');
       const familyAttr =
         typeof standaloneFamilyMark?.attrs?.fontFamily === 'string' && standaloneFamilyMark.attrs.fontFamily
@@ -794,49 +639,34 @@ function walkProseRuns(
           : {}),
       };
 
-      // ONE resolution function (resolve.ts): baseStyle < paragraph
-      // style < charStyle < direct marks, per property, complete
-      // values — the registry never leaves a property undefined.
+      // One resolver (resolve.ts): base < para style < charStyle <
+      // direct marks, per property.
       const resolved = resolveRun({ base, para: paraDef, char: charDef, direct });
 
-      // Direct BLOCK formatting (the lineHeight attr) parses against
-      // the RESOLVED font size (CSS: absolute units are relative to
-      // the element's own size) and beats the char/para tiers. The
-      // attr value passes through VERBATIM (1 stays 1 — the pinned
-      // attr-table contract); tiers apply only when the attr is unset.
+      // Direct lineHeight parses against the RESOLVED font size and
+      // beats the tiers; the attr value passes through verbatim.
       const attrLineHeight = parseLineHeight(node.attrs?.lineHeight, resolved.fontSize);
       const tierLineHeight = charDef?.properties.lineHeight ?? paraDef?.properties.lineHeight;
       const lineHeight = attrLineHeight !== undefined ? attrLineHeight : tierLineHeight;
 
-      // Dropped-attr detection — collected, warned once, never silent.
-      // color/highlight/underline/strike and left/center/right textAlign
-      // are painted (runDecor / block align); spaceBefore/spaceAfter are
-      // MAPPED to the engine's block-tier spacing (M6); the INDENT
-      // FAMILY is mapped to engine geometry (M6.2 — indent/indentLeft/
-      // indentRight consumed, no longer dropped); justify remains
-      // engine work and stays loud.
-      // M-REFS-11: the reference-table rows' SEMANTIC links (the
-      // `tensor-ref:` scheme — the invisible always-on hyperlink) are
-      // RECOGNIZED-QUIET: no styling in paginated (the user's
-      // "invisible" ruling), no dropped-attr warning (they are
-      // deliberate model data for the future PDF/DOCX exporters).
+      // Dropped-attr detection (warned once, never silent). Painted,
+      // not dropped: color/highlight/underline/strike, left/center/
+      // right textAlign. Mapped: spaceBefore/After, the indent family.
+      // justify stays loud. tensor-ref: links are recognized-quiet
+      // model data for the exporters.
       if (child.marks.some((m) => m.type.name === 'link')) {
         const href = child.marks.find((m) => m.type.name === 'link')?.attrs?.href;
         if (typeof href !== 'string' || !href.startsWith('tensor-ref:')) dropped.add('link');
       }
 
-      // TRANSFORMED MEASUREMENT (amendment 3): run TEXT is transformed
-      // HERE, so the engine measures (and wraps) the transformed text
-      // — uppercase is wider than source in real fonts. PM keeps the
-      // source text; the length-preserving invariant (transformText
-      // throws otherwise) keeps engine offsets identity-mapped to PM
-      // offsets, so caret/hitTest/search all stay in source coords.
+      // Run TEXT is transformed HERE so the engine measures the
+      // transformed text (uppercase is wider); transformText is
+      // length-preserving, so offsets stay PM-identical.
       const runText = transformText(child.text, resolved.textTransform);
       runs.push({ text: runText, style: textStyleOf(resolved, lineHeight) });
       runDecor.push({
         color: resolved.color !== '#000000' ? resolved.color : undefined,
-        // The HIGHLIGHT tier cascades like color (direct mark > char
-        // style > paragraph style; '' baseline = no highlight).
+        // The highlight tier cascades like color.
         highlight: resolved.highlight !== '' ? resolved.highlight : undefined,
         underline: resolved.underline,
         strike: resolved.strike,
@@ -847,15 +677,9 @@ function walkProseRuns(
 }
 
 /**
- * EMPTY-TEXTBLOCK INHERITANCE (P1): an empty paragraph/heading emits
- * ONE zero-length run with the block's effective style — same
- * resolution as normal runs minus the marks (none exist on an empty
- * textblock). The engine measures present-run styles over baseStyle
- * (P1 ruling), so an empty paragraph in a 2.0-spaced style measures
- * 2.0 and its NPC ¶ paints at the right size. (The horizontalRule
- * atom — kind 'paragraph' by projection — never reaches here: its
- * baseStyle-measured placeholder line comes from the projection's own
- * runs push.)
+ * An empty paragraph/heading emits ONE zero-length run with the
+ * block's effective style, so an empty paragraph in a 2.0-spaced
+ * style measures 2.0 and its NPC ¶ paints at the right size.
  */
 function emptyTextBlockRun(
   node: PMNode,
@@ -882,16 +706,10 @@ function convertNode(
 ): CachedConversion {
   const kind = projection.kind;
 
-  // M-IMAGES-1 — images convert structurally: no runs, no text, no
-  // BlockTier (indent/firstLine are wrap geometry the engine IGNORES
-  // for images by law; align is their horizontal control, relative to
-  // the FULL content box). src OPAQUE, dims REQUIRED (validated at
-  // the projection site), keepNext = the caption bond (FlowPolicy).
-  // M-IMAGES-2 — FLOATS (E-IMG-3): the float echo rides through; and
-  // the LOUD REFUSAL: a floated block NEVER carries flow — the
-  // engine's validateFloatFlow THROWS on float+keepNext (a float is
-  // not in flow and must not derive pages), so the adapter must never
-  // EMIT one. float present → flow omitted entirely, warned once.
+  // Images convert structurally: no runs, no text, no BlockTier;
+  // align is their horizontal control. A floated block NEVER carries
+  // flow (the engine throws on float+keepNext): float present → flow
+  // omitted entirely, warned once.
   if (kind === 'image') {
     const float =
       projection.float && Number.isFinite(projection.float.dx) && Number.isFinite(projection.float.dy)
@@ -924,20 +742,12 @@ function convertNode(
     };
   }
 
-  // M-EQ — equations convert structurally, the image arm's shape:
-  // no runs, no text, no BlockTier (the indent family is wrap
-  // geometry, ignored for atomics by law; align is the horizontal
-  // control). THE DIMS RULING: width/height are NOT projected — they
-  // are derived facts (a function of latex + fontSize under the KaTeX
-  // fonts) the engine asks the EquationMetrics port for at layout
-  // time; the adapter is pure (L1) and cannot measure. fontSize is
-  // the resolved document-default run size scaled by the node's
-  // `scale` attr (M-EQ-2 style control — a LAYOUT-relevant attr that
-  // rides the fontSize hash, so a scale edit re-measures + re-walks
-  // through the existing engine path; color is paint-only and stays
-  // OUT of the engine entirely, the image-radius precedent). No
-  // float/flow v1: a display equation is strictly in flow (Word's
-  // display-equation model).
+  // Equations convert structurally, the image arm's shape. Dims are
+  // NOT projected — derived facts the engine asks the EquationMetrics
+  // port for at layout time (the adapter is pure). fontSize is the
+  // document default scaled by the node's `scale` attr; color is
+  // paint-only. No float/flow: display equations are strictly in
+  // flow.
   if (kind === 'equation') {
     const scale =
       typeof projection.scale === 'number' && Number.isFinite(projection.scale) && projection.scale > 0
@@ -958,29 +768,20 @@ function convertNode(
     };
   }
 
-  // M-TABLES — the table projects WHOLE (one engine TableBlock, one
-  // blockId): rows → TableRowData, each cell's paragraphs through the
-  // SHARED walkProseRuns (one run mapping, no fork) into the table's
-  // CANONICAL arrays — rows top-down, cells left-to-right, paragraphs
-  // in order; the engine re-derives the same concatenation from the
-  // TableBlock structure (agreement by construction). Non-paragraph
-  // cell content throws the sentinel (v1 cell content = paragraphs
-  // only; the pageless fallback renders it until the engine grows
-  // cell code/quote/image support). The AdapterBlock carries the
-  // CELL-PARAGRAPH map (relStart positions relative to the table
-  // node — push() patches from/to the same way, and positionMap
-  // derives pmStart = from + relStart).
+  // The table projects WHOLE (one engine TableBlock): each cell's
+  // paragraphs through the shared walkProseRuns into the canonical
+  // concatenation; non-paragraph cell content throws the sentinel
+  // (v1: paragraphs only). The AdapterBlock carries the cell map.
   if (kind === 'table') {
     const rows: TableBlock['rows'] = [];
     const tableRuns: Run[] = [];
     const tableDecor: RunDecor[] = [];
     const paragraphs: { relStart: number; textStart: number; textLen: number }[] = [];
     let tableText = '';
-    // Position walk with a MANUAL cursor (PM forEach offsets are
-    // CONTENT-relative and its third callback arg is an INDEX — never
-    // a position): cursor tracks each child node's position relative
-    // to the TABLE node. The table node's open is +1, so the first row
-    // sits at relative 1; each node's span = its nodeSize.
+    // Position walk with a MANUAL cursor: PM forEach offsets are
+    // CONTENT-relative (the third arg is an index, never a position),
+    // so the cursor tracks each child's position relative to the
+    // TABLE node.
     let cursor = 1;
     node.forEach((row) => {
       if (row.type.name !== 'tableRow') {
@@ -1026,11 +827,9 @@ function convertNode(
           });
           tableRuns.push(...conv.runs);
           tableDecor.push(...conv.runDecor);
-          // THE SEPARATOR LAW (M-TABLES 2 — the engine's computeTableLayout
-          // advances textOffset by the same +1): every cell paragraph's
-          // slice gets a trailing '\n' in the canonical text, so empty
-          // cells own a DISTINCT textStart and the PM↔offset bridge
-          // round-trips. The separator never enters a line range.
+          // Every cell paragraph's slice gets a trailing '\n' (the
+          // engine advances textOffset the same way), so empty cells
+          // own a distinct textStart.
           tableText += conv.text + '\n';
           // The paragraph's first text position, TABLE-relative:
           // the paragraph node at `cursor` (relative to the table),
@@ -1039,7 +838,7 @@ function convertNode(
           cursor += para.nodeSize;
         });
         cursor = cellPos + cell.nodeSize;
-        // M-T4 — per-cell padding override (per-side; null inherits).
+        // Per-cell padding override (per-side; null inherits).
         const cellPad = cell.attrs.padding as
           | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
           | null
@@ -1073,14 +872,10 @@ function convertNode(
         });
       });
       cursor = rowPos + row.nodeSize;
-      // M-T3c: the row's minimum height (Word's "at least") — null =
-      // pure content height; the engine's TableRowData.minHeight
-      // consumes it verbatim.
+      // The row's minimum height (Word's "at least"); null = content
+      // height.
       const rowMin = row.attrs?.minHeight;
-      // M-FLOW: the row's split control (Word's "Allow row to break
-      // across pages" / w:cantSplit) — null = unset = MAY split (the
-      // Word/GDocs default); true = atomic. Verbatim to the engine's
-      // TableRowData.cantSplit.
+      // The row's split control (Word's w:cantSplit) — true = atomic.
       const rowCantSplit = row.attrs?.cantSplit;
       rows.push({
         isHeader: allHeader,
@@ -1092,10 +887,8 @@ function convertNode(
 
     const borderStyle = node.attrs?.borderStyle;
     const alignAttr = node.attrs?.align;
-    // M-T4 — outer margins: top/bottom ride the block tier's spacing
-    // (the engine's once-at-entry rule — a table margin above/below IS
-    // block spacing); left/right narrow the engine's table box. Sides
-    // clamp ≥ 0 (the panel clamps too; this is the backstop).
+    // Outer margins: top/bottom ride the block tier's spacing;
+    // left/right narrow the engine's table box.
     const marginAttr = node.attrs?.margin as
       | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
       | null
@@ -1110,8 +903,7 @@ function convertNode(
       marginSide('left') != null || marginSide('right') != null
         ? { left: marginSide('left') ?? 0, right: marginSide('right') ?? 0 }
         : null;
-    // M-T4 — the table's default cell padding (per-side; null sides
-    // inherit the engine constants).
+    // The table's default cell padding (per-side; null inherits).
     const cellPaddingAttr = node.attrs?.cellPadding as
       | { top?: number | null; right?: number | null; bottom?: number | null; left?: number | null }
       | null
@@ -1124,9 +916,8 @@ function convertNode(
       cellPaddingAttr != null
         ? { top: padSide('top'), right: padSide('right'), bottom: padSide('bottom'), left: padSide('left') }
         : null;
-    // M-FLOW — the table-level pagination flags (the five-flag subset;
-    // the schema excludes widowControl). Emitted only when a flag is
-    // set — same all-null-no-field guard as paragraphs.
+    // Table-level pagination flags, emitted only when set (like
+    // paragraphs).
     const tableFlow = resolveFlowTier(null, {
       keepNext: node.attrs?.keepNext,
       keepLines: node.attrs?.keepLines,
@@ -1139,7 +930,7 @@ function convertNode(
       kind: 'table',
       rows,
       borderStyle: borderStyle === 'none' || borderStyle === 'outer' ? borderStyle : 'all',
-      // M-T3c — table flow: horizontal placement within the content box.
+      // Table alignment within the content box.
       align: alignAttr === 'center' || alignAttr === 'right' ? alignAttr : 'left',
       ...(spaceBefore != null ? { spaceBefore } : {}),
       ...(spaceAfter != null ? { spaceAfter } : {}),
@@ -1164,23 +955,12 @@ function convertNode(
     };
   }
 
-  // M-REFS — the reference table converts from its REAL CHILDREN (the
-  // container model: entries are real paragraphs the generator
-  // maintains): each child's runs flow through the SHARED
-  // walkProseRuns (one run mapping, no fork — user marks render in
-  // paginated like body text), plus the SYNTHETIC tab + page-number
-  // runs (document-default style; page strings arrive with the
-  // two-pass — LAYOUT facts, never persisted PM text). One engine
-  // ReferenceTableBlock + the ENTRY sidecar (the table.paragraphs
-  // precedent): per-entry `relStart` = the child paragraph's position
-  // RELATIVE to the container (pmStart = block.from + relStart — the
-  // caret/selection bridge into entry text), `textStart`/`textLen`
-  // = the child's REAL text slice of the canonical block text (the
-  // synthetic tab/number suffix follows it, non-mappable). TARGETS
-  // come from the SCAN (keyed by the child's refId — the generator's
-  // key): the sidecar's targets are navigation facts, not layout.
-  // The PLACEHOLDER (a null-refId child, the generator's own write)
-  // converts like any entry — real italic text, zero targets.
+  // The reference table converts from its REAL CHILDREN (the
+  // container model): each child's runs flow through the shared
+  // prose walk, plus the synthetic tab + page-number runs (layout
+  // facts, never persisted PM text). The sidecar bridges hit-offsets
+  // to entry text and navigation targets; the placeholder converts
+  // like any entry with zero targets.
   if (kind === 'referenceTable') {
     const refKind = projection.refKind ?? 'toc';
     const refDepth = typeof projection.refDepth === 'number' ? projection.refDepth : 3;
@@ -1196,11 +976,9 @@ function convertNode(
     // table arm's manual walk, same shape).
     let cursor = 1;
     let sawChild = false;
-    // The resolver's per-entry page strings (aligned with the children
-    // below) — undefined when the caller passed none (cold start).
+    // The resolver's per-entry page strings — undefined on cold start.
     const refPagesInput = projection.refPages;
-    // THE NUMBER DISPLAY (M-REFS-9) — hoisted (the sidecar's click
-    // fact reads it outside the row loop).
+    // Hoisted: the sidecar reads it outside the row loop.
     const numberDisplay = projection.numberDisplay ?? 'plain';
     let entryIndex = 0;
 
@@ -1224,7 +1002,7 @@ function convertNode(
       const textStart = refText.length;
 
       // The entry's targets: the scan join by refId (null = the
-      // placeholder — real text, zero navigation).
+      // placeholder).
       const refId = typeof child.attrs.refId === 'string' && child.attrs.refId ? child.attrs.refId : null;
       let targets: number[] = [];
       if (refId) {
@@ -1235,17 +1013,11 @@ function convertNode(
       }
 
       const indentLeft = Math.max(0, ownIndentLeft(child));
-      // THE LEADER SPAN (M-REFS-8): the generator writes a refLeader-
-      // marked dots span as the row's LAST text node — REAL text with
-      // the USER's marks (resolved through the shared prose walk, so
-      // size/bold/color flow into the runs). Its LENGTH is detected
-      // from the child's own inline nodes (never guessed from text: a
-      // heading may legitimately end in dots) and rides the SIDECAR as
-      // the painter's tag — the engine lays out the seed verbatim (the
-      // block-text contract holds bit-for-bit; the engine NEVER
-      // rewrites run text), and the PAINTER extends the dots with
-      // extra ink at the leader run's own measured style to fill the
-      // gap to the page number.
+      // The leader span: the generator writes a refLeader-marked dots
+      // span as the row's LAST text node. Its LENGTH is detected from
+      // the inline node (never guessed from text) and rides the
+      // sidecar — the engine lays out the seed verbatim, the painter
+      // extends the dots to fill the gap to the page number.
       let leaderLen = 0;
       const lastInline = child.childCount > 0 ? child.child(child.childCount - 1) : null;
       if (
@@ -1255,17 +1027,10 @@ function convertNode(
         leaderLen = lastInline.text?.length ?? 0;
       }
 
-      // The engine entry: the row's real runs (text + seed dots) + the
-      // synthetic tab + THE PAGE NUMBER (the two-pass resolver's
-      // string, '' while unresolved — a LAYOUT fact riding the entry
-      // runs by construction, so a re-resolved number re-breaks
-      // exactly this block through the engine's contentHash).
-      // THE NUMBER DISPLAY (M-REFS-9, the presets' number arm): the
-      // container's numberDisplay attr decides the number run's TEXT.
-      // 'plain' (default): the resolved page string. 'none': NO
-      // number at all (the entries stand alone — the entries' own
-      // semantic link marks (M-REFS-11) are the navigation data; the
-      // future exporters map them).
+      // The engine entry: the row's real runs + the synthetic tab +
+      // THE PAGE NUMBER (the resolver's string, '' while unresolved —
+      // a layout fact, so a re-resolved number re-breaks exactly this
+      // block). numberDisplay 'none' drops the number entirely.
       const pageStr = numberDisplay === 'none' ? '' : refPagesInput?.[thisEntryIndex] ?? '';
       engineEntries.push({
         runs: [
@@ -1277,8 +1042,7 @@ function convertNode(
       });
       refRuns.push(...prose.runs);
       refDecor.push(...prose.runDecor);
-      // The synthetic pair rides the canonical text too (the engine's
-      // block text = the entries' concatenation, by construction).
+      // The synthetic pair rides the canonical text too.
       refRuns.push({ text: '\t', style: syntheticStyle }, { text: pageStr, style: syntheticStyle });
       refDecor.push({}, {});
       refText += prose.text + '\t' + pageStr;
@@ -1325,21 +1089,16 @@ function convertNode(
         reference: sidecar,
       },
       indentLeft: 0,
-      // The doc-version fact (see Projection.scan) — targets ride the
-      // scan; the children's own edits miss the node cache naturally.
+      // Sibling facts for the reuse test: the scan (compared by
+      // reference), the page strings, and the number display.
       scan: projection.scan,
-      // The page-strings fact (identity-stable resolver output) —
-      // the reuse test below compares it by reference.
       refPages: projection.refPages,
-      // The number-display fact (the preset — the reuse test).
       numberDisplay: projection.numberDisplay,
     };
   }
 
-  // The paragraph tier's style identity. Headings resolve through
-  // `heading-{level}` — the styleId attr's guaranteed twin (the
-  // HeadingSync plugin maintains the alignment); paragraphs through
-  // their styleId attr ('normal' default, schema-guaranteed).
+  // Headings resolve through `heading-{level}` (the styleId attr's
+  // twin); paragraphs through their styleId attr ('normal' default).
   const paraDef =
     kind === 'heading'
       ? lookupStyle(headingStyleId(node.attrs.level ?? 1), definitions)
@@ -1360,24 +1119,20 @@ function convertNode(
     const code = codeRuns(node, base);
     runs.push(...code.runs);
     text = code.text;
-    // EMPTY-TEXTBLOCK INHERITANCE (P1): an empty codeBlock emits one
-    // zero-length run carrying the pageless-look style — the engine
-    // measures present-run styles over baseStyle (P1 ruling), so the
-    // blank line matches its mono siblings, not the prose default.
+    // An empty codeBlock emits one zero-length mono run, so the
+    // blank line matches its siblings.
     if (runs.length === 0) {
       runs.push({ text: '', style: { fontFamily: 'monospace', fontSize: base.fontSize } });
     }
   } else {
-    // M-TABLES: the walk is SHARED — table cell paragraphs convert
-    // through the same walkProseRuns (one run mapping, no fork).
+    // Table cell paragraphs share the same walk.
     const prose = walkProseRuns(node, kind, paraDef, base, definitions, dropped, fieldTotal);
     runs.push(...prose.runs);
     runDecor.push(...prose.runDecor);
     text = prose.text;
   }
 
-  // EMPTY-TEXTBLOCK INHERITANCE (P1) — the shared helper (M-TABLES:
-  // cell paragraphs inherit through the same function).
+  // Empty paragraphs/headings inherit through the shared helper.
   if (
     runs.length === 0 &&
     (node.type.name === 'paragraph' || node.type.name === 'heading')
@@ -1385,10 +1140,8 @@ function convertNode(
     runs.push(emptyTextBlockRun(node, paraDef, base));
   }
 
-  // BLOCK TIER (M6 + M-STYLES): direct attrs beat the paragraph style's
-  // geometry properties, which beat the baseline. Unset = default attr
-  // value (0 / null), so the STYLE provides the value in that case; the
-  // legacy `indent` steps fold into the attr side as today.
+  // Direct attrs beat the paragraph style's geometry, which beats
+  // the baseline; the legacy `indent` steps fold into the attr side.
   const attrsTier: BlockTierAttrs =
     kind === 'paragraph'
       ? {
@@ -1402,17 +1155,11 @@ function convertNode(
       : { textAlign: alignAttr };
   const tier = resolveBlockTier(paraDef, attrsTier, projection.indentLeft);
 
-  // M-FLOW — the pagination-flag cascade: direct attrs beat the
-  // paragraph style's flow properties, everything else stays unset.
-  // resolveFlowTier returns undefined when nothing resolves — the
-  // block then carries no `flow` field at all (hashBlock covers flow;
-  // an empty object would needlessly churn every paragraph's hash).
-  // Kinds 'paragraph'/'heading' only: codeBlocks carry no flow attrs,
-  // and table-cell / reference-entry paragraphs convert through their
-  // own arms (embedded content — cells paginate as ROWS, entries as
-  // lanes; per-paragraph flow is meaningless there). List-item and
-  // blockquote paragraphs project through THIS arm, so their flags
-  // ride too (Word: keep flags apply to list paragraphs).
+  // Flow-flag cascade (direct attrs beat the paragraph style's flow
+  // properties). resolveFlowTier returns undefined when nothing
+  // resolves — the block then carries no `flow` field (hashBlock
+  // covers flow; an empty object would churn every hash). Paragraphs
+  // and headings only; embedded cell/entry paragraphs have no flow.
   const flow =
     kind === 'paragraph' || kind === 'heading'
       ? resolveFlowTier(paraDef, {
@@ -1437,29 +1184,23 @@ function convertNode(
     firstLineIndent = totalLeft > 0 ? -totalLeft : undefined;
   }
 
-  // 'justify' (attr OR style tier) is engine work and stays LOUD: the
-  // pageless CSS renders it natively, the paginated mode drops it to
-  // left through the same one-time warning the textAlign attr always
-  // had — identical ruling for the style tier.
+  // 'justify' is engine work: dropped to left with the same
+  // one-time warning (the pageless CSS renders it natively).
   const align: TextAlign = tier.align === 'justify' ? 'left' : tier.align;
   if (tier.align === 'justify') dropped.add('textAlign (justify — engine work)');
   const spaceBefore = tier.spaceBefore != null && tier.spaceBefore > 0 ? tier.spaceBefore : undefined;
   const spaceAfter = tier.spaceAfter != null && tier.spaceAfter > 0 ? tier.spaceAfter : undefined;
 
   const hints = projection.paint ?? {};
-  // SEMANTIC-side hint spelling (M6.1): listMarker per the projection
-  // spec; blockquote/rule/code as booleans. The engine ignores all of
-  // them (hashBlock covers kind/runs/flow/space only).
+  // Semantic-side hint spelling; the engine ignores all of them.
   const hintFields = {
     ...(hints.marker ? { listMarker: hints.marker } : {}),
     ...(hints.blockquote ? { blockquote: true } : {}),
     ...(hints.rule ? { rule: true } : {}),
     ...(hints.code ? { code: true } : {}),
   };
-  // TAB STOPS (M-RULER Phase 3): projected onto the block px
-  // content-box-relative, normalized (sorted, deduped, absent when
-  // empty). Inert in the breaker until Phase 4; hashBlock deliberately
-  // doesn't cover the field yet (see engine/src/types.ts).
+  // Tab stops, normalized (sorted, deduped, absent when empty); the
+  // breaker does not consume them yet.
   const tabStops = kind === 'paragraph' ? normalizeTabStops(node.attrs?.tabStops) : null;
   const shared = {
     id: blockId,
@@ -1496,18 +1237,13 @@ function convertNode(
       ...(projection.paint ? { paint: projection.paint } : {}),
       runDecor,
     },
-    // The cache's sibling-fact key is the BASE indent (structural:
-    // list depth / blockquote gutter) — own-attr changes produce a NEW
-    // node object (PM immutability) and miss the WeakMap by
-    // construction, so only the base needs the equality test.
+    // The sibling-fact key is the BASE indent — own-attr changes
+    // produce a new node object and miss the WeakMap.
     indentLeft: projection.indentLeft,
     paint: projection.paint,
-    // M-PAGEFIELD: the warm total rides ONLY on field-bearing blocks —
-    // field-free blocks convert identically at ANY total (storing the
-    // total here would break reuse whenever the shell's warm total
-    // differs from the caller's, e.g. the unit tests' undefined). The
-    // fixpoint's widened total must MISS field-bearing caches (a stale
-    // placeholder would never widen).
+    // The warm total rides only on field-bearing blocks — a widened
+    // total must miss their caches; field-free blocks are
+    // total-independent.
     fieldTotal: runs.some((r) => (r as { fieldKind?: string }).fieldKind != null) ? fieldTotal : undefined,
   };
 }
@@ -1516,46 +1252,25 @@ export function pmDocToSemantic(
   pm: PMNode,
   baseStyle: TextStyle,
   registry: StyleRegistrySnapshot = BUILTIN_REGISTRY,
-  /**
-   * M-HEADER-FOOTER-2 — band options read PER CALL (L4): the
-   * different-first-page flag travels in .wpdoc metadata; the caller
-   * (PaginatedView's relayout) reads it fresh from the document store.
-   */
+  /** Band options read PER CALL: the different-first-page flag
+   *  travels in .wpdoc metadata. */
   bandOptions?: { differentFirstPage?: boolean },
-  /**
-   * M-REFS — the RESOLVED PAGE STRINGS (the two-pass fixpoint's input):
-   * per referenceTable blockId, one string per entry (multi-location
-   * index entries join pages "3, 7"). Absent on cold start ('' runs);
-   * the caller (PaginatedView's relayout) passes the resolver's
-   * identity-stable output so the conversion cache stays warm in
-   * steady state.
-   */
+  /** Resolved page strings per referenceTable blockId (the
+   *  fixpoint's input), one string per entry; absent on cold start —
+   *  the caller passes the resolver's identity-stable output. */
   referencePages?: ReferencePagesMap,
-  /**
-   * M-PAGEFIELD — the WARM PAGE TOTAL (the two-pass fixpoint's other
-   * input): the field runs' measured placeholder is the total's
-   * max-width digit string (layout-stable across pages — every page's
-   * number fits); pass 1 guesses 1 digit, the fixpoint re-lays-out
-   * when the real total widens. Absent on cold start.
-   */
+  /** The warm page total: the field runs' measured placeholder is
+   *  the max-width digit string; the fixpoint re-lays-out when the
+   *  real total widens. Absent on cold start. */
   fieldTotal?: number,
-  /**
-   * #58 SECTIONS — the document's page setup (read PER CALL, L4): the
-   * FINAL section's props (the store law — the sectionBreak nodes
-   * carry sections 0..n−1; the content after the last break rides the
-   * store). The adapter resolves the COMPLETE boundary table with it;
-   * absent → the Letter/Normal fallback (defensive — real callers
-   * pass the store's pageSetup).
-   */
+  /** #58 — the FINAL section's props, read per call; the adapter
+   *  resolves the complete boundary table with it. Absent → the
+   *  Letter/Normal fallback (defensive; real callers pass the store). */
   pageSetup?: PageSetup,
 ): AdapterResult {
-  // THE REGISTRY EPOCH (M-STYLES STEP 3): the shell-side mirror of the
-  // engine's baseStyleHash. A baseStyle change OR any definition edit
-  // (epoch bump) invalidates the identity cache wholesale — every
-  // block re-converts with fresh resolved runs/decor. The engine then
-  // decides per block what re-breaks via contentHash (layout-relevant
-  // edits) or splices (paint-only edits — those still reach the canvas
-  // through the rebuilt AdapterBlocks).
+  // The registry epoch: a baseStyle change or definition edit
+  // invalidates the identity cache wholesale; the engine then decides
+  // per block what re-breaks via contentHash or splices.
   const contextKey = `${baseStyle.fontFamily}\u0000${baseStyle.fontSize}\u0000${registry.epoch}`;
   if (contextKey !== lastContextKey) {
     cacheGeneration += 1;
@@ -1565,22 +1280,17 @@ export function pmDocToSemantic(
   const base = baselineRunStyle(baseStyle);
   const definitions = registry.definitions;
 
-  // M-REFS — the ONE per-call scan (memoized on the doc object — one
-  // walk per doc version, shared by every referenceTable node AND the
-  // pageless NodeView). Computed lazily-adjacent here so every
-  // projection branch below closes over the same identity.
+  // The ONE per-call scan (memoized on the doc object), shared by
+  // every referenceTable node and the pageless NodeView.
   const refScan = scanCollections(pm);
 
   const blocks: AdapterBlock[] = [];
   const semantic: Block[] = [];
   const dropped = new Set<string>();
-  // #74 — the pending forced-break SPELLING ('page' from a pageBreak
-  // node, 'column' from a columnBreak node) — the stamp merges it into
-  // the following block's flow.
+  // #74 — the pending forced-break spelling ('page' or 'column'),
+  // merged into the following block's flow.
   let pendingBreakBefore: 'page' | 'column' | null = null;
-  // M-FLOW — a breakAfter attr's badge anchors above the block it
-  // forces — the NEXT in-flow block. Set when the breaking block
-  // pushes, attached when the forced block pushes.
+  // A breakAfter attr badges the NEXT in-flow block.
   let pendingAfterBreakFact: { pos: number } | null = null;
 
   // #58 — the sectionBreak nodes in doc order (the walk collects;
@@ -1591,12 +1301,8 @@ export function pmDocToSemantic(
     type: 'nextPage' | 'continuous';
   }[] = [];
 
-  // #58 — the NPC sidecar: every pageBreak/sectionBreak/columnBreak
-  // atom with the block following it (the view paints formatting-mark
-  // badges just above that block's first line — view-only ink, never
-  // printed: the print walk reads the engine's layout, not this
-  // sidecar). #74 — a columnBreak fact's `type` is inert (the badge
-  // labels off the kind); 'nextPage' keeps the section-typed union.
+  // #58 — the NPC sidecar: every break atom with the block following
+  // it; view-only ink, never printed.
   const breakFacts: {
     kind: 'pageBreak' | 'sectionBreak' | 'columnBreak';
     type: 'nextPage' | 'continuous';
@@ -1608,13 +1314,9 @@ export function pmDocToSemantic(
     type: 'nextPage' | 'continuous';
   } | null = null;
 
-  // #58 — the PRE-SCAN: a band container may carry a sectionId whose
-  // break node sits LATER in doc order (band containers at the doc
-  // start precede every break), so the tag→section-index map must be
-  // known before the walk reaches either. One cheap top-level pass
-  // (breaks are top-level atoms). Stale tags (a break deleted without
-  // the merge-on-delete law's cleanup) resolve to the doc default —
-  // content preserved, never dropped.
+  // PRE-SCAN: a band container's sectionId may sit before its break
+  // node in doc order, so the tag→index map must exist before the
+  // walk. Stale tags resolve to the doc default.
   const sectionIdToIndex = new Map<string, number>();
   pm.forEach((node) => {
     if (node.type.name === 'sectionBreak') {
@@ -1625,10 +1327,8 @@ export function pmDocToSemantic(
     }
   });
 
-  // M-HEADER-FOOTER-2 — the band routing: children of headerBlock/
-  // footerBlock land in the engine's BandSet (never in flow order)
-  // while their AdapterBlocks ride BOTH `blocks` (the shared sidecar —
-  // real PM positions, emitted in `from` order) and `bandBlocks`.
+  // Band routing: header/footer children go to the engine's BandSet
+  // (never flow order); their AdapterBlocks ride both lists.
   const bandSemantic: {
     header: Block[];
     footer: Block[];
@@ -1645,9 +1345,8 @@ export function pmDocToSemantic(
   const bandBlockIds = new Set<string>();
   let sawBandNode = false;
 
-  /** Commit one band child: semantic → its region (the doc default by
-   *  default; #58 tagged overrides push into their section's bucket),
-   *  adapter → both lists. */
+  /** Commit one band child: semantic → its region, adapter → both
+   *  lists. */
   const pushBand = (
     conv: CachedConversion,
     node: PMNode,
@@ -1662,11 +1361,9 @@ export function pmDocToSemantic(
     bandBlockIds.add(adapter.id);
   };
 
-  /** Cache-aware projection of one PM node. Reuses the cached
-   * conversion only when the sibling facts are unchanged (see
-   * CachedConversion); a stale-marker or stale-indent hit reconverts.
-   * codeBlock blocks always carry the code paint hint — merged here so
-   * the cache comparison and the stored facts agree. */
+  /** Cache-aware projection: reuses only when the sibling facts are
+   *  unchanged. codeBlocks always carry the code hint — merged here
+   *  so the cache comparison and the stored facts agree. */
   const projected = (node: PMNode, projectionIn: Projection, pos: number): CachedConversion => {
     const projection: Projection =
       projectionIn.kind === 'codeBlock' && !projectionIn.paint?.code
@@ -1677,25 +1374,17 @@ export function pmDocToSemantic(
       cached &&
       cached.gen === cacheGeneration &&
       cached.indentLeft === projection.indentLeft &&
-      // M-PAGEFIELD: the total gates ONLY field-bearing conversions (a
-      // widened total re-converts — the fixpoint's pass 2); field-free
-      // conversions are total-independent and reuse at ANY warm total
-      // (storing the total on them would break reuse whenever the
-      // caller's total differs).
+      // The total gates only field-bearing conversions (a widened
+      // total re-converts); field-free ones reuse at any total.
       (cached.fieldTotal == null || cached.fieldTotal === fieldTotal) &&
       paintEqual(cached.paint, projection.paint) &&
-      // M-REFS: the scan fact — a referenceTable node reuses its
-      // conversion only under the SAME doc scan (a retitle elsewhere
-      // keeps the node object but changes the scan object). Every
-      // other kind carries undefined on both sides (no-op test).
+      // The scan fact: a referenceTable reuses only under the SAME
+      // doc scan (a retitle keeps the node but changes the scan).
       cached.scan === projection.scan &&
-      // M-REFS: the page-strings fact — a re-resolved number is a NEW
-      // array (identity-stable when unchanged), so the ToC reconverts
-      // exactly when its numbers moved.
+      // A re-resolved number is a new array — reconvert exactly when
+      // the numbers moved.
       cached.refPages === projection.refPages &&
-      // M-REFS-9: the number-display fact (a preset flip changes the
-      // numbers/decor without touching the PM children — the same
-      // sibling-fact pattern as the scan/pages facts).
+      // The number-display fact (a preset flip reconverts).
       cached.numberDisplay === projection.numberDisplay
     ) {
       return cached;
@@ -1712,19 +1401,11 @@ export function pmDocToSemantic(
     return conv;
   };
 
-  /** Commit one projected block: forced breakBefore from a PRECEDING
-   * pageBreak is a sibling fact, applied per call (the clone breaks
-   * object identity for that one block and the engine re-hashes it;
-   * forced-break blocks are rare). M-FLOW: the stamp MERGES over the
-   * block's own resolved flow — a paragraph after an explicit break
-   * may also carry keepNext etc., and replacing the object would drop
-   * them (breakBefore is the one field the stamp owns). A FLOATED
-   * block passes the pending break (and its NPC fact) THROUGH to the
-   * next in-flow block: the engine's validateFloatFlow refuses
-   * breakBefore on floats (a THROW at layout), and its ruled spelling
-   * is "put the forced break on the following text block" — the
-   * pre-M-FLOW unconditional stamp made pageBreak-then-float a crash
-   * path. Positions are always fresh. */
+  /** Commit one projected block. The pageBreak stamp MERGES over the
+   *  block's own flow (breakBefore is the one field the stamp owns).
+   *  A FLOATED block passes the pending break through — the engine
+   *  refuses breakBefore on floats; its ruling: put the forced break
+   *  on the following text block. Positions are always fresh. */
   const push = (conv: CachedConversion, node: PMNode, pos: number): void => {
     const floated =
       conv.semantic.kind === 'image' && (conv.semantic as { float?: unknown }).float != null;
@@ -1740,26 +1421,21 @@ export function pmDocToSemantic(
       pendingBreakFact = null;
       stampedHere = true;
     }
-    // M-FLOW — the previous block's breakAfter anchors HERE (this is
-    // the block it forces), unless the same edge already carries the
-    // explicit node's badge — one badge per page edge.
+    // The previous block's breakAfter anchors HERE, unless the
+    // explicit node's badge already covers the edge.
     if (pendingAfterBreakFact && !floated && !stampedHere) {
       breakFacts.push({ kind: 'pageBreak', type: 'nextPage', pos: pendingAfterBreakFact.pos, afterBlockId: block.id });
     }
     pendingAfterBreakFact = null;
-    // M-FLOW — DIRECT-attr forced breaks badge like the node spelling
-    // (the two spellings, one visual language). Style-tier breaks do
-    // NOT badge (a style that breaks before every heading would paint
-    // every heading — the attr is the user's visible act).
+    // Direct-attr forced breaks badge like the node spelling;
+    // style-tier breaks never badge (a style would paint every
+    // heading).
     const directBreakBefore = node.attrs?.breakBefore;
     if (
       !floated &&
       !stampedHere &&
       (directBreakBefore === 'page' || directBreakBefore === 'column')
     ) {
-      // M-FLOW/#74 — DIRECT-attr forced breaks badge like the node
-      // spelling (the two spellings, one visual language); the badge's
-      // kind follows the spelling.
       breakFacts.push({
         kind: directBreakBefore === 'page' ? 'pageBreak' : 'columnBreak',
         type: 'nextPage',
@@ -1866,22 +1542,16 @@ export function pmDocToSemantic(
   pm.forEach((node, offset) => {
     const name = node.type.name;
 
-    // M-HEADER-FOOTER-2 — the band containers: route their children OUT
-    // of the body flow into the engine's BandSet (never in flow order).
-    // Paragraph/heading children only — a structural child (table, …)
-    // throws the sentinel so the view falls back to pageless (which
-    // renders the container natively), the loud-throws family's law.
+    // Band containers: route their children OUT of the body flow into
+    // the engine's BandSet. Paragraph/heading only — anything else
+    // throws the sentinel (pageless renders it).
     if (name === 'headerBlock' || name === 'footerBlock') {
       sawBandNode = true;
       const variant: HeaderFooterVariant = node.attrs?.variant === 'first' ? 'first' : 'default';
       const region = regionOf(name, variant)!;
-      // #58 — the SECTION TAG: a container tagged with a known
-      // sectionId feeds THAT section's override; untagged (or stale —
-      // the break is gone) containers are the DOC DEFAULT every
-      // non-overriding section inherits (the tagged-containers
-      // decision). Two containers with the same key merge in doc order.
-      // The FINAL section's reserved id maps to the last index (it has
-      // no break node of its own).
+      // #58 — the SECTION TAG: a known sectionId feeds THAT section's
+      // override; untagged or stale containers are the doc default.
+      // The FINAL section's reserved id maps to the last index.
       const tag = node.attrs?.sectionId;
       const sectionIndex =
         tag === FINAL_SECTION_ID
@@ -1946,32 +1616,25 @@ export function pmDocToSemantic(
     }
 
     if (name === 'columnBreak') {
-      // #74 COLUMNS — forced column break on the FOLLOWING block (the
-      // pageBreak law: the node is NOT part of the IR). A trailing
-      // columnBreak is simply skipped (slots derive from placed lines).
+      // #74 — forced column break on the FOLLOWING block (the
+      // pageBreak law); a trailing one is simply skipped.
       pendingBreakBefore = 'column';
-      // #74 — the NPC sidecar (the marker paints just above the
-      // following block's first line, at its column's frame).
+      // The NPC sidecar: the marker paints at its column's frame.
       pendingBreakFact = { kind: 'columnBreak' as const, type: 'nextPage' as const };
       return;
     }
 
     if (name === 'sectionBreak') {
-      // #58 SECTIONS — the node is NOT part of the IR (the pageBreak
-      // law): it is collected as a section boundary. `afterBlock` = the
-      // last projected block's index (−1 when the break opens the doc);
-      // the RESOLUTION below turns the collected breaks into the
-      // engine's section-start table. The engine's boundary law does
-      // the forced close — no pendingBreakBefore here.
+      // #58 — the node is NOT part of the IR: collected as a section
+      // boundary; afterBlock = the last projected block's index. The
+      // engine's boundary law does the forced close.
       sectionBreaksCollected.push({
         afterBlock: semantic.length - 1,
         setup: (node.attrs?.setup ?? null) as PageSetup | null,
         type: node.attrs?.type === 'continuous' ? 'continuous' : 'nextPage',
       });
-      // #58 — the NPC sidecar: the break's kind, type, and the block
-      // FOLLOWING it (the view paints the marker just above that
-      // block's first line — at a page top for nextPage, mid-flow for
-      // continuous). The position rides for the pageless surface.
+      // The NPC sidecar: the break's kind/type and the block following
+      // it; the position rides for the pageless surface.
       breakFacts.push({
         kind: 'sectionBreak',
         type: node.attrs?.type === 'continuous' ? 'continuous' : 'nextPage',
@@ -2003,21 +1666,14 @@ export function pmDocToSemantic(
     } else if (name === 'codeBlock') {
       push(projected(node, { kind: 'codeBlock', indentLeft: 0 }, offset), node, offset);
     } else if (name === 'horizontalRule') {
-      // No atomic union member in the engine (receipt: Block =
-      // paragraph | heading | codeBlock) — project as a single-line
-      // paragraph with a rule paint hint. One LineBox can never
-      // fragment across pages.
+      // No atomic union member — project as a single-line paragraph
+      // with a rule paint hint (one LineBox, never fragments).
       push(projected(node, { kind: 'paragraph', indentLeft: 0, paint: { rule: true } }, offset), node, offset);
     } else if (name === 'image') {
-      // M-IMAGES-1 — the image joins the projection. src is OPAQUE
-      // (echoes through to placed[]); dims are REQUIRED DOCUMENT DATA
-      // (the engine's ImageBlock contract — never fetched at layout
-      // time). A dim-less node is the PENDING-BACKFILL state (legacy
-      // docs): throw the sentinel so the view falls back to pageless
-      // (which renders the node view's natural-size <img>) until the
-      // backfill writes the attrs — the standard update path then
-      // re-enters paginated (the fallback resets on every successful
-      // layout, PaginatedView's relayout receipt).
+      // src is OPAQUE; dims are REQUIRED. A dim-less node is the
+      // pending-backfill state of legacy docs: throw the sentinel so
+      // the view falls back to pageless until the backfill writes
+      // the attrs.
       const imgAttrs = node.attrs as {
         src?: string | null;
         width?: number | null;
@@ -2059,9 +1715,7 @@ export function pmDocToSemantic(
         offset,
       );
     } else if (name === 'equation') {
-      // M-EQ — the equation joins the projection (see convertNode's
-      // equation arm for the dims ruling; color stays out of the
-      // engine — paint-only, derived shell-side).
+      // See convertNode's equation arm for the dims ruling.
       const eqAttrs = node.attrs as { latex?: string; align?: string; scale?: unknown };
       push(
         projected(
@@ -2080,16 +1734,11 @@ export function pmDocToSemantic(
         offset,
       );
     } else if (name === 'table') {
-      // M-TABLES — the table joins the projection: one engine
-      // TableBlock + the cell-paragraph map (see the conversion).
+      // One engine TableBlock + the cell map (see the conversion).
       push(projected(node, { kind: 'table', indentLeft: 0 }, offset), node, offset);
     } else if (name === 'referenceTable') {
-      // M-REFS — the reference table joins the projection: one engine
-      // ReferenceTableBlock per node, entries from the per-call SCAN
-      // (the doc-version fact — the conversion cache reuses only under
-      // the same scan object; a retitle elsewhere reconverts). The
-      // sidecar (entry slices → PM targets) rides the AdapterBlock.
-      // The page strings ride the resolver's identity-stable map.
+      // One engine ReferenceTableBlock per node; the page strings ride
+      // the resolver's identity-stable map.
       push(
         projected(
           node,
@@ -2108,8 +1757,7 @@ export function pmDocToSemantic(
         offset,
       );
     } else {
-      // THE THROW LIST (M6.1, pruned by M-IMAGES-1, M-TABLES and
-      // M-EQ): the last true future feature is (drawing).
+      // The last true future feature is (drawing).
       throw new UnsupportedDocError(
         `[adapter] unsupported block kind '${name}' at offset ${offset}: future features ` +
           '(drawing) — the pageless fallback renders them until the engine supports them'
@@ -2119,10 +1767,8 @@ export function pmDocToSemantic(
 
   warnDroppedAttrs(dropped);
 
-  // M-HEADER-FOOTER-2 — assemble the BandSet (absent when no band nodes
-  // rode the doc: old files, nothing enabled — the engine then reserves
-  // nothing). differentFirstPage rides bandOptions (per call, L4); the
-  // engine picks the first-page vs rest regions off it.
+  // Assemble the BandSet (absent when no band nodes rode the doc);
+  // differentFirstPage rides bandOptions.
   const bands = sawBandNode
     ? {
         ...(bandSemantic.header.length ? { header: bandSemantic.header } : {}),
@@ -2147,13 +1793,9 @@ export function pmDocToSemantic(
     : undefined;
 
   // #58 — THE SECTION RESOLUTION: the collected breaks (each carrying
-  // the PRECEDING section's props — Word's sectPr spelling) become the
-  // engine's section-START table. Section 0 begins at the doc start
-  // with break 0's geometry; boundary k (k ≥ 1) sits after break k−1
-  // and carries break k's geometry; the FINAL section (after the last
-  // break) rides the layout opts — the engine appends the doc
-  // defaults itself (the store-level pageSetup IS the final section's,
-  // the store law). ABSENT when no breaks: the additive law.
+  // the PRECEDING section's props, Word's sectPr spelling) become the
+  // engine's section-START table; the FINAL section rides the layout
+  // opts. ABSENT when no breaks.
   let sections: SectionBoundary[] | undefined;
   if (sectionBreaksCollected.length > 0) {
     // A break without props (hand-crafted/legacy): continuity — the
@@ -2167,12 +1809,10 @@ export function pmDocToSemantic(
       // ≡ one column, so the field is simply omitted.
       return { page: lo.page, margins: lo.margins, ...(lo.columns ? { columns: lo.columns } : {}) };
     };
-    // THE COMPLETE TABLE (n breaks → n+1 sections): section 0 at the
-    // doc start (break 0's props), section k after break k−1 (break
-    // k's props), and the FINAL section after the LAST break riding
-    // the doc's pageSetup (the store law). The engine consumes it
-    // verbatim — no implicit append (it could not know the last
-    // break's position).
+    // n breaks → n+1 sections: section 0 at the doc start (break 0's
+    // props), section k after break k−1, the final section after the
+    // LAST break riding the doc's pageSetup. The engine consumes it
+    // verbatim — no implicit append.
     let prevSetup: PageSetup | null = sectionBreaksCollected[0]!.setup;
     sections = [
       {

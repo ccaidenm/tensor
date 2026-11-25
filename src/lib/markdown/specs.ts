@@ -4,18 +4,9 @@ import { InlineImageNode } from '@/lib/editor/InlineImageNode';
 import { EquationNode } from '@/lib/editor/EquationNode';
 
 /**
- * M-MD — the Markdown mapping specs. Handlers are attached by EXTENDING
- * the real nodes, so the registry keys (the extension NAME) can never
- * drift from the schema node names. The fields are inert in the
- * production editor (nothing there builds a manager) — they are read
- * only by the standalone MarkdownManager (lib/markdown/manager.ts).
- *
- * Tensor nodes with NO spec here ride the stock handlers (paragraph,
- * heading, bold/italic/strike/code, lists, links, blockquote, hr, hard
- * break, highlight, underline, tables) and skip cleanly: nodes without
- * a renderMarkdown handler render '' (headerBlock, footerBlock,
- * referenceTable, pageBreak) — lossy.ts counts them so the export
- * warning can name what is being left behind.
+ * The Markdown mapping specs: handlers ride extensions of the real nodes
+ * (registry keys can never drift from schema names); read only by the
+ * standalone manager. No spec → stock handlers; no renderMarkdown → ''.
  */
 
 /** Markdown alt-text escaping: the only characters that break
@@ -24,12 +15,9 @@ function escapeImageAlt(alt: string): string {
   return alt.replace(/[\\[\]]/g, (char) => `\\${char}`);
 }
 
-/** THE image render (block image and inlineImage share it): the
- *  `media://<sha256>` placeholder goes out verbatim — the export flow
- *  (lib/markdown/exportMarkdown.ts) rewrites the refs to the sibling
- *  `<name>.assets/` paths when writing the file. A content-addressed
- *  sha256 hex can never be confused with prose, so the placeholder is
- *  unambiguous and the rewrite is a plain string pass. */
+/** The shared image render: the `media://<sha256>` placeholder goes out
+ *  verbatim — the export flow rewrites the refs to the sibling
+ *  `<name>.assets/` paths. A sha256 hex can't be confused with prose. */
 function renderImageMarkdown(node: JSONContent): string {
   const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
   const alt = typeof node.attrs?.alt === 'string' ? escapeImageAlt(node.attrs.alt) : '';
@@ -37,14 +25,9 @@ function renderImageMarkdown(node: JSONContent): string {
 }
 
 /**
- * THE image parse. marked tokenizes images as INLINE tokens wherever
- * they appear, and one token type cannot know its future parent — so
- * the spec always produces an inlineImage (the schema's inline group),
- * which is valid inside flowing text. The manager's PROMOTION pass
- * (manager.ts) lifts a top-level paragraph whose ONLY child is an
- * inlineImage into the block image node — a standalone `![pic](x)`
- * line round-trips as the block figure; images nested in list items,
- * blockquotes or cells stay inline, which is what they are.
+ * marked tokenizes images inline wherever they appear — the spec always
+ * produces an inlineImage (valid in flowing text); the manager's
+ * promotion pass (manager.ts) lifts standalone shapes into the block node.
  */
 function parseImageToken(token: MarkdownToken, helpers: MarkdownParseHelpers): JSONContent {
   const shape = token as { href?: unknown; text?: unknown };
@@ -66,26 +49,20 @@ export const MarkdownImageNode = ImageNode.extend({
 });
 
 export const MarkdownInlineImageNode = InlineImageNode.extend({
-  // RENDER only: the 'image' token handler above owns parsing — a
-  // second handler under the same token name would be dead weight.
+  // Render only: the 'image' token handler above owns parsing.
   renderMarkdown: renderImageMarkdown,
 });
 
 /**
- * THE equation spec: display math rides the `$$…$$` convention
- * (Obsidian/Joplin/Pandoc territory) via a custom block tokenizer —
- * marked has no native math syntax. Display-only is COMPLETE, not a
- * subset: the equation node IS a block atom, there is no inline math
- * in the model. The latex body travels verbatim (trimmed); a `$$`
- * without a closing fence fails the tokenizer and stays prose.
+ * Display math rides the `$$…$$` convention via a custom block tokenizer
+ * (marked has no native math). Display-only is complete — the node is a
+ * block atom; an unclosed `$$` fails the tokenizer and stays prose.
  */
 const EQUATION_TOKENIZER: MarkdownTokenizer = {
   name: 'equation',
   level: 'block',
-  // LINE-START only: marked uses start() to know where the next
-  // possible block begins — a mid-line match would slice prose mid-line
-  // ("costs $$ today" must stay prose). A $$ at a line start is where
-  // a display-math block can legally begin.
+  // Line-start only: marked uses start() to find the next possible block —
+  // a mid-line match would slice prose ("costs $$ today" stays prose).
   start: (src) => {
     const match = /(^|\n)\$\$/.exec(src);
     return match ? match.index + match[1].length : -1;

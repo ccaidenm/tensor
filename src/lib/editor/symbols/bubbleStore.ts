@@ -1,11 +1,9 @@
 import { create } from 'zustand';
 
 /**
- * THE SYMBOL BUBBLE STORE — the bubble's mount lives in App.tsx (NOT
- * inside the Insert tab's TabsContent), so it PERSISTS across ribbon
- * tab switches: park it in a corner, switch to Home, keep dropping
- * symbols. The ribbon button only OPENS it (with its rect as the
- * anchor); closing is the bubble's business (Done / the toggle).
+ * THE SYMBOL BUBBLE STORE — the bubble mounts in App.tsx, NOT inside
+ * the Insert tab, so it PERSISTS across ribbon tab switches. The
+ * ribbon button only OPENS it; closing is the bubble's business.
  */
 interface SymbolBubbleStore {
   open: boolean;

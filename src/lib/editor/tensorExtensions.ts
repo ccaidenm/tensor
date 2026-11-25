@@ -26,30 +26,25 @@ import { ScrollGuardExtension } from '@/lib/paginated/ScrollGuardExtension';
 import { PageBreakNode } from '@/lib/pagination/PageBreakNode';
 import { ColumnBreakNode } from '@/lib/pagination/ColumnBreakNode';
 import { SectionBreakNode } from '@/lib/pagination/SectionBreakNode';
-// M-HEADER-FOOTER-2: the doc-level header/footer containers — content
-// rides the ONE PM doc (L3); the adapter routes them into doc.bands.
+// The doc-level header/footer containers — content rides the ONE PM
+// doc; the adapter routes them into doc.bands.
 import { FooterBlock, HeaderBlock } from '@/lib/editor/HeaderFooterNodes';
-// M-MD: the markdown-mapped variants — the SAME nodes extended with
-// their markdown handlers. The fields are inert in the production
-// editor (nothing there builds a manager); lib/markdown/manager.ts
-// builds its standalone MarkdownManager from this very list.
+// The markdown-mapped variants — the SAME nodes with markdown
+// handlers; inert in production (nothing there builds a manager);
+// lib/markdown/manager.ts builds its MarkdownManager from this list.
 import { MarkdownImageNode, MarkdownInlineImageNode, MarkdownEquationNode } from '@/lib/markdown/specs';
 import { PageFieldNode } from '@/lib/editor/PageFieldNode';
 import { TensorTableKit } from '@/lib/editor/TableExtensions';
-// M-EQ: display equations — a block atom (the ImageNode family);
-// latex is the node's only document data, rendering is a
-// projection (lib/equations), paginated layout rides the engine's
-// EquationBlock + EquationMetrics port.
-// (M-MD: the markdown-mapped variant comes from lib/markdown/specs.)
-// M-REFS: the reference-table node (ToC/ToF/Index — one generic block
-// container; entries are real paragraphs the generator maintains) +
-// the invisible indexEntry mark + the debounced rescan seam + THE
-// GENERATOR (the container's reconciliation engine).
+// Display equations — a block atom; latex is the only document data,
+// rendering is a projection (lib/equations); the markdown-mapped
+// variant comes from lib/markdown/specs.
+// The reference-table node (ToC/ToF/Index) + the invisible indexEntry
+// mark + the debounced rescan seam + the generator.
 import { ReferenceTableNode } from '@/lib/editor/ReferenceTableNode';
 import { IndexMark } from '@/lib/editor/IndexMark';
 import { RefLeaderMark } from '@/lib/editor/RefLeaderMark';
-// #COMMENTS: the comment mark (the anchoring half — attrs.threadId) +
-// the tracking plugin (anchored scan, the janitor, active-thread).
+// The comment mark (attrs.threadId) + the tracking plugin (anchored
+// scan, the janitor, active-thread).
 import { CommentMark } from '@/lib/editor/CommentExtension';
 import { ReferenceScanExtension } from '@/lib/references/store';
 import { ReferenceGeneratorExtension } from '@/lib/references/generator';
@@ -58,6 +53,8 @@ import { PageSetupHistoryExtension } from '@/lib/editor/pageSetupHistoryExtensio
 /** The Tensor editor's extension list — one source shared by the app
  * shell (Editor.tsx) and the test harness so tests exercise the exact
  * production editor. */
+import { PlaceholderExtension } from './PlaceholderExtension';
+
 export function tensorExtensions(): Extensions {
   return [
     StarterKit.configure({
@@ -82,8 +79,9 @@ export function tensorExtensions(): Extensions {
     Color,
     Highlight.configure({ multicolor: true }),
     FontSize,
-    // M-STYLES: the charStyle mark (registry reference; one per span)
-    // + apply/convert commands + the reactive heading-sync plugin.
+    PlaceholderExtension,
+    // The charStyle mark (registry reference) + apply/convert commands
+    // + the reactive heading-sync plugin.
     CharStyleMark,
     StyleCommandsExtension,
     TextAlignNoShortcut.configure({ types: ['heading', 'paragraph'] }),
@@ -105,39 +103,31 @@ export function tensorExtensions(): Extensions {
     // engine's forced-break spelling (flow.breakBefore: 'page').
     PageBreakNode,
     ColumnBreakNode,
-    // #58 SECTIONS: the sectionBreak atom — the adapter translates it
-    // into the engine's per-section geometry boundaries (the node is
-    // NOT part of the IR; the pageBreak law).
+    // #58 — the sectionBreak atom; the adapter translates it into the
+    // engine's per-section geometry boundaries (not part of the IR).
     SectionBreakNode,
-        // M-MD: the markdown-mapped image/equation nodes (same schema, same
-    // names — the markdown handlers ride along, inert in production).
+    // The markdown-mapped image/equation nodes — same schema, same
+    // names; the markdown handlers ride along, inert in production.
     MarkdownImageNode,
     MarkdownInlineImageNode,
-    // M-PAGEFIELD: the page-number field (bands resolve per page).
+    // The page-number field (bands resolve per page).
     PageFieldNode,
-    // M-TABLES: the TipTap table family (schema + commands + the
-    // built-in columnResizing plugin via `resizable`) plus Tensor's
-    // borderStyle/backgroundColor attrs. Pages mode falls back to the
-    // pageless render until the engine grows the TableBlock kind.
+    // The TipTap table family (schema + commands + columnResizing via
+    // `resizable`) plus Tensor's borderStyle/backgroundColor attrs.
     ...TensorTableKit,
-    // M-HEADER-FOOTER-2: the header/footer container nodes.
+    // The header/footer container nodes.
     HeaderBlock,
     FooterBlock,
-    // M-EQ: display equations — a block atom (the ImageNode family);
-    // latex is the node's only document data, rendering is a
-    // projection (lib/equations), paginated layout rides the engine's
-    // EquationBlock + EquationMetrics port.
+    // Display equations — a block atom; latex is the only document
+    // data, rendering is a projection (lib/equations).
     MarkdownEquationNode,
-    // M-REFS: the reference tables (ToC/ToF/Index) — the generic
-    // collection container (kind/depth attrs only; entries are real
-    // paragraphs the generator keeps in sync) + the invisible index
-    // mark + the debounced rescan publisher + the generator itself.
+    // The reference tables (ToC/ToF/Index) + the invisible index mark +
+    // the debounced rescan publisher + the generator.
     ReferenceTableNode,
     IndexMark,
     RefLeaderMark,
-    // #COMMENTS: the invisible comment mark + tracking plugin (after
-    // the marks family, before the history-override tail — order among
-    // marks is irrelevant; the plugin rides the mark's own registration).
+    // The invisible comment mark + tracking plugin (order among marks
+    // is irrelevant; the plugin rides the mark's own registration).
     CommentMark,
     ReferenceScanExtension,
     ReferenceGeneratorExtension,
@@ -146,7 +136,7 @@ export function tensorExtensions(): Extensions {
     // the raw history would half-undo a page-setup action).
     PageSetupHistoryExtension,
     // Stable block ids (engine edit-survival contract) + the
-    // paginated-mode scroll guard (L3).
+    // paginated-mode scroll guard.
     BlockIdExtension,
     ScrollGuardExtension,
   ];

@@ -5,33 +5,13 @@ import { useConfigStore } from '@/lib/config/store';
 import { announce } from '@/lib/accessibility/announce';
 
 /**
- * #COMMENTS — the thread-content store, beside the document store.
- *
- * THE TWO-HALF MODEL: the ANCHORING half lives in the PM document (the
- * `comment` mark, attrs.threadId — CommentExtension.ts) and rides
- * docJSON like any content; the CONTENT half (entries, authors,
- * timestamps, resolved) lives HERE and travels in .wpdoc metadata as
- * `metadata.commentThreads` (the lineNumbers optional-field precedent).
- * The ids are the JOIN: one nanoid minted at creation names both the
- * mark's threadId and the store record.
- *
- * Why a separate store and not PM attrs: entries/replies/resolution are
- * document DATA that must survive save/close/reopen, but they are not
- * prose — putting them in the PM doc would make every comment edit a
- * document transaction (undo history pollution, layout rescans). The
- * store is the deliberate sidecar; `threadsForSave` + `hydrate` are the
- * file seam, exactly like pageStyles/lineNumbers.
- *
- * SESSION-ONLY fields (never persisted): activeThreadId (the caret's
- * thread — like the search plugin's current match), showResolved (the
- * gutter's reveal toggle). Every launch starts with them default.
- *
- * THE LOAD-ORDER LAW: on every open path (wpdoc/markdown/docx, and the
- * future recovery-restore UI), `hydrate` runs BEFORE editor.setContent
- * — the tracking plugin's janitor strips marks whose threadId has no
- * store record, so a late hydrate would destroy the freshly-loaded
- * document's anchors (openDocument does the ordering; the media-store
- * precedent — openV2 feeds the MediaStore during open).
+ * The thread-content store. Anchoring lives in the PM doc (the
+ * `comment` mark); entries/authors/resolution live here and travel in
+ * .wpdoc metadata — comment edits must not pollute undo history or
+ * trigger layout rescans. hydrate runs BEFORE editor.setContent on
+ * every open path: the tracking plugin strips marks with no store
+ * record, so a late hydrate would destroy fresh anchors.
+ * activeThreadId, showResolved, and draftThreadId are session-only.
  */
 
 export interface CommentEntry {
@@ -49,9 +29,8 @@ export interface CommentEntry {
 export interface CommentThread {
   /** = the comment mark's threadId (the JOIN, stable across saves). */
   id: string;
-  /** First entry = the thread's opening comment; the rest are replies,
-   *  in conversation order. ≥1 always (deleting the last entry deletes
-   *  the thread — GDocs behavior). */
+  /** The first entry is the opening comment; ≥1 always (deleting the
+   *  last entry deletes the thread). */
   entries: CommentEntry[];
   resolved: boolean;
   resolvedAt?: string;
@@ -60,35 +39,27 @@ export interface CommentThread {
 
 interface CommentStore {
   threads: Record<string, CommentThread>;
-  /** Thread ids with ≥1 live mark in the PM doc — the tracking
-   *  plugin's scan write. A thread WITHOUT its id here is ORPHANED (the
-   *  full range was deleted): visible in the gutter with a clear
-   *  affordance, never silently gone. */
+  /** Threads with ≥1 live mark. A thread without its id here is
+   *  orphaned — visible in the gutter, never silently gone. */
   anchoredIds: ReadonlySet<string>;
   /** The thread under the caret (selection tracking). */
   activeThreadId: string | null;
   /** Resolved threads hidden by default; the gutter's show toggle. */
   showResolved: boolean;
-  /** The in-flight DRAFT (session-only): the thread the user just
-   *  anchored and is composing the first entry for. Its card renders
-   *  as a composer; submit fills the text, cancel deletes the thread
-   *  (and its mark). The GDocs comment flow. */
+  /** The in-flight draft (session-only): the thread being composed;
+   *  cancel deletes it and its mark. */
   draftThreadId: string | null;
 
-  /** The open-path seam: replaces ALL thread state (stale ghosts from
-   *  the previously-open document must never survive an open). Threads
-   *  whose entries are ALL empty text are IN-FLIGHT DRAFTS — they do
-   *  not survive a reopen (the GDocs discard-on-close behavior; the
-   *  empty-anchor mark is janitor-stripped as part of the same rule). */
+  /** The open-path seam: replaces ALL thread state. All-empty threads
+   *  (drafts) don't survive a reopen. */
   hydrate: (threads: CommentThread[]) => void;
   /** The tracking plugin's doc-scan write (anchored membership). */
   setAnchoredIds: (ids: ReadonlySet<string>) => void;
   setActiveThread: (id: string | null) => void;
   setShowResolved: (show: boolean) => void;
 
-  /** Create a thread (the FIRST entry). The command mints the id and
-   *  calls this BEFORE setMark (the WRITE-ORDER law: the janitor must
-   *  never observe a mark whose thread is not yet in the store). */
+  /** Create with the first entry; called BEFORE setMark — the janitor
+   *  must never see a mark with no store record. */
   addThread: (threadId: string, text: string) => void;
   /** The comment flow: an anchored draft (an empty first entry) the
    *  composer fills. Submit fills the entry text and clears the draft
@@ -106,17 +77,13 @@ interface CommentStore {
   deleteThread: (threadId: string) => void;
   setResolved: (threadId: string, resolved: boolean) => void;
 
-  /** The save seam: threads as an ordered array (absent-when-empty is
-   *  the caller's job — assembleDocumentFile spreads conditionally).
-   *  In-flight drafts write WITH their empty entry (session data — a
-   *  crash mid-draft keeps the anchor; a REOPEN prunes empty threads,
-   *  see hydrate). */
+  /** Threads as an ordered array for the save seam;
+   *  absent-when-empty is the caller's job. */
   threadsForSave: () => CommentThread[];
 }
 
-/** The author display name for a NEW entry: the document's own author
- *  (Properties dialog / DOCX import), else the app identity (Settings
- *  > General > User — the pristine-document posture), else Anonymous. */
+/** The author for a new entry: the document's author, else the app
+ * identity, else Anonymous. */
 function currentAuthor(): string {
   const docAuthor = useDocumentStore.getState().coreProperties.author;
   if (docAuthor) return docAuthor;
@@ -146,9 +113,7 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
   hydrate: (threads) => {
     const record: Record<string, CommentThread> = {};
     for (const t of threads) {
-      // In-flight drafts (ALL entries empty) do not survive a reopen —
-      // the GDocs discard-on-close behavior; the janitor strips their
-      // now-unknown marks as part of the same rule.
+      // In-flight drafts (all entries empty) don't survive a reopen.
       if (t.entries.every((e) => e.text.trim() === '')) continue;
       record[t.id] = t;
     }
@@ -159,8 +124,7 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
 
   setAnchoredIds: (ids) => {
     const { anchoredIds } = get();
-    // Membership-compare (not reference): the scan runs on every
-    // touched keystroke — an equal Set must not re-render subscribers.
+    // Membership-compare: an equal Set must not re-render subscribers.
     if (ids.size === anchoredIds.size && [...ids].every((id) => anchoredIds.has(id))) return;
     set({ anchoredIds: ids });
   },
@@ -209,8 +173,6 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
       };
     });
     useDocumentStore.getState().markDirty();
-    // THE SR LAW: thread state changes are announced (the aria-live
-    // region — polite, never assertive).
     announce('Comment added');
   },
 
@@ -280,11 +242,8 @@ export const useCommentStore = create<CommentStore>((set, get) => ({
   },
 
   deleteThread: (threadId) => {
-    // Strip the marks FIRST (a document transaction), then drop the
-    // record — the janitor's order reversed, but idempotent: a mark
-    // whose thread vanished would be stripped by the janitor anyway;
-    // doing it explicitly keeps the PM doc honest even when the store
-    // write fails.
+    // Strip the marks first, then drop the record — idempotent with
+    // the janitor either way.
     const editor = useDocumentStore.getState().editor;
     const markType = editor?.schema.marks.comment;
     if (editor && markType) {

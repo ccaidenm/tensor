@@ -57,12 +57,12 @@ async function exportParts(input: DocxExportInput) {
 }
 
 /**
- * #74 COLUMNS — the shell suite. The ENGINE's laws live in the engine's
- * own suite (packages/engine/tests/columns.test.ts); this file pins the
- * SHELL seams: the persistence + pipeline (store pageSetup →
- * toLayoutOptions → the engine's opts; per-section specs ride the
- * sectionBreak setup verbatim), the column-correct rendering, and the
- * manual column-break node.
+ * #74 — the columns shell suite. The engine-side behavior lives in
+ * packages/engine/tests/columns.test.ts; this file pins the SHELL
+ * seams: the persistence + pipeline (store pageSetup → toLayoutOptions
+ * → the engine's opts; per-section specs ride the sectionBreak setup
+ * verbatim), the column-correct rendering, and the manual column-break
+ * node.
  */
 
 const LETTER: PageSetup = {
@@ -128,7 +128,7 @@ describe('columns — the persistence + pipeline', () => {
 
   it('toLayoutOptions carries the document-level column spec (gap pt → px; null ≡ absent ≡ one column)', () => {
     const withColumns = toLayoutOptions({ ...LETTER, columns: TWO_COL });
-    // The store law: the setup's gap is POINTS; the boundary converts.
+    // The setup's gap is POINTS; the boundary converts.
     expect(withColumns.columns).toEqual({ count: 2, gap: 48 });
     // null is the PM round-trip spelling of "none" — mapped away.
     expect(toLayoutOptions({ ...LETTER, columns: null }).columns).toBeUndefined();
@@ -280,8 +280,8 @@ describe('columns — the manual column break (ColumnBreakNode)', () => {
       undefined,
       useDocumentStore.getState().pageSetup,
     );
-    // The pageBreak law: the node is NOT part of the IR — the FOLLOWING
-    // block carries the forced break.
+    // The node is NOT part of the IR — the FOLLOWING block carries
+    // the forced break.
     const two = sem.doc.blocks.find((b) => b.id.endsWith('-two') || (sem.doc.blocks.indexOf(b) === 1));
     expect(two!.flow?.breakBefore).toBe('column');
     // The NPC sidecar: the badge anchors above "two"'s first line.
@@ -293,10 +293,9 @@ describe('columns — the manual column break (ColumnBreakNode)', () => {
   it('a trailing columnBreak stamps the next block if one follows (the harness normalizes one in)', () => {
     // TipTap normalizes a doc to `block+` — a trailing atom gets an
     // empty paragraph appended, so "nothing follows" is unreachable
-    // through setContent; the LAW is what's pinned: the atom forces
-    // the FOLLOWING block (here the normalized empty one), and a
-    // genuinely trailing atom would simply skip (the pageBreak law —
-    // pages/slots derive from placed lines).
+    // through setContent. What's pinned: the atom forces the FOLLOWING
+    // block (here the normalized empty one); a genuinely trailing
+    // atom would simply skip (pages/slots derive from placed lines).
     const { editor } = renderTensor('<p>one</p><div data-column-break></div>');
     const sem = pmDocToSemantic(
       editor.state.doc,
@@ -381,8 +380,8 @@ describe('columns — the Columns surfaces (the dialog, the popover, the button)
     // Preset "Three" drafts count 3; Done applies document-wide.
     fireEvent.click([...document.querySelectorAll('button')].find((b) => b.textContent === 'Three')!);
     fireEvent.click(document.querySelector('[data-testid="columns-dialog-done"]')!);
-    // The store carries the spec; the break's setup merged it too (the
-    // document scope's one-transaction law).
+    // The store carries the spec; the break's setup merged it too
+    // (the document scope is one transaction).
     expect(useDocumentStore.getState().pageSetup.columns).toEqual({ count: 3, gap: 36 });
     const breakPos = ((): number | null => {
       let found: number | null = null;

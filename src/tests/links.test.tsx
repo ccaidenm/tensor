@@ -11,7 +11,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 
 /**
  * Links in the paginated tree: the LinkBubble mounts with
- * PAINTED-rect anchors (L3), Ctrl/Cmd+click on a painted link opens it,
+ * PAINTED-rect anchors, Ctrl/Cmd+click on a painted link opens it,
  * plain click places the caret (the committed legacy rule).
  */
 

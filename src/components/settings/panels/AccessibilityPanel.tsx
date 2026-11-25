@@ -26,11 +26,6 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
   );
 }
 
-/**
- * ACCESSIBILITY — the senses the app adapts to. Reduce Motion moved
- * here from General (its natural home); the grammar double line is the
- * color-blind aid for the spell-check flags.
- */
 export function AccessibilityPanel() {
   const reduceMotion = useConfigStore((s) => s.config.accessibility.reduceMotion);
   const setReduceMotion = useConfigStore((s) => s.setReduceMotion);

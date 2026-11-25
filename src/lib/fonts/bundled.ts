@@ -1,19 +1,7 @@
 /**
- * M-FONTS-A. The bundled catalog: system fallbacks + the Geist
- * Variable precedent + curated OFL families via Fontsource CSS
- * imports. The registry seeds itself from BUNDLED_FONTS at store
- * creation; these imports are what actually makes the families load in
- * the app (the Geist precedent — index.css's @fontsource-variable
- * import). files entries are the per-face CSS specifiers — also the
- * receipt keys for the on-disk bold-resolution test (each maps to
- * node_modules/@fontsource/<pkg>/files/<pkg>-latin-<w>-<s>.woff2).
- *
- * CATOLOG RULING: no Roboto (product-identity — reads as
- * default-Android; the catalog complements Geist). Manrope/Sora/
- * IBM Plex Sans took its slots. Per-family claims are exactly what
- * Fontsource ships: Fira Code, Manrope, and Sora have NO italic design
- * (verified on disk) — their entries claim only regular+bold, and the
- * dialog never previews a face they don't have.
+ * The bundled catalog: the CSS imports above are what actually load
+ * the families (the registry only seeds from BUNDLED_FONTS); `files`
+ * entries double as receipt keys for the on-disk bold-resolution test.
  */
 
 import '@fontsource-variable/geist/wght.css';
@@ -62,8 +50,8 @@ import '@fontsource/sora/700.css';
 
 import type { FontEntry } from './registry';
 
-/** The UI font (index.css precedent) — registered as a variable font:
- *  700 weights the axis; there is no static bold FILE. */
+/** The UI font — a variable font: 700 weights the axis; there is no
+ *  static bold file. */
 const GEIST: FontEntry = {
   id: 'bundled:geist',
   family: 'Geist Variable',
@@ -73,13 +61,9 @@ const GEIST: FontEntry = {
   status: 'ready',
 };
 
-/** System fallbacks (the old FontGroup hard-coded list): no files —
- *  the OS resolves them; the browser dialog's preview DEGRADES
- *  gracefully (family string renders via whatever the system
- *  provides; on a machine without Georgia, its preview line falls
- *  back visually and that is by design). Source 'system' (the
- *  OS's families), NOT 'bundled' (Tensor's own catalog) — the source
- *  badges and filters distinguish them. */
+/** System fallbacks: no `files` — the OS resolves them and previews
+ *  degrade gracefully by design. Source is 'system' (the OS's
+ *  families), not 'bundled', so badges and filters distinguish them. */
 const SYSTEM: FontEntry[] = [
   ['system-ui', 'System UI'],
   ['Arial', 'Arial'],
@@ -95,8 +79,8 @@ const SYSTEM: FontEntry[] = [
   status: 'ready' as const,
 }));
 
-/** Curated OFL families — files are per-face CSS specifiers matching
- *  the imports above. */
+/** Curated OFL families — `files` are per-face CSS specifiers
+ *  matching the imports above. */
 const FONTSOURCE: FontEntry[] = [
   fontsource('open-sans', 'Open Sans', { italic: true, boldItalic: true }),
   fontsource('lora', 'Lora', { italic: true, boldItalic: true }),

@@ -10,29 +10,9 @@ import { commentTrackingKey } from '@/lib/editor/CommentExtension';
 import { announce } from '@/lib/accessibility/announce';
 
 /**
- * #COMMENTS — one thread card in the boundary gutter. Shadcn-native
- * surfaces (Button/Textarea/IconButton — no title attrs, aria-labels
- * on icon buttons per the house law).
- *
- * THE LAYOUT (the GDocs chain, redesigned):
- *   ┌──────────────────────────────────────────────┐
- *   │ [AL] Anonymous · Jan 5, 3:04 PM    ✓  🗑     │  header: avatar, author, time,
- *   │                                    (hover)  │  status — card actions on hover
- *   │ “the commented text…”                       │  the anchored SNIPPET — the ONE
- *   │                                              │  jump affordance (click → select
- *   │ The opening comment body.                    │  + focus the range)
- *   │ Bob · Jan 6 → the reply body.                 │  replies: author·time, then body
- *   │ [Reply…]                                     │  grows with text
- *   └──────────────────────────────────────────────┘
- *
- * THE FOCUS LAW (the user's ruling): the composer's textbox is the
- * ONLY card-side focus affordance — clicking it focuses it (native),
- * and the active-thread effect hands focus back when the caret returns
- * to the anchored text. Nothing else on the card steals focus.
- *
- * THE ORPHANED STATE (the issue's "never silently gone"): no live
- * anchor → no snippet row, an Unanchored badge in the header, and the
- * conversation stays fully readable/deletable.
+ * One thread card in the boundary gutter. The composer's textbox is the
+ * only card-side focus affordance; the active-thread effect hands focus
+ * back when the caret returns to the anchored text.
  */
 
 /** Absolute timestamp, compact ("Jan 5, 3:04 PM"). */
@@ -46,12 +26,9 @@ function formatTimestamp(iso: string): string {
 }
 
 /**
- * AUTO-GROW: the comment textareas size to their content — no manual
- * resize handle (`resize-none`; the browser's default corner grip is
- * gone). Deterministic across engines: the ui Textarea's
- * field-sizing-content is best-effort (WebKitGTK support varies), so
- * the explicit height is authoritative everywhere. Called from each
- * textarea's ref callback (mount sizing) and onChange (typing).
+ * The comment textareas size to their content (resize-none — no corner
+ * grip). The ui Textarea's field-sizing-content is best-effort
+ * (WebKitGTK varies), so the explicit height is authoritative.
  */
 function autogrow(el: HTMLTextAreaElement | null): void {
   if (!el) return;
@@ -59,10 +36,9 @@ function autogrow(el: HTMLTextAreaElement | null): void {
   el.style.height = `${el.scrollHeight}px`;
 }
 
-/** The anchored text excerpt — the card's context line. First marked
- *  piece's text, whitespace-flattened, ellipsized. Null = orphaned (or
- *  no editor yet). A FRESH read at render time (the gutter re-renders
- *  on editor transactions — the house's recompute-per-render pattern). */
+/** The anchored text excerpt (first marked piece, whitespace-flattened,
+ *  ellipsized). Null = orphaned (or no editor yet). A fresh read at
+ *  render time — the gutter re-renders on editor transactions. */
 function anchorSnippet(threadId: string): string | null {
   const editor = useDocumentStore.getState().editor;
   if (!editor) return null;
@@ -100,17 +76,15 @@ export function CommentThreadCard({
   const [replyText, setReplyText] = useState('');
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
-  // THE ACTIVE-THREAD RE-FOCUS (the return path): clicking the anchored
-  // TEXT makes the draft the active thread — the effect hands focus
-  // back to the composer. The textbox itself is the only other focus
-  // affordance (the focus law — nothing else on the card steals it).
+  // Clicking the anchored text makes the draft the active thread — the
+  // effect hands focus back to the composer; nothing else on the card
+  // steals focus.
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     if (isDraft && active) draftRef.current?.focus();
   }, [isDraft, active]);
-  // The reply box's height follows its value — including the CLEAR
-  // after posting, which fires no onChange (a state write). The
-  // layout effect covers mount, typing, and the reset in one law.
+  // The reply box's height follows its value — the clear after posting
+  // fires no onChange, hence the layout effect.
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   useLayoutEffect(() => {
     autogrow(replyRef.current);
@@ -153,10 +127,7 @@ export function CommentThreadCard({
       )}
       style={{ top: `${top}px` }}
     >
-      {/* THE HEADER — the thread's author + time + status. Card actions
-          (resolve, delete) reveal on hover/focus-within; the status
-          badges ride inline. NOT a button — the snippet below is the
-          jump affordance. */}
+      {/* The header is NOT a button — the snippet below is the jump affordance. */}
       <div className="flex items-center gap-2">
         <span
           aria-hidden="true"
@@ -196,9 +167,7 @@ export function CommentThreadCard({
         </span>
       </div>
 
-      {/* THE SNIPPET — the anchored text excerpt, and the ONE jump
-          affordance: clicking selects the range, focuses the editor
-          (making this the active thread), and scrolls to it. */}
+      {/* The snippet — the one jump affordance: select the range, focus, scroll. */}
       {snippet && (
         <button
           type="button"
@@ -211,9 +180,8 @@ export function CommentThreadCard({
         </button>
       )}
 
-      {/* THE DRAFT COMPOSER — the GDocs flow: an anchored thread whose
-          first entry is empty until posted; cancel removes the thread
-          AND its mark (an unsent draft leaves nothing behind). */}
+      {/* The draft composer: cancel removes the thread AND its mark —
+          an unsent draft leaves nothing behind. */}
       {isDraft ? (
         <div className="mt-2">
           <Textarea
@@ -270,11 +238,8 @@ export function CommentThreadCard({
         </div>
       ) : (
         <>
-          {/* THE CHAIN — the opening comment body up top (its author
-              lives in the header), replies below with their own
-              author · time line. Per-entry hover actions (edit,
-              delete) at the body's right — pr-10 keeps long lines
-              from running under them. */}
+          {/* Per-entry hover actions sit at the body's right — pr-10
+              keeps long lines from running under them. */}
           <ul className="mt-2 space-y-2">
             {thread.entries.map((entry, idx) => (
               <li key={entry.id} className="group/entry relative">
@@ -338,8 +303,6 @@ export function CommentThreadCard({
             ))}
           </ul>
 
-          {/* THE REPLY ROW — Enter sends, Shift+Enter newlines; grows
-              with the text (no resize handle — the autogrow law). */}
           <div className="mt-2">
             <Textarea
               data-testid={`comment-reply-${thread.id}`}

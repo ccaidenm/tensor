@@ -44,8 +44,8 @@ const canvasesOn = (pageIndex: number) =>
   document.querySelector(`[data-page-index="${pageIndex}"]`)?.querySelectorAll('canvas').length ?? 0;
 
 const allCanvases = () =>
-  // The ruler bars own canvases too (M-RULER) — the virtualization
-  // counts are about BLOCK canvases, so exclude both.
+  // The ruler bars own canvases too — the virtualization counts are
+  // about BLOCK canvases, so exclude both.
   document.querySelectorAll(
     'canvas:not([data-testid="ruler-canvas"]):not([data-testid="ruler-vertical-canvas"])',
   ).length;

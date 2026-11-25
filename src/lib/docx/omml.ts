@@ -1,16 +1,10 @@
 import { oKids, oSub, oat, type ONode } from './oxml';
 
 /**
- * M-DOCX — OMML → LaTeX (#38a import side). Word stores equations as
- * OMML (Office Math Markup); Tensor stores LaTeX. The OMML grammar is
- * small and structured, so a direct mapper beats an XSLT detour.
- * Traversal rides the ONode model (oxml.ts).
- *
- * Scope ruling: the CONSTRUCTS Word actually writes for typed math —
- * fractions, radicals, scripts, n-ary operators, delimiters, accents,
- * bars, functions, limits, matrices. Anything outside the subset
- * degrades to its literal text (never a silent loss — the equation
- * stays readable, counted in the import report).
+ * OMML → LaTeX (#38 import side): Word stores equations as OMML,
+ * Tensor as LaTeX. Covers the constructs Word actually writes for
+ * typed math; anything outside the subset degrades to its literal
+ * text (never a silent loss — counted in the import report).
  */
 
 interface OmmlState { degraded: number }
@@ -192,7 +186,7 @@ function convertOne(kid: ONode, state: OmmlState): string {
     case 'argSz':
       return ''; // property containers carry no math
     default: {
-      // Unknown construct: RECURSE into its children (the math inside
+      // Unknown construct: recurse into its children (the math inside
       // survives), count it — never a silent loss.
       state.degraded += 1;
       return convertKids(kid, state) || escapeMathText(kid.text);

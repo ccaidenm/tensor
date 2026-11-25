@@ -1,24 +1,9 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 
 /**
- * M-PAGEFIELD (#34) — the page-number FIELD: an inline atom in band
- * content that resolves to the CURRENT page number ('page') or the
- * document's total page count ('pages') — the "Page X of Y" footer
- * composed as literal text around two fields, Word's own spelling.
- *
- * THE RESOLUTION LAW (the M-REFS family): numbers are LAYOUT facts —
- * the PM node is a marker, never carrying a resolved value (never
- * saved, never stale). The ADAPTER emits the field as a text run
- * measured at the warm total's max-width digits (the widest page
- * number string — layout-stable across pages); the PAINT resolves
- * per page (each page's echoed band lines draw their own number);
- * the SHELL's two-pass fixpoint re-lays-out when the total's digit
- * width changes. The ENGINE never reads the field — the run is plain
- * text to it (the fieldKind marker is deliberately unhashed).
- *
- * PAGELESS: page numbers are meaningless without pages — the
- * pageless view renders the chip (this node's DOM), a known and
- * honest divergence.
+ * #34 — the page-number FIELD: an inline atom resolving to the current
+ * page ('page') or total count ('pages'). The node is a marker, never
+ * a saved value; paint resolves per page (the engine never reads it).
  */
 export const PageFieldNode = Node.create({
   name: 'pageField',
@@ -44,11 +29,8 @@ export const PageFieldNode = Node.create({
   },
 
   /**
-   * THE PLAIN-TEXT SPELLING (clipboard text/plain + the spell/search
-   * token): a stable braced label. Copy/paste round-trips through
-   * PM's HTML path (renderHTML/parseHTML above); the plain-text
-   * flavor carries the label so external targets and the menu's
-   * text-only paste replay show WHAT was there instead of nothing.
+   * The plain-text spelling (clipboard text/plain, spell/search):
+   * a stable braced label so external targets see WHAT was there.
    */
   renderText({ node }: { node: { attrs: { kind?: string } } }) {
     return node.attrs.kind === 'pages' ? '{NUMPAGES}' : '{PAGE}';
@@ -56,10 +38,9 @@ export const PageFieldNode = Node.create({
 
   renderHTML({ node }: { node: { attrs: Record<string, unknown>; type: { name: string } } }) {
     const pages = node.attrs.kind === 'pages';
-    // The chip: the editor's own surface (the paginated canvas paints
-    // the resolved number; this DOM is the pageless view + the
-    // clipboard's spelling). Inline styles — self-contained, no CSS
-    // sheet dependency.
+    // The chip: the pageless view + clipboard spelling (the paginated
+    // canvas paints the resolved number). Inline styles — no CSS sheet
+    // dependency.
     return [
       'span',
       mergeAttributes(

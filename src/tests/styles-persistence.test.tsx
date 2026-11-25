@@ -8,11 +8,10 @@ import { useDocumentStore } from '@/lib/document/store';
 import type { StyleDefinition } from '@/lib/styles/types';
 
 /**
- * M-STYLES STEP 5: persistence round-trips — the global file payload,
- * the per-document metadata merge, and the .wpdoc save/open shape
- * keeping styleIds. The Tauri fs layer itself is behind the plugin;
- * these tests pin the SCHEMA + the store flow around it (the exact
- * bytes writeDocumentAtomic writes are JSON of these objects).
+ * Persistence round-trips — the global file payload, the per-document
+ * metadata merge, and the .wpdoc save/open shape keeping styleIds. The
+ * Tauri fs layer is behind the plugin; these pin the SCHEMA + the
+ * store flow around it.
  */
 
 function resetRegistry() {
@@ -110,9 +109,9 @@ describe('.wpdoc round-trip (the saveDocument shape → open flow)', () => {
     expect(doc.firstChild!.attrs.styleId).toBe('legal-body');
     expect(doc.child(1).attrs.styleId).toBe('heading-2');
 
-    // And the DOC layer's definition WINS over the global one by id
-    // (the merge ruling): give global a legal-body edit, re-apply the
-    // doc layer, the doc's version resolves.
+    // And the DOC layer's definition WINS over the global one by id:
+    // give global a legal-body edit, re-apply the doc layer, the
+    // doc's version resolves.
     registry.getState().setLayers({
       global: [{ ...docDef, properties: { fontSize: 99 } }],
       doc: [docDef],

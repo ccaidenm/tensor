@@ -38,7 +38,7 @@ type StubRecord = Record<string, unknown>;
 
 // Recorded canvas ops, readable by tests via (globalThis as any).__paintOps
 // (reset it before the assertion window). fillStyle rides along so
-// style-color edits are assertable (M-STYLES paint-only epoch).
+// style-color edits are assertable (the paint-only epoch).
 const paintOps: Array<{ op: string; args: unknown[]; fillStyle?: string; font?: string; strokeStyle?: string }> = [];
 (globalThis as { __paintOps?: typeof paintOps }).__paintOps = paintOps;
 
@@ -62,24 +62,23 @@ const stubContext: StubRecord = {
     actualBoundingBoxDescent: 0,
   }),
   drawImage: function (this: StubRecord, ...args: unknown[]) {
-    // M-IMAGES-1: image paint ops — args[1..4] are x/y/w/h when the
-    // 9-arg form is used (img, x, y, w, h = 5-arg form at 1..4).
+    // Image paint ops — args[1..4] are x/y/w/h (9-arg form; the 5-arg
+    // form lands at 1..4 too).
     paintOps.push({ op: 'drawImage', args, fillStyle: this.fillStyle as string });
   },
-  // M-IMAGES-1.5: the corner-radius clip path (roundRect + clip
-  // recorded; the path builders are no-ops — geometry rides the
-  // recorded ops).
+  // The corner-radius clip path (roundRect + clip recorded; the path
+  // builders are no-ops — geometry rides the recorded ops).
   beginPath: () => {},
   moveTo: () => {},
   lineTo: () => {},
   arcTo: () => {},
   closePath: () => {},
-  // M-RULER Phase 5: the vertical ruler's rotated labels (no-ops — the
-  // stub records raw fillText args pre-transform, which is what the
-  // label assertions read).
+  // The vertical ruler's rotated labels (no-ops — the stub records
+  // raw fillText args pre-transform, which is what the label
+  // assertions read).
   translate: () => {},
   rotate: () => {},
-  // M-IMAGES-2.2: the FAILED-box cross-hatch strokes (recorded so the
+  // The FAILED-box cross-hatch strokes (recorded so the
   // failed-vs-pending placeholder split is assertable).
   strokeStyle: 'rgba(0,0,0,0.35)',
   stroke: function (this: StubRecord, ...args: unknown[]) {

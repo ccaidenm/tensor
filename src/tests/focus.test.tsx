@@ -17,13 +17,11 @@ import { toast } from '@/components/ui/toast';
 import { settleLayout } from './harness';
 
 /**
- * #FOCUS — Focus Mode: the session chrome toggle. One command body
- * (the ribbon button, the palette, F11, and the exit button all dispatch
- * it); the store drives every hide (ribbon, status bar, rulers,
- * sidebars) and owns the transition side effects (fullscreen + the
- * orientation toast); the selection survives the round-trip (the
- * acceptance criterion). Session-only state — starts false, never
- * persisted.
+ * Focus Mode: the session chrome toggle — one command body (ribbon
+ * button, palette, F11, exit button); the store drives every hide
+ * (ribbon, status bar, rulers, sidebars) and owns the transition side
+ * effects (fullscreen + the orientation toast). Session-only state —
+ * never persisted.
  */
 
 /** Mounts the app-shortcut listener (App.tsx's own mount — the F11

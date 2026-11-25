@@ -7,16 +7,9 @@ import type { RibbonContextId } from './contextualTabs';
 import { selectionInBand } from '@/lib/editor/headerFooterCommands';
 
 /**
- * M-CONTEXTUAL-RIBBON — the context producer binding.
- *
- * `useRibbonContext(id, isActive)` ENTERS the context when the signal
- * turns true and EXITS it when it turns false — the whole activation
- * contract, drop-in for any future context (image, table, header/footer,
- * …). The Ribbon wiring in Ribbon.tsx handles what "entered" means (tab
- * appended + auto-focused + previous tab restored on exit); producers
- * only ever report selection kind. The store's guards make this safe:
- * enter is idempotent per id and first-come-wins across ids; exit is
- * id-scoped, so a stale producer can't tear down a newer context.
+ * The context producer binding: `useRibbonContext(id, isActive)` enters
+ * when the signal turns true, exits when false — safe because the
+ * store's enter is idempotent/first-come-wins and exit is id-scoped.
  */
 export function useRibbonContext(id: RibbonContextId, isActive: boolean) {
   const enter = useRibbonContextStore((s) => s.enter);
@@ -31,10 +24,8 @@ export function useRibbonContext(id: RibbonContextId, isActive: boolean) {
   }, [id, isActive]);
 }
 
-/**
- * True while the selection sits inside a table: the caret (or any
- * selection) with a `table` ancestor, or a NodeSelection ON a table.
- */
+/** True while the selection has a `table` ancestor (or a NodeSelection
+ *  on a table). */
 export function selectionInTable(editor: Editor | null): boolean {
   if (!editor) return false;
   const { selection } = editor.state;
@@ -57,7 +48,7 @@ export function imageSelected(editor: Editor | null): boolean {
 }
 
 /** True while the selection sits inside a referenceTable container (or
- *  a NodeSelection on one) — the contextual tab's producer (M-REFS). */
+ *  a NodeSelection on one). */
 export function selectionInReferenceTable(editor: Editor | null): boolean {
   if (!editor) return false;
   const { selection } = editor.state;
@@ -80,9 +71,8 @@ function isNodeSelection(selection: unknown): selection is NodeSelection {
 
 /**
  * The built-in selection producers, mounted once by the Ribbon. Each
- * reports its context's selection kind from PM state (via useEditorState,
- * the app's reactive selection read — never a separate subscription
- * model).
+ * reports its context's selection kind from PM state via useEditorState
+ * (the app's one reactive selection read).
  */
 export function useSelectionContexts(editor: Editor | null) {
   const inTable = useEditorState({
@@ -97,16 +87,15 @@ export function useSelectionContexts(editor: Editor | null) {
   });
   useRibbonContext('image', imageActive ?? false);
 
-  // M-HEADER-FOOTER-2: the headerFooter producer — selection-driven,
-  // the table/image pattern (a band container in the selection's
-  // ancestry enters the Header & Footer context; leaving it exits).
+  // The headerFooter producer — a band container in the selection's
+  // ancestry enters the Header & Footer context; leaving it exits.
   const inBand = useEditorState({
     editor,
     selector: ({ editor: e }) => selectionInBand(e ?? null),
   });
   useRibbonContext('headerFooter', inBand ?? false);
 
-  // M-REFS: the referenceTable producer — inside a collection (or a
+  // The referenceTable producer — inside a collection (or a
   // NodeSelection on one) enters the Reference Table context.
   const inRefTable = useEditorState({
     editor,

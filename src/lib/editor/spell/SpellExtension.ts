@@ -5,31 +5,9 @@ import type { EditorState } from '@tiptap/pm/state';
 import type { SpellError } from './types';
 
 /**
- * The spell-check STATE HOLDER — the search pattern, one word at a
- * time: a PM plugin whose state is the single source of truth for
- * flagged spans, expressed in PM positions so it survives edits by
- * MAPPING (never re-derivation). The two view modes project it:
- *
- *  - PAGES: PaginatedView maps error ranges through positionMap into
- *    flat underline bars (SpellHighlights) — the SearchHighlights
- *    projection, underline-shaped (paint.ts's own bar geometry).
- *  - PAGELESS/fallback: the plugin's DecorationSet renders the
- *    .tensor-spell-error class in the visible DOM.
- *
- * WHY NOT ONLY DECORATIONS: the hidden view (L3) never paints; the
- * decoration set is the pageless visual AND the test surface, while
- * the errors array is the data both views + the suggestion bubble
- * read. One state, two projections.
- *
- * LIFECYCLE (the live-update law): results arrive ASYNC from the
- * LanguageTool client, so between a keystroke and its recheck the
- * stored errors must still track the text —
- *  - unrelated edits (before/after a flagged word): ranges MAP
- *    (insertion at a boundary uses sticky assoc so the span never
- *    absorbs neighboring text);
- *  - edits INSIDE a flagged word: the text-at-range no longer equals
- *    `word` → the error is dropped INSTANTLY (unflag-as-typed); the
- *    debounced recheck re-flags whatever is still misspelled.
+ * The spell-check state holder: flagged spans in PM positions — they
+ * survive unrelated edits by MAPPING; edits INSIDE a flagged word drop
+ * the error instantly. One state, two projections (bars / decorations).
  */
 export interface SpellPluginState {
   errors: SpellError[];
@@ -66,10 +44,9 @@ function buildDecorations(doc: import('@tiptap/pm/model').Node, errors: readonly
 }
 
 /** The flagged text at a (possibly remapped) range, for the
- *  drop-on-content-edit guard. Clamped to the doc — a stale/malformed
- *  range (e.g. beyond doc end) reads as "" ≠ word and gets dropped;
- *  it must NEVER throw, or one bad range would kill every subsequent
- *  transaction's dispatch. */
+ *  drop-on-content-edit guard. Clamped — a stale range reads as ""
+ *  and gets dropped; it must NEVER throw (one bad range would kill
+ *  every subsequent dispatch). */
 function textAtRange(state: EditorState, from: number, to: number): string {
   const size = state.doc.content.size;
   const f = Math.max(0, Math.min(from, size));
@@ -99,9 +76,8 @@ function createSpellPlugin() {
           errors = errors.filter((e) => e.ruleId !== meta.ruleId);
         } else if (meta?.type === 'setErrors') {
           // Block-scoped replacement: fresh results for the rechecked
-          // blocks (they all live inside `blocks`); everything outside
-          // is by-construction still valid (unchanged nodes — the
-          // identity cache proof) and survives untouched.
+          // blocks; everything outside is unchanged nodes (the identity
+          // cache) and survives untouched.
           errors = [
             ...prev.errors.filter((e) => !meta.blocks.some((b) => e.from >= b.from && e.to <= b.to)),
             ...meta.errors,
@@ -119,7 +95,7 @@ function createSpellPlugin() {
               to: tr.mapping.map(e.to, -1),
             }))
             // Collapsed (fully deleted) or content-edited spans die
-            // immediately — the instant-unflag law.
+            // immediately.
             .filter((e) => e.to > e.from && textAtRange(newState, e.from, e.to) === e.word);
         }
 
@@ -150,11 +126,10 @@ declare module '@tiptap/core' {
        *  results (block-scoped recheck); errors outside survive. */
       setSpellErrors: (errors: SpellError[], blocks: SpellBlockRange[]) => ReturnType;
       /** Drop every current flag of this word (case-insensitive) — the
-       *  add-to-dictionary / ignore-all immediate receipt. */
+       *  immediate effect of add-to-dictionary / ignore-all. */
       ignoreSpellWord: (word: string) => ReturnType;
-      /** Grammar's twin: drop every flag of this RULE — the
-       *  ignore-rule immediate receipt (one false positive, whole
-       *  rule, this session). */
+      /** Grammar's twin: drop every flag of this RULE for this
+       *  session. */
       ignoreSpellRule: (ruleId: string) => ReturnType;
       clearSpellErrors: () => ReturnType;
     };

@@ -3,6 +3,7 @@ import { ChevronDown, Pencil, Plus, Type } from 'lucide-react';
 import { useEditorState } from '@tiptap/react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Editor } from '@tiptap/core';
 import { useStyleRegistryStore } from '@/lib/styles/registry';
 import { headingStyleId, type StyleDefinition } from '@/lib/styles/types';
@@ -10,14 +11,9 @@ import { inlineStyle } from '@/lib/styles/resolve';
 import { useStyleDialogStore } from '@/lib/styles/dialogStore';
 
 /**
- * M-STYLES STEP 4. The dropdown lists the merged registry (built-ins +
- * customs) grouped by kind; applying a PARAGRAPH style sets styleId
- * (or CONVERTS the node for heading entries / converts a heading
- * back for the rest — the styleCommands); applying a CHARACTER style
- * sets the charStyle mark (one per span, replaced on re-apply). The
- * old preset-stamp path (styleDefinitions.ts: imperative chains
- * stamping concrete attrs/marks onto nodes) is DELETED — this is its
- * deliberate replacement, not a parallel mechanism.
+ * Lists the merged registry grouped by kind. Applying a paragraph style
+ * sets styleId (converting the node for headings); a character style
+ * sets the charStyle mark — one per span, replaced on re-apply.
  */
 
 function stylePreviewStyle(def: StyleDefinition): React.CSSProperties {
@@ -101,42 +97,54 @@ export function StylesDropdown({ editor }: { editor: Editor }) {
           {def.name}
         </button>
         <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            className="rounded p-1 hover:bg-muted"
-            title="Edit style"
-            onClick={() => openDialog(def.id, def.kind)}
-          >
-            <Pencil size={12} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  className="rounded p-1 hover:bg-muted"
+                  onClick={() => openDialog(def.id, def.kind)}
+                >
+                  <Pencil size={12} />
+                </button>
+              }
+            />
+            <TooltipContent>Edit style</TooltipContent>
+          </Tooltip>
         </div>
       </div>
     );
   };
 
-  // The trigger NAMES the current style (Word's spelling of the same
-  // affordance) — the caret block's paragraph style, truncated when a
-  // custom name runs long.
+  // The trigger names the caret block's paragraph style (Word's
+  // affordance), truncated when a custom name runs long.
   const currentStyleName = active?.paragraph ? (merged[active.paragraph]?.name ?? active.paragraph) : 'Styles';
 
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
+      <Tooltip>
+        <TooltipTrigger
           render={
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-36 justify-between gap-2 px-2 text-sm font-normal"
-              aria-label={`Styles (current: ${currentStyleName})`}
-            >
-              <span className="flex min-w-0 items-center gap-1.5">
-                <Type size={12} className="shrink-0 text-muted-foreground" />
-                <span className="truncate">{currentStyleName}</span>
-              </span>
-              <ChevronDown size={12} className="shrink-0 opacity-60" />
-            </Button>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-36 justify-between gap-2 px-2 text-sm font-normal"
+                aria-label={`Styles (current: ${currentStyleName})`}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Type size={12} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{currentStyleName}</span>
+                </span>
+                <ChevronDown size={12} className="shrink-0 opacity-60" />
+              </Button>
+            }
+          />
           }
         />
+        <TooltipContent>Styles</TooltipContent>
+      </Tooltip>
         <PopoverContent className="w-64 p-1">
           <div className="max-h-[28rem] overflow-y-auto">
             <div className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">

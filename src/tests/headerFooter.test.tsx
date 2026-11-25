@@ -19,7 +19,7 @@ import { Ribbon } from '@/components/layout/Ribbon';
 import { deriveRulerModel } from '@/lib/paginated/ruler';
 import { renderTensor, settleLayout, GEOMETRY } from './harness';
 
-// ─── .wpdoc simulation (the wpdoc.test simulator, trimmed) ────────────────
+// .wpdoc simulation (the wpdoc.test simulator, trimmed)
 
 type Stored =
   | { kind: 'v2'; document: string; media: { id: string; ext: string; bytesB64: string }[] }
@@ -113,9 +113,9 @@ const firstBodyCanvasTop = (): number => {
   return Math.min(...tops);
 };
 
-// ─── Commands ────────────────────────────────────────────────────────────
+// Commands
 
-describe('M-HEADER-FOOTER-2 commands', () => {
+describe('commands', () => {
   it('a. enableRegion inserts the container + focuses its end (presence IS enablement)', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { editor } = renderTensor(threePageDoc);
@@ -157,9 +157,9 @@ describe('M-HEADER-FOOTER-2 commands', () => {
   });
 });
 
-// ─── Paint + reservation (the unified pipeline) ───────────────────────────
+// Paint + reservation (the unified pipeline)
 
-describe('M-HEADER-FOOTER-2 paint + reservation', () => {
+describe('paint + reservation', () => {
   it('c. a typed header paints on EVERY page and reserves body space', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { editor } = renderTensor(threePageDoc);
@@ -172,16 +172,14 @@ describe('M-HEADER-FOOTER-2 paint + reservation', () => {
     // An EMPTY band still paints its (empty) line — the anchor strip.
     await settle();
 
-    // Type into the header.
     act(() => {
       editor.commands.insertContent('Chapter One');
     });
     await settle();
 
-    // The body moved DOWN by the reservation (36pt→48px anchor + the
-    // measured header line, max'd with the 96px margin; a one-line
-    // header at 16px ⇒ 48+24 = 72 < 96 ⇒ margin still wins... the
-    // reservation is max(margin, need): assert >= topBefore).
+    // The body moves DOWN by the reservation — max(margin, need): a
+    // one-line header at 16px ⇒ 48+24 = 72 < 96 ⇒ the margin still
+    // wins; assert >= topBefore.
     const topAfter = firstBodyCanvasTop();
     expect(topAfter).toBeGreaterThanOrEqual(topBefore);
 
@@ -297,14 +295,12 @@ describe('M-HEADER-FOOTER-2 paint + reservation', () => {
     });
     await settle();
 
-    // Click in the header strip on page 2: y ≈ 48px (the anchor) +
-    // page-2 offset, x mid-page. resolveStackCoordinates-style math is
-    // the harness's; use the stack's own hit path via dispatching a
-    // mousedown with computed coords (GEOMETRY + zoom 1).
+    // Click in the header strip on page 2 (y ≈ 48px anchor + the
+    // page-2 offset). jsdom's getBoundingClientRect is mocked zero;
+    // the handler converts (clientX - rect.left)/zoom — pass client
+    // coords directly.
     const stack = document.querySelector('[data-testid="paginated-stack"]') as HTMLElement;
     const stackRect = { left: 0, top: 0 };
-    // jsdom: getBoundingClientRect is mocked zero; the handler converts
-    // (clientX - rect.left)/zoom — pass client coords directly.
     const page = 1;
     const y =
       stackRect.top + page * (GEOMETRY.pageHeight + PAGE_GAP) + 50;
@@ -318,9 +314,9 @@ describe('M-HEADER-FOOTER-2 paint + reservation', () => {
   });
 });
 
-// ─── Persistence ──────────────────────────────────────────────────────────
+// Persistence
 
-describe('M-HEADER-FOOTER-2 persistence', () => {
+describe('persistence', () => {
   it('h. content rides docJSON; settings ride metadata; round-trip identical', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { editor } = renderTensor(threePageDoc);
@@ -418,9 +414,9 @@ describe('M-HEADER-FOOTER-2 persistence', () => {
   });
 });
 
-// ─── Ribbon ───────────────────────────────────────────────────────────────
+// Ribbon
 
-describe('M-HEADER-FOOTER-2 ribbon', () => {
+describe('ribbon', () => {
   it('k. the contextual tab follows the selection into a band and back', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { editor } = renderTensor(threePageDoc);
@@ -443,9 +439,9 @@ describe('M-HEADER-FOOTER-2 ribbon', () => {
     expect(useRibbonContextStore.getState().active).toBeNull();
   });
 });
-// ─── M-HEADER-FOOTER-3: the echo-projection fixes (end to end) ────────────
+// The echo-projection fixes (end to end)
 
-describe('M-HEADER-FOOTER-3 echo fixes', () => {
+describe('echo fixes', () => {
   const STRIDE = GEOMETRY.pageHeight + PAGE_GAP; // 1088
   const stack = () =>
     document.querySelector('[data-testid="paginated-zoom-wrapper"]') as HTMLElement;
@@ -479,8 +475,7 @@ describe('M-HEADER-FOOTER-3 echo fixes', () => {
     expect(selectionInBand(editor)).toBe(true);
 
     // BELOW the band, still in the top margin (page-relative y=85): the
-    // body's nearest-line clamp (the pre-band behavior) — the v2 strip
-    // rule swallowed these.
+    // body's nearest-line clamp — the band strip must not swallow it.
     fireEvent.mouseDown(stack(), { clientX: x, clientY: STRIDE + 85 });
     await settle();
     expect(selectionInBand(editor)).toBe(false);
@@ -511,7 +506,6 @@ describe('M-HEADER-FOOTER-3 echo fixes', () => {
     fireEvent.mouseDown(stack(), { clientX: x, clientY: y });
     await settle();
 
-    // PM word range selected, inside the band container.
     expect(selectionInBand(editor)).toBe(true);
     expect(editor.state.selection.from).toBeLessThan(editor.state.selection.to);
     // Painted selection: ONE rect — on the CLICKED page's echo, with
@@ -575,9 +569,9 @@ describe('M-HEADER-FOOTER-3 echo fixes', () => {
   });
 });
 
-// ─── M-HEADER-FOOTER-3: tab stops in bands + margin-scaled anchors ────────
+// Tab stops in bands + margin-scaled anchors
 
-describe('M-HEADER-FOOTER-3 final fixes', () => {
+describe('final fixes', () => {
   const caretEl = () =>
     document.querySelector('[data-testid="synthetic-caret"]') as HTMLElement | null;
 
@@ -593,13 +587,11 @@ describe('M-HEADER-FOOTER-3 final fixes', () => {
     });
     await settle();
 
-    // The ruler MODEL derives from the band paragraph (the v2 spelling
-    // read the CONTAINER at depth 1 and went margins-only).
+    // The ruler MODEL derives from the band PARAGRAPH, not the container.
     const model = deriveRulerModel(editor.state);
     expect(model).not.toBeNull();
 
-    // The command targets the band PARAGRAPH (the v2 spelling hit the
-    // container and no-oped — "clicking the ruler never inserts").
+    // The command targets the band PARAGRAPH (the container would no-op).
     act(() => {
       editor.commands.setTabStops([{ position: 200, alignment: 'left' }]);
     });

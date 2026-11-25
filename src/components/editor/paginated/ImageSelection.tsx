@@ -3,35 +3,22 @@ import type { PageGeometry, PlacedRect } from '@tensor-editor/engine';
 import type { Editor } from '@tiptap/core';
 
 /**
- * M-IMAGES-2 — the selected image's overlay: the placed rect as the
- * selection state + the two direct-manipulation modes.
- *
- * RESIZE (R1 — the Word contract): EACH corner drags its own edges —
- * the OPPOSITE corner is the ANCHOR (NW anchors SE, NE anchors SW,
- * etc.); the preview grows/shrinks from it. Aspect-locked by DEFAULT,
- * Shift = free (the 1.5 ruling STANDS — only the anchor rule changed;
- * the old top-left-anchored-everywhere math made the top handles move
- * inverted). Preview is overlay-only (no relayout per mousemove);
- * attrs commit on RELEASE → the standard PM relayout → the ENGINE
- * re-fits (fit-down reasserts).
- *
- * CURSORS (R2): per-corner CSS diagonals — nw/se → 'nwse-resize',
- * ne/sw → 'nesw-resize'; 'grab' during an active drag.
- *
- * FLOAT DRAG (E-IMG-3): a body drag moves the image — overlay
- * transform during the drag (NO relayout per mousemove), and on drop
- * the ANCHOR-RELATIVE offset (dx,dy) commits (the engine re-derives
- * the anchor on the next layout and clamps the placed rect to the
- * page box — the shell never clamps). A drag on an unfloated image
- * floats it (front, Word behavior).
+ * The selected image's overlay: the placed rect as selection state +
+ * direct manipulation. RESIZE: each corner drags its own edges, the
+ * OPPOSITE corner the ANCHOR; aspect-locked by default (Shift = free);
+ * overlay-only preview, attrs commit on RELEASE (PM relayout; the
+ * engine re-fits — fit-down reasserts). FLOAT DRAG: overlay transform
+ * during the drag; the ANCHOR-RELATIVE (dx,dy) commits on drop (the
+ * engine re-derives the anchor and clamps to the page box — the shell
+ * never clamps). An unfloated drag floats it.
  */
 
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
 
-/** M-IMAGES-2.1 — the resize floor (the crossing rule): a drag may
- *  pass THROUGH/PAST the anchored corner; both axes clamp at the
- *  floor DURING the preview, the anchor never flips, and no position
- *  jump happens on release (the commit floors the same way). */
+/** The resize floor (the crossing rule): a drag may pass THROUGH/PAST
+ *  the anchored corner; both axes clamp at the floor DURING the
+ *  preview, the anchor never flips, and the commit floors the same way
+ *  (no position jump on release). */
 const MIN_DRAG = 16;
 
 /** The Word anchor rule: each corner anchors its OPPOSITE. */
@@ -62,11 +49,9 @@ interface ImageSelectionProps {
   editor: Editor;
   pos: number;
   zoom: number;
-  /** Float drag commit (anchor-relative delta; the node's current
-   *  float lives in the selection state the caller reads — commit is
-   *  the caller's command). OPTIONAL: absent for an INLINE object's
-   *  selection — an in-flow object has no float placement of its own
-   *  to drag into (the body drag is inert; the cursor stays neutral). */
+  /** Float drag commit (anchor-relative delta; commit is the caller's
+   *  command). OPTIONAL: absent for an INLINE object — in-flow objects
+   *  have no float placement (body drag inert, cursor neutral). */
   onFloatDrag?: (dx: number, dy: number) => void;
 }
 
@@ -89,9 +74,8 @@ export function ImageSelection({
   const baseW = preview?.w ?? placed.rect.width;
   const baseH = preview?.h ?? placed.rect.height;
 
-  // ─── RESIZE: per-corner anchor math. The anchored frame: the
-  // OPPOSITE corner of the placed rect stays fixed; the preview rect
-  // spans from that anchor to the dragged corner.
+  // RESIZE anchor math: the OPPOSITE corner of the placed rect stays
+  // fixed; the preview spans from that anchor to the dragged corner.
   function onHandleDown(corner: Corner, e: React.PointerEvent) {
     e.stopPropagation();
     e.preventDefault();
@@ -101,7 +85,7 @@ export function ImageSelection({
       startX: e.clientX,
       startY: e.clientY,
       aspect: placed.rect.height / Math.max(1, placed.rect.width),
-      free: !e.shiftKey, // DEFAULT aspect-locked; Shift = free (1.5 ruling)
+      free: !e.shiftKey, // DEFAULT aspect-locked; Shift = free
     };
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
   }
@@ -128,14 +112,11 @@ export function ImageSelection({
         w = wByH;
       }
     }
-    // M-IMAGES-2.2 — WYSIWYG CLAMP: the preview cannot exceed the
-    // page's content box. The ENGINE re-fits anything larger
-    // (fit-down), so an unclamped preview used to grow with the drag
-    // and then snap back on commit — "accepted the input and did
-    // nothing". The preview now STICKS at the page limit: an honest
-    // response, and the commit always lands where the preview is.
-    // #74 — the clamp is the image's COLUMN's width under columns (the
-    // engine will fit the placed rect into the slot).
+    // WYSIWYG CLAMP: the preview cannot exceed the page's content box —
+    // the ENGINE re-fits anything larger, so an unclamped preview would
+    // grow and snap back on commit. The preview STICKS at the limit;
+    // the commit lands where the preview is. #74 — the clamp is the
+    // image's COLUMN's width under columns.
     const slot = placed.column != null ? geometry.columns?.[placed.column] : undefined;
     w = Math.min(w, slot ? slot.width : geometry.contentBox.width);
     h = Math.min(h, geometry.contentBox.height);
@@ -149,13 +130,11 @@ export function ImageSelection({
       setPreview(null);
       return;
     }
-    // COMMIT (M-IMAGES-2.2): the DRAGGED SIZE — the placed dims the
-    // user saw — not a ratio over the intrinsic attrs. An upload
-    // larger than the page is ENGINE-FITTED for display (placed ≠
-    // intrinsic), so the old ratio-scaled intrinsic commit recomputed
-    // attrs the engine re-fitted right back to the SAME placed rect —
-    // "accepted the input and did nothing". The dragged size IS the
-    // chosen document size; fit-down still reasserts on reflow.
+    // COMMIT the DRAGGED SIZE — the placed dims the user saw, not a
+    // ratio over the intrinsic attrs: an oversized upload is ENGINE-FITTED
+    // for display (placed ≠ intrinsic), so a ratio commit would be
+    // re-fitted right back. The dragged size IS the document size;
+    // fit-down still reasserts on reflow.
     const newWidth = Math.max(MIN_DRAG, Math.round(preview.w));
     const newHeight = Math.max(MIN_DRAG, Math.round(preview.h));
     editor
@@ -171,9 +150,8 @@ export function ImageSelection({
     setPreview(null);
   }
 
-  // ─── FLOAT DRAG: the body of the selection is the drag zone.
-  // Absent for an INLINE object's selection (in-flow objects don't
-  // float) — the body drag is inert, the cursor neutral.
+  // FLOAT DRAG: the selection body is the drag zone. Absent for INLINE
+  // objects — the body drag is inert, the cursor neutral.
   function onBodyDown(e: React.PointerEvent) {
     if (!onFloatDrag) return;
     e.stopPropagation();
@@ -245,8 +223,7 @@ export function ImageSelection({
           style={{
             left: CORNER_POS[corner].x,
             top: CORNER_POS[corner].y,
-            // R2: the per-corner CSS diagonal cursor (computed per
-            // handle — the receipt); 'grab' during the drag (above).
+            // Per-corner CSS diagonal cursor; 'grab' during the drag (above).
             cursor: `${CORNER_CURSOR[corner]}`,
           }}
           onPointerDown={(e) => onHandleDown(corner, e)}

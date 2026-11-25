@@ -33,20 +33,10 @@ export function getCursorPosition(editor: Editor): CursorPosition {
   return { line, column };
 }
 
-// ─── STATISTICS (the Review tab's dashboard) ───────────────────────────
-//
-// THE SECTIONED WALK: one structured pass over the top-level blocks
-// produces the document summary AND the heading-delimited breakdown —
-// the lightweight, display-only "section" concept the issue asks for
-// (every heading H1–H6 starts a region titled by its text; content
-// before the first heading is the Preamble). This is deliberately NOT
-// the Sections/section-breaks document-model feature.
-//
-// THE READABILITY HEURISTICS are standard and English-centric (the
-// panel discloses it): syllables from vowel groups with the silent-e
-// adjustment, sentences from terminators + line breaks, Flesch Reading
-// Ease (0–100, clamped) and Flesch–Kincaid Grade from the classic
-// formulas. No libraries — the formulas ARE the feature.
+// ─── Statistics ──────────────────────────────────────────────────────
+// Headings H1–H6 delimit the breakdown's regions (content before the
+// first heading is the Preamble) — NOT the Sections/section-breaks
+// feature. Readability heuristics are standard and English-centric.
 
 export interface RegionStats {
   /** The heading's text, or 'Preamble'. */
@@ -92,10 +82,8 @@ export function countSentences(text: string): number {
     .filter(Boolean).length;
 }
 
-/** One word's syllable estimate: vowel groups (a e i o u y) with the
- *  silent-e adjustment ("cake" → 1, "table" → 2 — a consonant+le
- *  ending keeps its vowel group); letterless words (digits) speak as
- *  one syllable; never fewer than one. */
+/** One word's syllable estimate: vowel groups with the silent-e
+ *  adjustment; letterless words (digits) speak as one; never below one. */
 export function countSyllables(word: string): number {
   const w = word.toLowerCase().replace(/[^a-z]/g, '');
   if (!w) return 1;
@@ -117,9 +105,9 @@ function accumulate(region: RegionStats, text: string): void {
 }
 
 /**
- * THE REPORT — the panel's and the dialog's shared computation (one
- * walk, many surfaces; the numbers can never drift). Headings count as
- * words in both their own region and the total.
+ * The shared computation for the panel and the dialog — one walk so
+ * the numbers can never drift. Headings count as words in both their
+ * own region and the total.
  */
 export function getSectionedStats(editor: Editor): StatisticsReport {
   const doc = editor.state.doc;
@@ -137,11 +125,9 @@ export function getSectionedStats(editor: Editor): StatisticsReport {
       current = emptyRegion('Preamble', null, offset);
       regions.push(current);
     }
-    // THE TEXT BETWEEN LAW: reproduce doc.textBetween(0, size, ' ', ' ')
-    // exactly so the totals can never drift from the status bar — a
-    // block-separator space before every node but the first, and leaf
-    // nodes (images, rules) render as the leafText (' ') just like the
-    // whole-doc call does.
+    // Reproduce doc.textBetween(0, size, ' ', ' ') exactly so totals
+    // match the status bar: a separator space before every node but
+    // the first, and leaf nodes render as ' '.
     const own = node.isLeaf ? ' ' : node.textBetween(0, node.content.size, ' ', ' ');
     const text = first ? own : ' ' + own;
     first = false;
@@ -154,8 +140,7 @@ export function getSectionedStats(editor: Editor): StatisticsReport {
 
 // ─── Reading time ──────────────────────────────────────────────────────
 
-/** The standard words-per-minute baseline (the issue's "standard
- *  baseline" — 200 wpm, the classic reading-speed convention). */
+/** The standard words-per-minute reading baseline (200 wpm). */
 export const READING_WPM = 200;
 
 export function formatReadingTime(words: number): string {
@@ -168,9 +153,7 @@ export function formatReadingTime(words: number): string {
 // ─── Readability ───────────────────────────────────────────────────────
 
 /** Flesch Reading Ease: 206.835 − 1.015·(words/sentences) − 84.6·
- *  (syllables/words), clamped to [0, 100] (real texts can score
- *  negative; the UI shows a band, so the clamp keeps it honest).
- *  null when there is nothing to read. */
+ *  (syllables/words), clamped to [0, 100]; null when nothing to read. */
 export function fleschReadingEase(words: number, sentences: number, syllables: number): number | null {
   if (words === 0 || sentences === 0) return null;
   const score = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words);
@@ -178,8 +161,7 @@ export function fleschReadingEase(words: number, sentences: number, syllables: n
 }
 
 /** Flesch–Kincaid Grade Level: 0.39·(words/sentences) + 11.8·
- *  (syllables/words) − 15.59, floored at 0 (kindergarten). null when
- *  there is nothing to read. */
+ *  (syllables/words) − 15.59, floored at 0; null when nothing to read. */
 export function fleschKincaidGrade(words: number, sentences: number, syllables: number): number | null {
   if (words === 0 || sentences === 0) return null;
   const grade = 0.39 * (words / sentences) + 11.8 * (syllables / words) - 15.59;
@@ -197,9 +179,8 @@ export function fleschBand(score: number): string {
   return 'Very confusing';
 }
 
-/** The band's tone on the easy→difficult gradient — green for easy
- *  reading, shading through amber/orange to red for difficult. The
- *  lib stays presentation-free; the panel maps tones to colors. */
+/** The band's tone on the easy→difficult gradient — the lib stays
+ *  presentation-free; the panel maps tones to colors. */
 export function fleschBandTone(score: number): 'positive' | 'neutral' | 'caution' | 'warning' | 'poor' {
   if (score >= 70) return 'positive';
   if (score >= 60) return 'neutral';

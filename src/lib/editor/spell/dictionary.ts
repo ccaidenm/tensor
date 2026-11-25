@@ -2,20 +2,9 @@ import { readTextFile, writeTextFile, exists, mkdir } from '@tauri-apps/plugin-f
 import { appConfigDir, join } from '@tauri-apps/api/path';
 
 /**
- * The PERSONAL DICTIONARY — a dedicated plain-text file, one word per
- * line, at {appConfigDir}/spell/dictionary-<lang>.txt.
- *
- * Why a file (not a config key): the dictionary is unbounded
- * user-generated content; config.json stays small, hand-editable, and
- * diffable (the generate-licenses / revealConfigFile contract). One
- * file per language keeps future languages from sharing a bag of
- * words. Plain text beats JSON here: trivially mergeable, diffable,
- * and the same shape every spellchecker since the '90s uses.
- *
- * All access goes through the fs plugin whose $APPCONFIG scope is
- * already granted (capabilities/default.json). Outside Tauri (tests,
- * plain-browser dev) every call degrades to a no-op — the in-memory
- * store still works per-session.
+ * The PERSONAL DICTIONARY — plain text, one word per line, at
+ * {appConfigDir}/spell/dictionary-<lang>.txt: a file, not a config key
+ * (unbounded user content), one per language. Outside Tauri: no-op.
  */
 
 const SPELL_DIR = 'spell';

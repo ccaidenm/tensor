@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEditorState } from '@tiptap/react';
 import { useDocumentStore } from '../../lib/document/store';
 import { useSidebarStore } from '../../lib/layout/sidebarStore';
@@ -55,20 +56,23 @@ export function StatusBar() {
       onMouseDown={handleBenchClick}
       className="flex h-8 items-center gap-4 border-t border-border bg-card px-4 text-xs text-muted-foreground"
     >
-      {/* THE COUNTS REGION opens the Statistics dashboard (the Review
-          sidebar) — the bar's own affordance for the numbers it shows.
-          Clicks still bubble to the container, so the bench trigger
-          keeps working. */}
-      <button
-        type="button"
-        onClick={() => useSidebarStore.getState().open('statistics', 'right')}
-        className="flex items-center gap-4 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground"
-        data-testid="statusbar-counts"
-        title="Open Statistics"
-      >
-        <span>{stats.words} words</span>
-        <span>{stats.characters} characters</span>
-      </button>
+      {/* Opens the Statistics dashboard; clicks still bubble to the container so the bench trigger keeps working. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={() => useSidebarStore.getState().open('statistics', 'right')}
+              className="flex items-center gap-4 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="statusbar-counts"
+            >
+              <span>{stats.words} words</span>
+              <span>{stats.characters} characters</span>
+            </button>
+          }
+        />
+        <TooltipContent>Open Statistics</TooltipContent>
+      </Tooltip>
       <span className="ml-auto">Page {currentPage} of {pageCount}</span>
       <span>
         Ln {cursor?.line ?? 1}, Col {cursor?.column ?? 1}

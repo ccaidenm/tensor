@@ -3,16 +3,11 @@ import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { useMediaStore } from '@/lib/media/store';
 
 /**
- * M-IMAGES-1 — the image node view. ONE resolution point: the
- * MediaStore (objectURL) — no parallel path, ever. Rendered in BOTH
- * worlds:
- *  - PAGELESS: this is the visible rendering (natural size — the
- *    parity bar with the paginated placed dims).
- *  - PAGINATED: the hidden PM view (pm-input-only) still renders it
- *    invisibly — and that is the a11y receipt: a real <img alt> in
- *    the accessibility tree, exactly the M5 Orca mirror ("NOT
- *    aria-hidden: opacity 0 keeps it in the accessibility tree" —
- *    PaginatedView's HiddenInputView law).
+ * The image node view. ONE resolution point: the MediaStore objectURL —
+ * no parallel path. Pageless: the visible rendering (natural size —
+ * parity with paginated placed dims). Paginated: rendered invisibly in
+ * the hidden PM view (opacity 0, NOT aria-hidden) so the real <img alt>
+ * stays in the a11y tree.
  */
 
 type ImageNodeViewProps = ReactNodeViewProps;
@@ -28,27 +23,21 @@ export function ImageNodeView({ node }: ImageNodeViewProps) {
   };
   const id = src?.startsWith('media://') ? src.slice('media://'.length) : null;
   const entry = useMediaStore((s) => (id ? s.entries.get(id) : undefined));
-  // M-IMAGES-2.2 — the <img>'s own decode failure (an <img> fired by
-  // the node view is a SECOND decode path beside the bitmap cache's —
-  // the pageless surface and the a11y view ride it): a browser
-  // broken-image glyph is FORBIDDEN here (the M-IMAGES-1 design law:
-  // tinted placeholder, never a broken glyph), so an onerror flips
-  // this view to the same hatched failed box the canvas surfaces use.
-  // OWNERSHIP: this view trusts only ITS OWN onerror (it doesn't
-  // subscribe to bitmap arrivals, so the canvas cache's failed state
-  // would be a stale read here — each surface owns its decode path).
+  // The <img> is a SECOND decode path beside the bitmap cache (the
+  // pageless surface and the a11y view ride it). Never a browser
+  // broken-image glyph: onerror flips to the canvas surfaces' hatched
+  // failed box. Trusts only its OWN onerror — it doesn't subscribe to
+  // bitmap arrivals (a stale read otherwise).
   const [imgFailed, setImgFailed] = useState(false);
   const failed = imgFailed;
 
   if (!id || !entry) {
     return (
       <NodeViewWrapper data-image-node="true" data-resolved="false">
-        {/* Unresolved ref (media not in the store — e.g. an external
-            doc opened without its container): the tinted placeholder,
-            never a broken-image glyph. Decode-failure state lives in
-            the failed branch below (shared with the <img> path).
-            M-A11Y: DECORATIVE images are hidden from the tree (the
-            alt="" <img> spelling carries it on the resolved path). */}
+        {/* Unresolved ref (e.g. an external doc opened without its
+            container): tinted placeholder, never a broken glyph.
+            Decorative images stay hidden from the a11y tree (the alt=""
+            <img> spelling carries it when resolved). */}
         <div
           data-testid="image-placeholder"
           aria-label={alt || 'image'}

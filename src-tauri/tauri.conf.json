@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "word-processor",
+  "productName": "Tensor",
   "version": "0.1.0",
   "identifier": "com.aestriex.word-processor",
   "build": {
@@ -12,21 +12,30 @@
   "app": {
     "windows": [
       {
-        "title": "Word Editor",
-        "maximized": true
+        "title": "Tensor",
+        "maximized": true,
+        "visible": false,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/translate-models/**"]
+        "scope": [
+          "$APPDATA/translate-models/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Caiden",
+    "category": "Productivity",
+    "copyright": "\u00a9 2026 Caiden",
+    "shortDescription": "A paginated word processor",
+    "longDescription": "Tensor \u2014 a paginated, engine-driven word processor with sections, columns, headers and footers, tables, images, equations, and native print, PDF, DOCX, and Markdown round trips.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -2,36 +2,30 @@ export interface ShortcutDefinition {
   id: string;
   label: string;
   keys: string;
-  /**
-   * 'editor' -- dispatched by DynamicShortcutsExtension's ProseMirror
-   *   plugin; only fires while the editor has focus. Fully rebindable.
-   * 'app' -- dispatched by useAppShortcuts' global window listener;
-   *   fires regardless of focus. Fully rebindable.
-   * 'os' -- owned by the operating system / window manager. Listed for
-   *   documentation/visibility only, never rebindable here.
-   */
+  /** 'editor': ProseMirror plugin, fires with editor focus only.
+   *  'app': global window listener, fires regardless of focus.
+   *  'os': OS-owned, listed for docs only. All but 'os' rebindable. */
   context: 'editor' | 'app' | 'os';
   category: string;
 }
 
 export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'save', label: 'Save', keys: 'ctrl+s', context: 'app', category: 'General' },
+  // #100 — the native menu is gone; these are its absorbed accelerators.
+  { id: 'open', label: 'Open', keys: 'ctrl+o', context: 'app', category: 'General' },
+  { id: 'quit', label: 'Quit', keys: 'ctrl+q', context: 'app', category: 'General' },
+  { id: 'new', label: 'New Document', keys: 'ctrl+n', context: 'app', category: 'General' },
   { id: 'openSettings', label: 'Open Settings', keys: 'ctrl+,', context: 'app', category: 'General' },
   { id: 'palette', label: 'Command Palette', keys: 'ctrl+shift+p', context: 'app', category: 'General' },
-  // Word's print-preview convention (context 'app': the preview is a
-  // document-wide surface, not a caret action).
+  // Word's convention; the preview is document-wide, not a caret action.
   { id: 'printPreview', label: 'Print Preview', keys: 'ctrl+p', context: 'app', category: 'General' },
   { id: 'undo', label: 'Undo', keys: 'ctrl+z', context: 'os', category: 'General' },
   { id: 'redo', label: 'Redo', keys: 'ctrl+y', context: 'os', category: 'General' },
-  // Word's spelling shortcut, kept as the convention (context 'app':
-  // the toggle is a document-wide setting, not a caret action).
+  // Word's convention; the toggle is document-wide, not a caret action.
   { id: 'toggleSpellCheck', label: 'Toggle Spell Check', keys: 'f7', context: 'app', category: 'Review' },
-  // F11 — the universal "distraction-free/fullscreen" convention
-  // (context 'app': the toggle fires with ANYTHING focused — including
-  // mid-focus-mode, where the ribbon button has unmounted).
+  // F11 convention; fires with anything focused, mid-focus-mode included.
   { id: 'toggleFocusMode', label: 'Toggle Focus Mode', keys: 'f11', context: 'app', category: 'View' },
-  // #COMMENTS — Word's comment convention (context 'editor': a caret
-  // action; the non-empty-selection guard lives in the command body).
+  // Word's convention; caret action — the selection guard lives in the command body.
   { id: 'addComment', label: 'Add Comment', keys: 'ctrl+alt+m', context: 'editor', category: 'Review' },
 
   { id: 'find', label: 'Find & Replace', keys: 'ctrl+f', context: 'editor', category: 'Search' },
@@ -49,8 +43,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // #58 — no default key (the page break owns ctrl+enter; the ribbon
   // and the palette carry the section break until a key is chosen).
   { id: 'insertSectionBreak', label: 'Section Break', keys: '', context: 'editor', category: 'Insert' },
-  // #74 COLUMNS — no default key (the ribbon and the palette carry the
-  // column break until a key is chosen — the section break's posture).
+  // #74 — no default key; the ribbon and palette carry it.
   { id: 'insertColumnBreak', label: 'Column Break', keys: '', context: 'editor', category: 'Insert' },
   // Word's equation shortcut convention (Alt+=).
   { id: 'insertEquation', label: 'Equation', keys: 'alt+=', context: 'editor', category: 'Insert' },
@@ -65,24 +58,17 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'decreaseIndent', label: 'Decrease Indent', keys: 'ctrl+[', context: 'editor', category: 'Paragraphs' },
 ];
 
-/** Returns the id's real live binding — user override if one exists in
- *  config, otherwise the registry default. ALWAYS use this rather than
- *  indexing config.keybindings[id] directly — a persisted config that
- *  predates a newly-added shortcut still resolves to a sane default
- *  instead of silently returning undefined (the exact class of bug this
- *  project has been bitten by before with wrong config paths). */
+/** The id's live binding — user override or registry default. Never
+ *  index config.keybindings directly: older configs predate newer
+ *  shortcuts and would resolve undefined. */
 export function getEffectiveKeybinding(keybindings: Record<string, string>, id: string): string {
   const def = SHORTCUTS.find((s) => s.id === id);
   return keybindings[id] ?? def?.keys ?? '';
 }
 
-/** Shift-glyph aliases: pressing shift+period/comma produces the
- * SHIFTED glyph in the key event ('>' / '<' on US layouts), so a
- * binding spelled with the unshifted key ('ctrl+shift+.') must match
- * the event's shifted glyph, and a recorded binding spelled with the
- * shifted glyph ('ctrl+shift+>') must match layouts that deliver the
- * unshifted key. Word documents these as Ctrl+Shift+> / Ctrl+Shift+<;
- * the registry spells the physical keys, both match. */
+/** Shift+'.'/',' events deliver the shifted glyph ('>'/'<'); match both
+ *  spellings so physical-key and glyph bindings both fire (Word displays
+ *  Ctrl+Shift+>, the registry stores ctrl+shift+.). */
 const SHIFT_GLYPH_ALIASES: Record<string, string> = {
   '>': '.',
   '<': ',',
@@ -104,13 +90,9 @@ export function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
   );
 }
 
-/** Converts a live KeyboardEvent into this app's canonical shortcut
- *  string format, for the "press a key combination" rebind UI. Returns
- *  null while only modifier keys are held (caller should keep listening),
- *  or if no real modifier is held at all — bare-letter shortcuts aren't
- *  supported anywhere in this app today, and allowing one here would risk
- *  silently binding a shortcut to a plain printable character and
- *  breaking normal typing. */
+/** KeyboardEvent -> canonical binding string for the rebind UI. Null
+ *  while only modifiers are held; bare letters are refused (they would
+ *  break normal typing). */
 export function captureShortcutString(e: KeyboardEvent): string | null {
   if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return null;
   if (e.key === 'Escape') return null; // reserved: always cancels recording
@@ -154,11 +136,7 @@ export function findLiveConflict(
 export function findShortcutConflicts(): string[][] {
   const seen = new Map<string, string[]>();
   for (const s of SHORTCUTS) {
-    // #74 — an UNBOUND shortcut has no collision surface: two registry
-    // entries with keys '' (the section/column breaks' posture — the
-    // ribbon + the palette carry them until a key is chosen) are not a
-    // conflict. (The detector's pre-existing blind spot — the column
-    // break's registration was the second '' entry.)
+    // #74 — unbound ('') entries can't collide.
     if (!s.keys) continue;
     const list = seen.get(s.keys) ?? [];
     list.push(s.id);

@@ -1,33 +1,18 @@
 import { z } from 'zod';
 
 /**
- * M-STYLES model. A style is a NAMED, ADDRESSABLE set of typographic
- * properties — never a bundle of stamped attrs. Documents reference
- * styles by id (`styleId` on paragraphs, the `charStyle` mark on runs);
- * the registry owns the definitions; resolution happens adapter-side
- * in ONE function (resolve.ts — resolveRun), never in the engine.
- *
- * INVARIANT (schema-level): every paragraph carries a `styleId`
- * (attr default 'normal', non-optional). Old documents get it via the
- * attr default on load — no migration pass. Headings carry
- * `heading-{level}` (the HeadingSync plugin maintains the alignment;
- * the adapter resolves headings through `heading-{level}`, the attr's
- * guaranteed twin).
+ * A style is a named, addressable set of properties: documents
+ * reference styles by id (styleId attr, default 'normal' — old
+ * documents get it via the attr default on load, no migration);
+ * resolution happens only in resolveRun, never in the engine.
  */
 
 export type StyleKind = 'paragraph' | 'character';
 
 /**
- * Length-preserving text casing transforms. 'capitalize'/'title-case'
- * uppercase the FIRST LETTER of each word only — every allowed value
- * maps source chars to output chars 1:1, which is what keeps PM source
- * coordinates and engine (transformed) offsets identity-mapped.
- * Length-changing transforms (camelCase included — ruled out as a
- * CONTENT transform, not typography) are BANNED from v1; transformText
- * enforces the invariant by assertion.
- * 'title-case' renders as CSS capitalize in pageless (documented
- * divergence: browsers may word-boundary differently on punctuation;
- * true title-case word lists are future scope, revisit 'M-later').
+ * Length-preserving casing: every value maps source chars to output
+ * chars 1:1, keeping PM and engine offsets identity-mapped — length-
+ * changing transforms are banned (transformText asserts).
  */
 export type TextTransform = 'uppercase' | 'lowercase' | 'capitalize' | 'title-case' | 'none';
 
@@ -49,23 +34,16 @@ export const StylePropertiesSchema = z.object({
   indentRight: z.number().optional(),
   firstLineIndent: z.number().optional(),
   /**
-   * 'justify' shares the adapter's existing loud ruling: pageless
-   * renders it natively; paginated treats it as left + the
-   * dropped-attr warning (justify is engine work, stays loud — the
-   * same semantics the textAlign ATTR already has).
+   * 'justify': pageless renders it natively; paginated treats it as
+   * left + the dropped-attr warning (same as the textAlign attr).
    */
   textAlign: z.enum(['left', 'center', 'right', 'justify']).optional(),
   fontVariant: z.enum(['small-caps', 'normal']).optional(),
   textTransform: z.enum(['uppercase', 'lowercase', 'capitalize', 'title-case', 'none']).optional(),
   /**
-   * M-FLOW — pagination flags at the style tier (Word's style pPr:
-   * w:keepNext / w:keepLines / w:widowControl / w:pageBreakBefore —
-   * plus keepPrevious/breakAfter, the Tensor superset). All optional;
-   * absent = the style says nothing (inherit — the engine defaults:
-   * keeps off, widowControl on). Same spellings as the engine's
-   * FlowPolicy, resolved through resolveFlowTier (direct attrs beat
-   * the style). Paragraph-kind styles only (the dialog hides the
-   * section for character styles).
+   * Pagination flags at the style tier — same spellings as the
+   * engine's FlowPolicy; direct attrs beat the style; absent =
+   * inherit (keeps off, widowControl on). Paragraph-kind styles only.
    */
   keepNext: z.boolean().optional(),
   keepLines: z.boolean().optional(),
@@ -111,14 +89,9 @@ export function isHeadingStyleId(id: string): boolean {
 }
 
 /**
- * The registry snapshot the ADAPTER consumes (pure data — the adapter
- * never imports the zustand store; callers build this from store
- * state, tests construct it directly). `epoch` is the registry-epoch
- * mirror of the engine's baseStyleHash: ANY definition edit bumps it,
- * invalidating the adapter's identity cache wholesale (every block
- * re-converts → new resolved runs → the engine's contentHash decides
- * what re-breaks; paint-tier facts like color reach the canvas even
- * when the engine splices).
+ * The registry snapshot the adapter consumes — pure data (the
+ * adapter never imports the zustand store). Any definition edit
+ * bumps `epoch`, invalidating the adapter's identity cache wholesale.
  */
 export interface StyleRegistrySnapshot {
   definitions: Record<string, StyleDefinition>;

@@ -8,9 +8,9 @@ import {
 } from '@/lib/a11yCheck/contrast';
 
 /**
- * M-A11Y — the WCAG math, pinned with the canonical boundary vectors
- * (the pairs the WCAG docs themselves use to demonstrate the AA
- * thresholds). Pure unit tests: no doc, no editor.
+ * The WCAG math, pinned with the canonical boundary vectors (the pairs
+ * the WCAG docs themselves use to demonstrate the AA thresholds). Pure
+ * unit tests: no doc, no editor.
  */
 
 describe('parseCssColor', () => {
@@ -24,14 +24,14 @@ describe('parseCssColor', () => {
     expect(parseCssColor('#ABC')).toEqual({ r: 170, g: 187, b: 204 });
   });
 
-  it('rgb()/rgba() — the rich-text paste path', () => {
+  it('rgb/rgba — the rich-text paste path', () => {
     expect(parseCssColor('rgb(255, 0, 0)')).toEqual({ r: 255, g: 0, b: 0 });
     expect(parseCssColor('rgba(0, 0, 255, 0.5)')).toEqual({ r: 0, g: 0, b: 255, alpha: 0.5 });
     expect(parseCssColor('rgb(1 2 3 / 0.8)')).toEqual({ r: 1, g: 2, b: 3, alpha: 0.8 });
     expect(parseCssColor('rgba(0, 0, 255, 1)')).toEqual({ r: 0, g: 0, b: 255, alpha: 1 });
   });
 
-  it('unparseable shapes → null (named colors, hsl(), CSS variables — never guessed)', () => {
+  it('unparseable shapes → null (named colors, hsl, CSS variables — never guessed)', () => {
     expect(parseCssColor('red')).toBeNull();
     expect(parseCssColor('hsl(120, 50%, 50%)')).toBeNull();
     expect(parseCssColor('var(--brand)')).toBeNull();

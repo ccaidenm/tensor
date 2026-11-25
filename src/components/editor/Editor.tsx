@@ -28,9 +28,8 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
     (s) => s.config.editor.defaultFontSize,
   );
   const mode = useViewMode();
-  // baseStyle := resolve('normal') (amendment 6): the pageless
-  // container font is the resolved 'normal' style — config defaults
-  // when 'normal' is unedited, the registry override when it is not.
+  // The pageless container font is the resolved 'normal' style — config
+  // defaults when 'normal' is unedited, the registry override when not.
   const mergedStyles = useStyleRegistryStore((s) => s.merged);
   const normalBase = useMemo(
     () => resolveNormalBase(defaultFontFamily, defaultFontSize, mergedStyles),
@@ -39,12 +38,11 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
 
   const editor = useEditor({
     extensions: tensorExtensions(),
-    content: "<p>Start typing…</p>",
-    // The INITIAL content is created without a transaction, so the
-    // BlockIdExtension's appendTransaction never fires for it — run the
-    // mint pass explicitly or the first layout call throws on the
-    // id-less doc (adapter contract) and boots into the fallback. The
-    // style-sync pass is the same load-path twin for heading styleIds.
+    content: "<p></p>",
+    // INITIAL content is created without a transaction, so
+    // appendTransaction never fires — mint block ids explicitly or the
+    // first layout throws on the id-less doc; style-sync is the same
+    // load-path pass for heading styleIds.
     onCreate: ({ editor }) => {
       ensureBlockIds(editor);
       ensureStyleSync(editor);
@@ -60,8 +58,8 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
         }
         return false;
       },
-      // M-IMAGES-1 — the two blob insert paths (the file picker is the
-      // third; all land in the ONE pipeline, media/insert.ts).
+      // The two blob insert paths (the file picker is the third; all
+      // land in the ONE pipeline, media/insert.ts).
       handlePaste: (_view, event) => {
         // Clipboard image files: bytes already on the clipboard.
         const files = [...event.clipboardData?.files ?? []].filter((f) =>
@@ -72,11 +70,9 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
           void insertImageBlob(useDocumentStore.getState().editor, files[0]!);
           return true;
         }
-        // External http(s) image source: REFUSED — no download arm
-        // (M-IMAGES-1.5), a toast says why, and ZERO network calls
-        // ever fire from a paste (the fonts privacy precedent,
-        // hardened). Clipboard IMAGE FILES (above) need no dialog —
-        // the bytes are already local.
+        // External http(s) image source: REFUSED — a toast says why;
+        // zero network calls ever fire from a paste. Clipboard IMAGE
+        // FILES (above) need no dialog — bytes are already local.
         const html = event.clipboardData?.getData('text/html') ?? '';
         const imgSrc = /<img[^>]+src="(https?:\/\/[^"]+)"/i.exec(html)?.[1];
         if (imgSrc && isExternalImageUrl(imgSrc)) {
@@ -116,9 +112,8 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
     let isLinkMouseDown = false;
 
     function handleMouseDown(e: MouseEvent) {
-      // Fallback-mode middle-click: the visible PM view is an editable,
-      // and Linux webviews paste the X11 primary selection by default —
-      // the Behavior toggle must hold in every mode.
+      // Linux webviews paste the X11 primary selection on middle-click
+      // by default — the Behavior toggle must hold in every mode.
       if (e.button === 1 && !useConfigStore.getState().config.editor.pasteOnMiddleClick) {
         e.preventDefault();
       }
@@ -170,19 +165,16 @@ export function Editor({ metrics, equationMetrics }: { metrics?: TextMetrics; eq
   // filtering — all inside the controller; this is just its mount.
   useSpellCheck(editor);
 
-  // Mode routing seam: 'Pages' is Tensor's default and identity —
-  // it renders the engine-driven PaginatedView; everything else renders
-  // the pageless interim shell. New modes are new branches here. The
-  // registry stylesheet mounts for BOTH modes (the paginated fallback
-  // renders EditorContent too) — one source of truth for pageless
-  // styling.
+  // Mode routing: 'Pages' renders the engine-driven PaginatedView;
+  // everything else the pageless shell. New modes are new branches.
+  // StylesStylesheet mounts for BOTH modes (the paginated fallback
+  // renders EditorContent too).
   return (
     <>
       <StylesStylesheet />
-      {/* M-T4 — the document context menu wraps BOTH modes at the
-          routing seam (one mount, every mode): right-click anywhere on
-          the editor surface opens the variant menu; App.tsx suppresses
-          the WebView's native menu globally. */}
+      {/* The document context menu wraps BOTH modes at the routing seam:
+          right-click opens the variant menu; App.tsx suppresses the
+          WebView's native menu globally. */}
       <DocumentContextMenu editor={editor}>
         {mode === 'Pages' ? (
           <PaginatedView editor={editor} metrics={metrics} equationMetrics={equationMetrics} />

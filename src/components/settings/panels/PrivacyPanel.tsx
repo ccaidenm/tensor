@@ -1,9 +1,8 @@
 import type { ReactNode } from 'react';
-import { Globe, Link2, RefreshCw, SpellCheck, Type } from 'lucide-react';
+import { Globe, Link2, SpellCheck, Type } from 'lucide-react';
 import { useConfigStore } from '@/lib/config/store';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { IconButton } from '@/components/layout/IconButton';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { useTranslateStore } from '@/lib/editor/translate/store';
 import { providerDestination } from '@/lib/editor/translate/client';
@@ -32,9 +31,8 @@ function Row({ icon, label, description, children }: { icon: ReactNode; label: s
   );
 }
 
-/** TRANSLATE — the posture row (the spell-check row's twin): where the
- *  text goes, stated plainly. The provider/key are MANAGED in
- *  Proofing; this row documents and opens the consent setup. */
+/** The translate posture row: where text goes, stated plainly. The
+ *  provider/key are managed in Proofing; this row opens the setup. */
 function TranslateRow() {
   const configured = useConfigStore((s) => s.config.translation.configured);
   const provider = useConfigStore((s) => s.config.translation.provider);
@@ -68,8 +66,6 @@ function TranslateRow() {
 export function PrivacyPanel() {
   const fetchLinkMetadata = useConfigStore((s) => s.config.privacy.fetchLinkMetadata);
   const setFetchLinkMetadata = useConfigStore((s) => s.setFetchLinkMetadata);
-  const autoCheckForUpdates = useConfigStore((s) => s.config.privacy.autoCheckForUpdates);
-  const setAutoCheckForUpdates = useConfigStore((s) => s.setAutoCheckForUpdates);
   const allowFontCatalogs = useConfigStore((s) => s.config.privacy.allowFontCatalogs);
   const setAllowFontCatalogs = useConfigStore((s) => s.setAllowFontCatalogs);
 
@@ -89,7 +85,7 @@ export function PrivacyPanel() {
         <Row
           icon={<Type className="h-4 w-4" />}
           label="Allow browsing online font catalogs"
-          description="Enables network requests to Google Fonts / Font Share when you search. No browsing ships yet — this only saves your preference for when it does (milestone B)."
+          description="Adds Google Fonts, Font Share, and Fontsource to the font browser's search. While off, the font browser shows only your installed, bundled, and uploaded fonts — nothing requests the network."
         >
           <Switch
             checked={allowFontCatalogs}
@@ -113,29 +109,6 @@ export function PrivacyPanel() {
         <TranslateRow />
       </SettingsSection>
 
-      <SettingsSection id="updates" title="Updates">
-        <Row
-          icon={<RefreshCw className="h-4 w-4" />}
-          label="Automatically Check for Updates"
-          description="Periodically contacts GitHub Releases to check for a newer version. Not yet implemented (tracked in #65) — this only saves your preference for when it is."
-        >
-          <Switch checked={autoCheckForUpdates} onCheckedChange={setAutoCheckForUpdates} />
-        </Row>
-        <div className="flex items-center justify-between py-3">
-          <div>
-            <div className="text-sm font-medium">Check Now</div>
-            <div className="text-xs text-muted-foreground">Not yet implemented — requires a signed release pipeline (#65)</div>
-          </div>
-          <span className="inline-flex">
-            <IconButton
-              label="Check for updates — not yet implemented"
-              icon={<RefreshCw className="h-4 w-4" />}
-              disabled
-              onClick={() => {}}
-            />
-          </span>
-        </div>
-      </SettingsSection>
     </div>
   );
 }

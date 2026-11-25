@@ -1,11 +1,9 @@
 import { enqueuePreview } from './previewQueue';
 
 /**
- * The lazy preview face (STEP 2): download the real font file ONLY
- * for the entry under active preview — a temporary FontFace scoped to
- * the dialog, never the whole list. On release the face is deleted
- * from document.fonts (A's face-replace pattern). Byte downloads ride
- * the single-slot queue (deliberate-action rate limiting).
+ * The lazy preview face: download the real font file only for the
+ * entry under active preview — a temporary FontFace, deleted from
+ * document.fonts on release.
  */
 
 const PREVIEW_PREFIX = 'TensorPreview-';

@@ -2,7 +2,7 @@ import { RemoveFormatting } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 import { IconButton } from '../../IconButton';
 
-export function clearFormatting(editor: Editor) {
+function clearFormatting(editor: Editor) {
   editor
     .chain()
     .focus()

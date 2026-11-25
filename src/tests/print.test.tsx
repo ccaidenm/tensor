@@ -6,12 +6,10 @@ import type { PrintText } from '@/lib/print/types';
 import { createLayoutEngine, type LayoutOptions } from '@tensor-editor/engine';
 
 /**
- * M-PRINT (#43 Mark 1) — the print renderer suite. The walk runs
- * against a REAL engine layout (the layout outputs are the one
- * geometry source — the Mark-1 contract), with hand-built adapter
- * shapes for the inputs the canvas path derives from PM. Structural
- * assertions only (the docx-suite pattern): positions, page splits,
- * ink order.
+ * #43 — the print renderer suite: the walk runs against a REAL engine
+ * layout (the one geometry source) with hand-built adapter shapes for
+ * the inputs the canvas path derives from PM. Structural assertions
+ * only: positions, page splits, ink order.
  */
 
 const SHA = 'f'.repeat(64);
@@ -279,7 +277,7 @@ describe('print renderer — table cells + images', () => {
   });
 });
 
-describe('PrintDocumentView — the equation wrapper (M-PRINT fix)', () => {
+describe('PrintDocumentView — the equation wrapper', () => {
   it('the equation div carries .tensor-equation (the measured box IS the painted box)', async () => {
     const { render } = await import('@testing-library/react');
     const { PrintDocumentView } = await import('@/lib/print/PrintDocumentView');

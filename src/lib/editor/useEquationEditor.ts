@@ -3,27 +3,9 @@ import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 
 /**
- * M-EQ — the equation editor bubble's state machine, the
- * useLinkBubble shape with one simplification: there is no store and
- * no 'insert' mode. Opening is SELECTION-DRIVEN — the node's
- * insertEquation command (ribbon button, Alt+=, palette) creates an
- * empty equation and NodeSelections it, and a plain click on an
- * existing equation NodeSelections it; BOTH land here through the
- * selectionUpdate path, so the bubble is always editing a node that
- * already exists. Close is local (Done/X/Escape, or selecting away).
- *
- * PAGINATED ANCHOR (L3, the link bubble's law): the hidden PM view's
- * coordsAtPos must never position anything — paginated mode injects
- * coordsFor (the painted-rect resolver); pageless uses the node view's
- * own DOM box (the visible surface IS the PM view there).
- *
- * PINNING: pointerdown inside the bubble pins it — the open state HOLDS
- * (no re-anchor, no close) while its own chrome is being clicked, but
- * its OWN attr writes (style buttons, palette inserts, typing) still
- * REFRESH the state's style attrs in place (the S/M/L/XL highlight
- * must follow the click — the mid-interaction refresh in update()).
- * The bubble's latex DRAFT is its own local state — state.latex only
- * seeds it at open, so refreshes never clobber mid-edit text.
+ * The equation bubble's state machine: opening is SELECTION-DRIVEN —
+ * insert and plain-click both NodeSelection the node. coordsFor positions
+ * the bubble in paginated mode; pointerdown inside pins, DRAFT stays local.
  */
 
 export interface EquationEditorState {
@@ -31,18 +13,16 @@ export interface EquationEditorState {
   pos: number;
   latex: string;
   align: 'left' | 'center' | 'right';
-  /** M-EQ-2 style attrs (the bubble's ColorPickerButton + scale
-   *  presets read these; null color = inherit the document default). */
+  /** Style attrs (the bubble's ColorPickerButton + scale presets read
+   *  these; null color = inherit the document default). */
   color: string | null;
   scale: number;
   coords: { left: number; top: number };
 }
 
-/** Pageless anchor (VIEWPORT coords — the bubble renders fixed at
- *  body level): the node view's DOM box, bubble opens BELOW it,
- *  horizontally centered on the box (the bubble offsets by half its
- *  own width — the same number the bubble is styled at, w-80 = 320).
- *  Exported for the bubble's render-time re-derivation. */
+/** Pageless anchor (VIEWPORT coords): the node view's DOM box, bubble
+ *  below it, centered (offset by half its own width — the styled
+ *  w-80 = 320). Exported for the bubble's render-time re-derivation. */
 const BUBBLE_HALF_WIDTH = 160;
 
 export function equationDomAnchor(editor: Editor, pos: number): { left: number; top: number } {
@@ -66,9 +46,8 @@ export function useEquationEditor(
   const [state, setState] = useState<EquationEditorState | null>(null);
   const pinnedRef = useRef(false);
   // The OPEN-time latex — an attr write dispatched by the bubble itself
-  // must not resurrect a closed bubble through the reactive path (the
-  // update event arrives while pinned, but the guard is belt-and-braces
-  // for the selectionUpdate that can trail it).
+  // must not resurrect a closed bubble (the update event arrives while
+  // pinned; the guard is belt-and-braces for the trailing selectionUpdate).
   const openPosRef = useRef<number | null>(null);
 
   const close = useCallback(() => {
@@ -107,13 +86,9 @@ export function useEquationEditor(
         scale: (node.attrs.scale as number) ?? 1,
       };
 
-      // THE MID-INTERACTION REFRESH (the stale-style-highlight fix):
-      // while the bubble is pinned, its OWN attr writes (style buttons,
-      // palette, typing) re-enter through 'update' events — the open
-      // state must REFRESH (the S/M/L/XL highlight moves) without
-      // re-anchoring (the bubble holds still while you click its
-      // chrome) and without re-seeding the draft (the bubble's latex
-      // state is its own; only the style attrs flow).
+      // MID-INTERACTION REFRESH: while pinned, the bubble's OWN writes
+      // re-enter through 'update' events — refresh the style attrs in
+      // place, no re-anchor, no re-seed of the draft.
       if (known && pinnedRef.current) {
         setState((prev) =>
           prev && prev.pos === pos

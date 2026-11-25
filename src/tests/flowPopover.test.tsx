@@ -11,13 +11,12 @@ import { DEFAULT_MARGINS, PAGE_GAP, toLayoutOptions } from '@/lib/document/pageS
 import { renderTensorInScrollContainer, settleLayout } from './harness';
 
 /**
- * M-FLOW — the paragraph popover UI suite (the reworked Line Spacing
- * dropdown): the FLUID single trigger, the Line Spacing radio group
- * (reflecting the selection's always-present effective multiplier),
- * the Line & Page Breaks checkboxes (mixed-state aware, style-tier
- * resolved, live + stay-open), and the StyleDialog's Pagination
- * section. Base UI controls assert through aria-checked. The model
- * suite lives in flowAttrs.test.tsx.
+ * The paragraph popover UI suite: the FLUID single trigger, the Line
+ * Spacing radio group (reflecting the selection's always-present
+ * effective multiplier), the Line & Page Breaks checkboxes
+ * (mixed-state aware, style-tier resolved, live + stay-open), and the
+ * StyleDialog's Pagination section. Base UI controls assert through
+ * aria-checked. The model suite lives in flowAttrs.test.tsx.
  */
 
 /** The trigger is ONE fluid button: icon + chevron inside, no seam. */
@@ -37,7 +36,7 @@ function ariaChecked(testId: string): string | null {
   return el?.getAttribute('aria-checked') ?? null;
 }
 
-describe('M-FLOW: the Line Spacing & Page Breaks popover', () => {
+describe('the Line Spacing & Page Breaks popover', () => {
   it('both sections render: the radio group + custom above, the six break toggles below', async () => {
     const { editor } = renderTensorInScrollContainer('<p>one</p>');
     await settleLayout();
@@ -149,7 +148,7 @@ describe('M-FLOW: the Line Spacing & Page Breaks popover', () => {
   });
 });
 
-describe('M-FLOW: the StyleDialog Pagination section (the style tier)', () => {
+describe('the StyleDialog Pagination section (the style tier)', () => {
   it("editing heading-1 shows the builtin keepNext checked; unchecking + save rewrites the definition (and restores)", async () => {
     renderTensorInScrollContainer('<p>x</p>');
     await settleLayout();
@@ -181,7 +180,7 @@ describe('M-FLOW: the StyleDialog Pagination section (the style tier)', () => {
   });
 });
 
-describe('M-FLOW: the Page Setup widow/orphan switch (the document default)', () => {
+describe('the Page Setup widow/orphan switch (the document default)', () => {
   it('toggling off + Apply writes the store default; toLayoutOptions feeds the engine', async () => {
     renderTensorInScrollContainer('<p>x</p>');
     await settleLayout();

@@ -10,13 +10,10 @@ import { renderTensor } from './harness';
 import type { JSONContent } from '@tiptap/core';
 
 /**
- * M-DOCX — THE IN-PLACE SAVE suite. The store's save/saveAs dispatch on
- * the file extension: a .docx document saves ITSELF (no dialog — the
- * file is the target; the lossy gate still guards), Save-As can adopt
- * a .docx path, and the OPEN flow adopts the Word file as the
- * document's own. Autosave is wpdoc-only (Word file locks + full
- * exports churn); recovery snapshots cover .docx documents between
- * explicit saves.
+ * The in-place save suite: save/saveAs dispatch on the file extension —
+ * a .docx saves ITSELF (no dialog; the lossy gate still guards),
+ * Save-As and OPEN adopt Word paths; autosave is wpdoc-only (file
+ * locks + churn), recovery snapshots cover .docx between saves.
  */
 
 const dialogState = vi.hoisted(() => ({ savePath: null as string | null, openPath: null as string | null }));
@@ -78,7 +75,7 @@ beforeEach(() => {
   useImportReportDialogStore.setState({ pending: null });
 });
 
-describe('the in-place save dispatch (M-DOCX)', () => {
+describe('the in-place save dispatch', () => {
   it('Save on a .docx document writes the Word file itself — no dialog, no zip container', async () => {
     const { editor } = renderTensor();
     editor.commands.setContent(doc(para('word-native body')));
@@ -183,12 +180,9 @@ describe('the in-place save dispatch (M-DOCX)', () => {
   });
 
   it('an opened .docx with losses shows the in-app report (never a native popup)', async () => {
-    // A Word file whose body carries an equation Tensor must re-spell:
-    // no losses. Force a loss instead: an unparseable OMML cannot be
-    // built here, so use the refused-image path — a drawing with no
-    // relationship — via a raw minimal docx? The SIMPLE loss to pin:
-    // the report dialog renders importNotices — drive it through the
-    // markdown skipped-image seam instead (same surface).
+    // An equation re-spells with no losses; an unparseable OMML can't
+    // be built here, so pin the report dialog (importNotices) through
+    // the markdown skipped-image seam (same surface).
     const { editor } = renderTensor();
     editor.commands.setContent(doc(para('x')));
     useDocumentStore.setState({ filePath: '/u/notes.md', isDirty: false });

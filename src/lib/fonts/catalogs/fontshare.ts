@@ -3,18 +3,9 @@ import { catalogFetchBytes, catalogFetchText } from './http';
 import { normalizeFamilyKey } from './normalize';
 
 /**
- * Font Share adapter (STEP 0b ruling).
- *
- * SEARCH: https://api.fontshare.com/v2/fonts?q=<term> — public, no
- * key (verified receipt: { fonts: [{ name, slug, category,
- * license_type, styles: [{ file: "//cdn.fontshare.com/wf/…",
- * weight.number, is_italic, is_variable }], … }] }). Per-query
- * requests are user-actioned (typing in the search box), so no boot
- * prefetch — unlike the list-all catalogs.
- *
- * DOWNLOAD: the styles' file URLs are DIRECT woff2 links
- * (protocol-relative — https: prefixed here). License metadata
- * (e.g. "itf_ffl") surfaces in the detail pane.
+ * Font Share: search = api.fontshare.com/v2/fonts (public, no key;
+ * per-query, so no boot prefetch); download = the styles' direct woff2
+ * file URLs (protocol-relative — https: prefixed here).
  */
 
 const SEARCH_URL = 'https://api.fontshare.com/v2/fonts';
@@ -39,8 +30,8 @@ interface FontShareResponse {
 }
 
 function toCatalogFont(f: FontShareFont): CatalogFont {
-  // M-FONTS-B.1: slots from the DECLARED styles (their weight.number),
-  // never the fixed 400/700 template.
+  // Slots from the declared styles (their weight.number), never a
+  // fixed template.
   const declared = f.styles
     .filter((s) => !s.is_variable)
     .map((s) => ({ weight: s.weight.number, style: (s.is_italic ? 'italic' : 'normal') as 'normal' | 'italic' }));
@@ -63,8 +54,8 @@ function toCatalogFont(f: FontShareFont): CatalogFont {
   };
 }
 
-/** Map a style's CDN file to an A-shaped URL set (bytes fetched in
- *  download()). */
+/** Map the CDN style files to a FontFiles-shaped URL set (bytes
+ *  fetched in download()). */
 function pickStyles(font: FontShareFont): {
   variable: boolean;
   urls: { regular?: string; bold?: string; italic?: string; boldItalic?: string };
@@ -72,7 +63,7 @@ function pickStyles(font: FontShareFont): {
   const files: { regular?: string; bold?: string; italic?: string; boldItalic?: string } = {};
   const variable = font.styles.some((s) => s.is_variable);
   for (const s of font.styles) {
-    if (s.is_variable) continue; // prefer the static instances for the A shape
+    if (s.is_variable) continue; // prefer the static instances
     const url = s.file.startsWith('//') ? `https:${s.file}` : s.file;
     if (s.is_italic) {
       if (s.weight.number === 700) files.boldItalic ??= url;

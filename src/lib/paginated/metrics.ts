@@ -27,7 +27,7 @@ import type { TextMetrics, TextStyle } from '@tensor-editor/engine';
  *  it participates in every measurement cache key — small-cap glyphs
  *  measure narrower than full caps, so a variant edit must re-measure.
  *
- *  THE TWO WORLDS (M-FONTS): STATIC fonts resolve '700' to a REAL
+ *  THE TWO WORLDS: STATIC fonts resolve '700' to a REAL
  *  registered bold FILE (a Fontsource 700.css face, or an uploaded
  *  entry's bold file) — never a synthetic bold; VARIABLE fonts (the
  *  Geist Variable precedent, entry.variable) have no bold file: the
@@ -40,7 +40,7 @@ export function fontString(style: TextStyle): string {
 }
 
 /**
- * SMALL-CAPS (M-STYLES addendum 3), paint-level. RECEIPT: the canvas
+ * SMALL-CAPS, paint-level. RECEIPT: the canvas
  * 2D context's `fontVariantCaps` property (HTML spec: "the font-caps
  * to apply") — Chromium and Gecko support it; WebKit support exists in
  * modern WebKit (Safari 17+/WebKitGTK 2.4x-era builds) but OLDER

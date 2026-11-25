@@ -7,10 +7,10 @@ import { getEffectiveKeybinding, SHORTCUTS } from '@/lib/shortcuts';
 import { useConfigStore } from '@/lib/config/store';
 
 /**
- * M-PRINT (#43, Mark 3 round 2) — the entry surfaces: Ctrl+P (the
- * SHORTCUTS table + the rebindable registry body), the View-menu
- * button's store target, and the modal's chrome suppression (the
- * guard pair law — Settings/palette/preview all suppress shortcuts).
+ * #43 — the entry surfaces: Ctrl+P (the SHORTCUTS table + the
+ * rebindable registry body), the View-menu button's store target,
+ * and the modal's chrome suppression (Settings/palette/preview all
+ * suppress shortcuts).
  */
 
 describe('print preview — the entry surfaces', () => {

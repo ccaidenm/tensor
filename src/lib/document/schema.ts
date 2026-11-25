@@ -15,13 +15,17 @@ const PageSetupSchema = z.object({
     right: z.number(),
   }),
   pageGap: z.number(),
+  /** #103 — the doc's rendering mode rides the file; schema-absence
+   *  silently stripped it on save (the pageless-everything bug).
+   *  Absent = old files resolve via the config default. */
+  viewMode: z.enum(['pages', 'pageless']).optional(),
   orientation: z.enum(['portrait', 'landscape']).optional(),
   pageColor: z.string().optional(),
   customWidth: z.number().optional(),
   customHeight: z.number().optional(),
-  /** M-FLOW — the document-level widow/orphan default; absent = ON. */
+  /** The document-level widow/orphan default; absent = on. */
   widowControl: z.boolean().optional(),
-  /** #WATERMARK — the decorative page overlay; absent/null = none. */
+  /** The decorative page overlay; absent/null = none. */
   watermark: z
     .object({
       kind: z.enum(['text', 'image']),
@@ -37,7 +41,7 @@ const PageSetupSchema = z.object({
     })
     .nullable()
     .optional(),
-  /** #74 COLUMNS — the document-level column spec; absent/null = one column. */
+  /** #74 — the document-level column spec; absent/null = one column. */
   columns: z
     .object({
       count: z.number().int().min(1),
@@ -52,22 +56,18 @@ const PageSetupSchema = z.object({
 }) satisfies z.ZodType<PageSetup>;
 
 /**
- * M-STYLES: the document's own style definitions (the DOC layer of
- * the registry merge — doc overrides global by id; see
- * lib/styles/registry.ts). Optional: old files predate styles and
- * merge as an empty layer. The styleIds on the document's paragraphs
- * ride docJSON (the PM document) — this field carries the DEFINITIONS
- * the document depends on beyond the global registry.
+ * The document's own style definitions (the DOC layer of the registry
+ * merge — doc overrides global by id). Paragraph styleIds ride docJSON;
+ * this carries definitions beyond the global registry. Optional for old files.
  */
 const DocStylesSchema = z.object({
   definitions: z.array(StyleDefinitionSchema).default([]),
 });
 
 /**
- * #48 — the per-page styles. File-side spelling: JSON keys are
- * STRINGS (page indexes serialize as strings); normalizePageStyles
- * converts to numeric keys on open. Absent = no per-page styles (the
- * lineNumbers/optional-field precedent — old files open unchanged).
+ * #48 — the per-page styles. File-side spelling: JSON keys are STRINGS
+ * (page indexes serialize as strings); normalizePageStyles converts to
+ * numeric keys on open. Absent = none (old files open unchanged).
  */
 export const PageStylesSchema = z.record(
   z.string(),
@@ -75,11 +75,9 @@ export const PageStylesSchema = z.record(
 );
 
 /**
- * M-LINENUMS: the document's line-number gutter setting. Optional —
- * old files predate it and open with the gutter off (the styles
- * precedent). countBy is metadata-only in v1 (no ribbon UI): the
- * counter advances on every line; a number is SHOWN only when
- * (n−1) % countBy === 0, else the line renders blank.
+ * The line-number gutter setting; optional (old files open with it off).
+ * countBy: the counter advances on every line but a number shows only
+ * when (n−1) % countBy === 0, else the line renders blank.
  */
 export const LineNumbersSchema = z.object({
   enabled: z.boolean(),
@@ -90,13 +88,10 @@ export const LineNumbersSchema = z.object({
 export type LineNumbersSetting = z.infer<typeof LineNumbersSchema>;
 
 /**
- * M-HEADER-FOOTER-2: the document's header/footer SETTINGS (enables,
- * different-first-page). Optional — old files predate them and open
- * with headers/footers off (the styles/lineNumbers precedent). The
- * CONTENT rides docJSON (headerBlock/footerBlock nodes). The schema
- * is compile-checked against the model type, so the two can't drift.
- * The v1 shape (per-region content docs) is recognized by the open
- * path's migration — see lib/document/headerFooter.ts.
+ * The header/footer SETTINGS (content rides docJSON as band nodes).
+ * Optional — old files open with headers/footers off. Compile-checked
+ * against the model type; the v1 shape is handled by the open-path migration
+ * (lib/document/headerFooter.ts).
  */
 export const HeaderFooterSchema = z.object({
   scope: z.object({ kind: z.literal('document') }),
@@ -104,13 +99,9 @@ export const HeaderFooterSchema = z.object({
 }) satisfies z.ZodType<HeaderFooterSettings>;
 
 /**
- * #COMMENTS — the file-side thread validation. Optional — old files
- * predate it and open with no threads (the styles/lineNumbers
- * precedent). NOT named `comments`: that key is the core-properties
- * "description" field (CorePropertiesSchema). The ANCHORS ride docJSON
- * (the comment mark's threadId); this array is the CONTENT half — the
- * ids are the join. Entries are ≥1 (deleting the last entry deletes
- * the thread, so a saved file never holds an empty one).
+ * File-side thread validation; optional (old files open with none). NOT
+ * named `comments` — that key is the core-properties "description" field.
+ * Anchors ride docJSON; entries are ≥1 (the file never holds an empty one).
  */
 export const CommentThreadsSchema = z.array(
   z.object({
@@ -133,18 +124,10 @@ export const CommentThreadsSchema = z.array(
 ) satisfies z.ZodType<import('@/lib/comments/store').CommentThread[]>;
 
 /**
- * M-HEADER-FOOTER-2: the v1 shape (per-region TipTap JSON docs) —
- * kept ONLY so the open path can SEE it (zod strips unknown keys;
- * without this union the legacy content fields would vanish before
- * the migration reads them) and translate it into doc-level nodes.
- * Never written by saves.
- *
- * UNION ORDER MATTERS: z.union picks the FIRST success, and the plain
- * settings object schema SUCCEEDS on legacy input by stripping — so
- * legacy must come FIRST, and must be distinguishable: the refine
- * requires at least one region CONTENT doc (new settings files have
- * none; a legacy file with all-empty regions migrates as settings
- * with no content, which is exactly its meaning).
+ * The v1 shape (per-region content docs), kept so zod doesn't strip its
+ * region fields before the migration reads them; never written. Union
+ * order matters: the settings schema succeeds on legacy input by
+ * stripping, so legacy must come first.
  */
 const LegacyHfRegionSchema = z
   .object({ doc: z.any().nullable().optional() })
@@ -168,20 +151,10 @@ export const LegacyHeaderFooterSchema = z
     { message: 'no legacy region content' },
   );
 
-export type LegacyHeaderFooterMetadata = z.infer<typeof LegacyHeaderFooterSchema>;
-export type HeaderFooterMetadata =
-  | z.infer<typeof HeaderFooterSchema>
-  | LegacyHeaderFooterMetadata;
-
 /**
- * M-META: the document's standard core properties — the fields the
- * Properties dialog edits and the exporters embed (DOCX #37 / PDF #39
- * consume the mappings in lib/document/coreProperties.ts). All
- * optional: old files predate them and open with them empty (the
- * styles precedent). `title` predates this milestone (never written
- * by the save path until M-META); keywords are ONE string — OOXML and
- * PDF both spell keywords that way. The schema is compile-checked
- * against the model type, so the two can't drift.
+ * The standard core properties (DOCX #37 / PDF #39 consume the mappings
+ * in coreProperties.ts). Optional (old files open empty); keywords are
+ * ONE string. Compile-checked against the model type.
  */
 const CorePropertiesSchema = z.object({
   title: z.string().optional(),
@@ -204,9 +177,8 @@ export const DocumentFileSchema = z.object({
     styles: DocStylesSchema.optional(),
     lineNumbers: LineNumbersSchema.optional(),
     headerFooter: z.union([LegacyHeaderFooterSchema, HeaderFooterSchema]).optional(),
-    /** #COMMENTS — the threads' CONTENT half (the anchors ride docJSON
-     *  as comment marks; the ids join them). Absent = the file predates
-     *  comments (or carries none). */
+    /** Comment threads' content half (anchors ride docJSON; absent =
+     *  the file predates comments or carries none). */
     commentThreads: CommentThreadsSchema.optional(),
   }).default({}),
 });

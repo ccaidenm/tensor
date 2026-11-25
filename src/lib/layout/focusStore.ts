@@ -15,9 +15,7 @@ interface FocusStore {
   active: boolean;
   /**
    * The sidebar Focus Mode displaced, restored on exit. Session-only
-   * chrome state, like `active` itself — never persisted (this is
-   * transient display state, not a user preference: every launch starts
-   * in normal mode).
+   * chrome state, never persisted — every launch starts in normal mode.
    */
   displacedSidebar: ActiveSidebar | null;
   /** Enter Focus Mode: remember + close any open sidebar. */
@@ -28,15 +26,9 @@ interface FocusStore {
 }
 
 /**
- * #FOCUS — Focus Mode's session state. Deliberately a plain zustand
- * store beside sidebarStore, NOT app-config: Focus Mode is a transient
- * display toggle (like the palette), not a preference to persist — the
- * issue's ruling is that every launch starts in normal mode.
- *
- * The store owns the MODE-TRANSITION SIDE EFFECTS (sidebar displacement,
- * fullscreen, the instructional toast) so every surface — ribbon button,
- * F11, palette, exit button — gets the identical transition through the
- * one command body. Direct setState bypasses them (tests use that).
+ * Focus Mode's session state: a plain zustand store, not app-config —
+ * a transient toggle, never persisted (every launch starts normal).
+ * The store owns the transition side effects shared by every surface.
  */
 export const useFocusStore = create<FocusStore>((set, get) => ({
   active: false,
@@ -47,18 +39,15 @@ export const useFocusStore = create<FocusStore>((set, get) => ({
     const open = useSidebarStore.getState().active;
     if (open) useSidebarStore.getState().close();
     set({ active: true, displacedSidebar: open });
-    // FULLSCREEN — entering focus mode takes the whole screen (the
-    // distraction-free promise). BEST-EFFORT, never blocking: browsers
-    // reject requestFullscreen outside a user gesture (every real
-    // trigger — button, F11, palette — IS one) and environments without
-    // the API (jsdom) skip the whole chain via optional chaining.
+    // Fullscreen: best-effort, never blocking — browsers reject
+    // requestFullscreen outside a user gesture (every real trigger is
+    // one); jsdom lacks the API (optional chaining skips the chain).
     void document.documentElement.requestFullscreen?.().catch(() => {
       // Rejected (permission/gesture policy): focus mode still works —
       // the mode never depends on the fullscreen succeeding.
     });
-    // THE ORIENTATION TOAST: a first-timer in a chromeless window needs
-    // to know the way out. The hint is LIVE (the user's rebind via
-    // getEffectiveKeybinding — never a hardcoded F11).
+    // The orientation toast: the exit hint follows the user's rebind
+    // (getEffectiveKeybinding — never a hardcoded F11).
     const hint = formatShortcutParts(
       getEffectiveKeybinding(useConfigStore.getState().config.keybindings, 'toggleFocusMode'),
     ).join(' + ');

@@ -5,34 +5,9 @@ import type { PageSetup } from '@/lib/document/pageSetup';
 import { deleteSectionBreakNear } from '@/lib/editor/headerFooterCommands';
 
 /**
- * #58 SECTIONS — the sectionBreak ATOM: divides the document into
- * sections. Word's sectPr spelling: the node carries THE PRECEDING
- * section's page setup ("everything above me, since the previous
- * break, is a section with this setup"); the document's store-level
- * pageSetup/headerFooter = THE FINAL section's (content after the
- * last break). Consequence (the additive law): a document with no
- * sectionBreak nodes is exactly today's document — the store's
- * pageSetup governs everything, no migration.
- *
- * THE ADAPTER TRANSLATES (the pageBreak law — the node is NOT part of
- * the IR): breaks become the engine's section-boundary facts, each
- * carrying the FOLLOWING section's geometry (the next break's attrs,
- * else the doc defaults). v1 breaks are nextPage type — a boundary
- * always closes the page (the engine's boundary law, same as
- * breakBefore).
- *
- * ATTRS:
- *  - `setup`: PageSetup-shaped (pageSize/orientation/margins pt/
- *    custom dims) — the PRECEDING section's props. pageGap is NOT
- *    section data (view spacing, store-level).
- *  - `sectionId`: a stable generated id — the band-override key
- *    (headerBlock/footerBlock nodes reference it; Phase 2).
- *
- * INSERT LAW (the split-dance, PageBreakNode's): block-start inserts
- * before, block-end after, mid-block splits first. The new break's
- * setup seeds from the EFFECTIVE geometry at the insertion point —
- * inserting a break changes nothing visually until the user edits
- * the new section's props (the honest default).
+ * #58 — the sectionBreak atom (Word's sectPr spelling): the node carries
+ * the preceding section's setup; the store's pageSetup governs the
+ * final section (no breaks = today's document, no migration).
  */
 
 /** A fresh section id (the band-override key — stable for the
@@ -44,7 +19,7 @@ function newSectionId(): string {
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     sectionBreak: {
-      /** `type`: how the section AFTER this break starts (Word's
+      /** `type`: how the section after this break starts (Word's
        * "Section start") — nextPage (default) or continuous. */
       insertSectionBreak: (setup?: PageSetup, type?: 'nextPage' | 'continuous') => ReturnType;
     };
@@ -80,7 +55,7 @@ export const SectionBreakNode = Node.create({
         renderHTML: (attrs: Record<string, unknown>) =>
           attrs.sectionId ? { 'data-section-id': attrs.sectionId } : {},
       },
-      // #58 — how the section AFTER this break starts (Word's "Section
+      // #58 — how the section after this break starts (Word's "Section
       // start"): 'nextPage' (default) closes the page; 'continuous'
       // flows on (the engine upgrades it when the geometry differs).
       type: {
@@ -112,12 +87,9 @@ export const SectionBreakNode = Node.create({
   },
 
   addKeyboardShortcuts() {
-    // #58 — MERGE-ON-DELETE: deleting the break merges its section into
-    // the FOLLOWING one (the following section's props win; the dead
-    // section's band overrides drop) — ONE undo step. A plain native
-    // delete would orphan the tagged band containers, so Backspace/
-    // Delete on a selected (or caret-adjacent) break route through the
-    // merge command; no break adjacent → false, the default deletion.
+    // #58 — merge-on-delete: the break's section merges into the
+    // following one (following props win; band overrides drop) —
+    // a plain delete would orphan the tagged band containers.
     return {
       Backspace: () =>
         this.editor.commands.command(({ state }) => {
@@ -147,10 +119,9 @@ export const SectionBreakNode = Node.create({
           const paragraphType = state.schema.nodes.paragraph;
           const { $from } = state.selection;
 
-          // THE SEED: the new break ends the section the insertion
-          // point sits in — its props = that section's EFFECTIVE
-          // geometry. v1: the store's pageSetup (the final section's;
-          // an explicit setup arg overrides — the ribbon's law).
+          // The seed: the new break's setup = the effective geometry at
+          // the insertion point (the store's pageSetup; an explicit
+          // setup arg overrides).
           const effective: PageSetup = setup ?? useDocumentStore.getState().pageSetup;
 
           let newTr = tr;

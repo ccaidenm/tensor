@@ -3,6 +3,9 @@ import { ChevronUp, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Kbd } from '@/components/ui/kbd';
+import { useConfigStore } from '@/lib/config/store';
+import { getEffectiveKeybinding, formatShortcutParts } from '@/lib/shortcuts';
 
 interface RibbonIconInputProps {
   label: string;
@@ -17,14 +20,12 @@ interface RibbonIconInputProps {
   /** The input's own accessible name (defaults to the tooltip's label —
    *  the icon alone isn't announced). */
   ariaLabel?: string;
-  /** #58 — a unit readout INSIDE the box (right edge, before the
-   *  steppers when they show): "0.5 in" reads without leaving the
-   *  field. */
+  /** #58 — a unit readout inside the box (right edge, before the steppers). */
   suffix?: string;
-  /** #58 — suppress this field's OWN tooltip (a tooltip GROUP wraps
-   *  the row instead: one hover, one delay, carried across the
-   *  fields). */
+  /** #58 — suppress this field's own tooltip (a group tooltip wraps the row instead). */
   hideTooltip?: boolean;
+  /** #101 — shortcut ids whose live user bindings ride the tooltip. */
+  shortcutIds?: string[];
 }
 
 export function RibbonIconInput({
@@ -40,8 +41,11 @@ export function RibbonIconInput({
   ariaLabel,
   suffix,
   hideTooltip = false,
+  shortcutIds,
 }: RibbonIconInputProps) {
   const [localValue, setLocalValue] = useState(String(value));
+  // Read the bindings once, not inside the map below (hook rules).
+  const keybindings = useConfigStore((s) => s.config.keybindings);
 
   useEffect(() => {
     setLocalValue(String(value));
@@ -127,7 +131,21 @@ export function RibbonIconInput({
   return (
     <Tooltip>
       <TooltipTrigger render={field} />
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>
+        <span className="flex items-center gap-2">
+          {label}
+          {shortcutIds && shortcutIds.length > 0 && (
+            <span className="flex items-center gap-1">
+              {shortcutIds.map((id) => {
+                const binding = getEffectiveKeybinding(keybindings, id);
+                return binding ? (
+                  <Kbd key={id}>{formatShortcutParts(binding).join('+')}</Kbd>
+                ) : null;
+              })}
+            </span>
+          )}
+        </span>
+      </TooltipContent>
     </Tooltip>
   );
 }

@@ -9,24 +9,9 @@ import type { LTMatch, SpellError } from './types';
 import type { SpellBlockRange } from './SpellExtension';
 
 /**
- * The CHECKING PIPELINE — everything between "the doc changed" and
- * "the plugin state holds fresh flags".
- *
- * DEBOUNCE (the live-update law): checks run after typing goes idle
- * — 600ms local (a fast, private loopback) / 2000ms online (the
- * public API is rate-limited; be a polite citizen). While a check is
- * in flight, a newer schedule coalesces into one rerun (latest-wins).
- *
- * BLOCK-DIFFED RECHECKS: PM's persistent doc tree + BlockIdExtension's
- * node identity mean an unchanged top-level node is the SAME OBJECT
- * across edits — the adapter's own WeakMap trick. Checked blocks never
- * re-send text; only edited/new blocks ride the wire. (A deleted
- * block's flags die in the plugin's mapping/guard, not here.)
- *
- * STALENESS GUARDS: the doc captured before the async call must still
- * be current when results land, or the whole batch is dropped (the
- * edit that invalidated it already rescheduled a fresh one). Same for
- * destroyed editors and mid-flight disable.
+ * The checking pipeline: debounced checks (600ms local / 2000ms online),
+ * block-diffed rechecks (unchanged nodes are the SAME OBJECT — never
+ * re-sent), and staleness guards (stale batches are dropped).
  */
 
 /** Idle window before a check fires (local sidecar). */
@@ -56,22 +41,18 @@ interface Piece {
   to: number;
 }
 
-/** M-REFS-7: exported for the dots-exclusion test (the internal
- * seam precedent). */
+/** Exported for the dots-exclusion test. */
 export function buildPiece(node: PMNode, offset: number): Piece | null {
   let text = '';
   const posMap: number[] = [];
-  // NOTE: node.descendants positions are CONTENT-relative (the first
-  // child of a node at doc offset X is at pos 0 = absolute X + 1) —
-  // the doc-level walk in search's buildDocIndex needs no shift, a
-  // per-node walk does. Pinned by spell-controller tests.
+  // node.descendants positions are CONTENT-relative (first child of a
+  // node at doc offset X is at absolute X + 1) — the per-node walk
+  // needs the +1 shift the doc-level walks don't.
   node.descendants((child, pos) => {
     if (child.isText) {
-      // M-REFS: the LEADER DOTS span (refLeader-marked) is INK, never
-      // language — LanguageTool flags '....' as a grammar issue and
-      // the row text is generator-owned. Same for the invisible
-      // indexEntry mark? NO — marked TERMS are real words the user
-      // wants checked; only the dots are excluded.
+      // The LEADER DOTS span (refLeader-marked) is INK, never language
+      // (LT flags '....' as grammar). Marked TERMS are real words the
+      // user wants checked — only the dots are excluded.
       if (child.marks.some((m) => m.type.name === 'refLeader')) {
         posMap.push(offset + 1 + pos); // keep a boundary anchor
         return false;
@@ -81,12 +62,9 @@ export function buildPiece(node: PMNode, offset: number): Piece | null {
       text += t;
       return false;
     }
-    // M-PAGEFIELD: the page-number FIELD is a DIGIT token in the
-    // language stream — without it the surrounding sentence fragments
-    // (' of ' alone reads as a lowercase sentence start and Language-
-    // Tool flags a capitalization that isn't one). Digits are
-    // caseless and never spell-checked words; each token char maps to
-    // the ATOM's own position (the highlight covers the field chip).
+    // The page-number FIELD becomes a DIGIT token — without it the
+    // sentence fragments (' of ' reads as a sentence start and LT
+    // flags a capitalization). Each char maps to the ATOM's position.
     if (child.type.name === 'pageField') {
       const token = (child.attrs as { kind?: string }).kind === 'pages' ? '12' : '1';
       for (let i = 0; i < token.length; i++) posMap.push(offset + 1 + pos);
@@ -338,9 +316,8 @@ export class SpellController {
 
       const from = piece.posMap[local]!;
       // `to`: the next char's position when the match ends mid-text;
-      // else lastCharPos + 1 (NEVER piece.to — the node-end position
-      // would swallow the block separator in textBetween and the
-      // drop-guard would kill the error at once).
+      // else lastCharPos + 1 (NEVER piece.to — it would swallow the
+      // block separator and the drop-guard would kill the error).
       const to = piece.posMap[local + m.length] ?? piece.posMap[piece.posMap.length - 1]! + 1;
       errors.push({
         from,
@@ -360,10 +337,4 @@ export class SpellController {
     for (const p of pieces) this.checked.set(p.node, true);
     this.editor.commands.setSpellErrors(errors, blocks);
   }
-}
-
-/** Test seam: build one checkable Piece for a node (exposed for unit
- *  tests of the offset mapping). */
-export function __buildPieceForTest(node: PMNode, offset: number): Piece | null {
-  return buildPiece(node, offset);
 }

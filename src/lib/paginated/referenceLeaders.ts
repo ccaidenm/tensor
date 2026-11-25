@@ -2,7 +2,7 @@ import type { LineBox, TextMetrics } from '@tensor-editor/engine';
 import type { AdapterBlock } from './adapter';
 
 /**
- * M-REFS-10 — THE LEADER ADOPTION (the "entire leading is selectable"
+ * THE LEADER ADOPTION (the "entire leading is selectable"
  * ruling): the gap between a row's seed dots and its page number is
  * filled with PAINT ink (the seam fix) — but ink can't be selected.
  * THE FIX: the generator ADOPTS the resolved dot count into the

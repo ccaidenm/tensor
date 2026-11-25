@@ -1,5 +1,4 @@
-use tauri::menu::{Menu, MenuItem, Submenu};
-use tauri::Emitter;
+use tauri::Manager;
 
 mod print;
 mod spell;
@@ -7,20 +6,10 @@ mod translate;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // M-REFS-8 — THE GHOST + THE WEBPROCESS SIGABRT (Linux/WebKitGTK):
-    // the crashed WebProcess's stack resolved to
-    // `WebKit::crashAfter10Seconds(IPC::Connection*)` — the watchdog
-    // that aborts the web process 10 seconds after it loses the UI
-    // process — i.e. the UI side STALLED first. Combined with the
-    // reported symptoms (canvas regions painting stale text until the
-    // next repaint; the whole app freezing) on an AMD iGPU, this is
-    // the WebKitGTK DMABUF renderer's buffer-handoff bug class: the
-    // GPU texture handoff between the web process and the UI process
-    // stalls, frames go stale, and the watchdog eventually fires.
-    // THE FIX (the standard Tauri-on-Linux mitigation): force WebKit's
-    // shared-memory rendering fallback. Must be set BEFORE any webview
-    // exists. A user-set value is respected (A/B testing: unset = the
-    // old behavior).
+    // Linux/WebKitGTK: the DMABUF renderer's buffer handoff stalls
+    // (stale canvas frames, then the web process watchdog aborts) —
+    // the standard Tauri mitigation is the shared-memory fallback,
+    // set BEFORE any webview exists. A user-set value is respected.
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
@@ -29,69 +18,44 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        // #100 — window-state: size/position/maximized persist across
+        // launches (the custom titlebar's maximize/restore pairs with
+        // it; restores BEFORE the setup hook below shows the window).
+        // DECORATIONS is EXCLUDED from the saved flags: the frameless
+        // truth lives in the platform configs (tauri.linux/windows.conf
+        // — created frameless; the compositor honors the map-time
+        // hint), and a pre-titlebar session's saved decorations=true
+        // must never resurrect the native bar.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(tauri_plugin_window_state::StateFlags::all()
+                    & !tauri_plugin_window_state::StateFlags::DECORATIONS)
+                .build(),
+        )
         .manage(spell::SpellState::new())
         .setup(|app| {
-            let handle = app.handle();
-
-            // File menu
-            let new_item = MenuItem::with_id(handle, "menu-new", "New", true, Some("CmdOrCtrl+N"))?;
-            let open_item =
-                MenuItem::with_id(handle, "menu-open", "Open", true, Some("CmdOrCtrl+O"))?;
-            let save_item =
-                MenuItem::with_id(handle, "menu-save", "Save", true, Some("CmdOrCtrl+S"))?;
-            let save_as_item =
-                MenuItem::with_id(handle, "menu-save-as", "Save As…", true, None::<&str>)?;
-            let quit_item =
-                MenuItem::with_id(handle, "menu-quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
-
-            let file_menu = Submenu::with_items(
-                handle,
-                "File",
-                true,
-                &[&new_item, &open_item, &save_item, &save_as_item, &quit_item],
-            )?;
-
-            // Edit menu
-            let undo_item =
-                MenuItem::with_id(handle, "menu-undo", "Undo", true, Some("CmdOrCtrl+Z"))?;
-            let redo_item =
-                MenuItem::with_id(handle, "menu-redo", "Redo", true, Some("CmdOrCtrl+Shift+Z"))?;
-            let cut_item = MenuItem::with_id(handle, "menu-cut", "Cut", true, Some("CmdOrCtrl+X"))?;
-            let copy_item =
-                MenuItem::with_id(handle, "menu-copy", "Copy", true, Some("CmdOrCtrl+C"))?;
-            let paste_item =
-                MenuItem::with_id(handle, "menu-paste", "Paste", true, Some("CmdOrCtrl+V"))?;
-
-            let edit_menu = Submenu::with_items(
-                handle,
-                "Edit",
-                true,
-                &[&undo_item, &redo_item, &cut_item, &copy_item, &paste_item],
-            )?;
-
-            // View menu
-            let dark_mode_item = MenuItem::with_id(
-                handle,
-                "menu-toggle-dark-mode",
-                "Toggle Dark Mode",
-                true,
-                None::<&str>,
-            )?;
-
-            let view_menu = Submenu::with_items(handle, "View", true, &[&dark_mode_item])?;
-
-            let menu = Menu::with_items(handle, &[&file_menu, &edit_menu, &view_menu])?;
-            app.set_menu(menu)?;
-
+            // #100 — THE CUSTOM TOPBAR owns the chrome. The window is
+            // created HIDDEN (visible: false in tauri.conf) so neither
+            // the native frame nor a pre-restore geometry ever flashes:
+            // the window-state plugin (initialized before this hook)
+            // restores geometry first; here the frameless flag applies
+            // and the finished window shows.
+            let window = app
+                .get_webview_window("main")
+                .ok_or("the main window is missing from tauri.conf")?;
+            // Linux/Windows: frameless — the merged titlebar row in the
+            // web view owns the chrome (drag regions + controls).
+            // macOS: KEEP the native traffic lights — they overlay the
+            // row's left lane (titleBarStyle: Overlay in tauri.conf).
+            #[cfg(not(target_os = "macos"))]
+            window.set_decorations(false)?;
+            window.show()?;
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            let _ = app.emit("menu-event", event.id().0.clone());
-        })
         .invoke_handler(tauri::generate_handler![
+            current_username,
             fetch_link_metadata,
             fetch_url,
             package_document,
@@ -129,6 +93,28 @@ struct LinkMetadata {
     title: Option<String>,
     description: Option<String>,
     favicon: Option<String>,
+}
+
+// #103 — the local user's name for the start-screen greeting (the
+// identity.author config takes precedence when set; this is the
+// fallback). Zero-dep: the standard env vars cover every desktop
+// platform; the home-dir basename is the last resort.
+#[tauri::command]
+fn current_username() -> Option<String> {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok()
+                .and_then(|home| {
+                    std::path::Path::new(&home)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                })
+        })
 }
 
 #[tauri::command]
@@ -197,11 +183,10 @@ async fn fetch_url(url: String, ua: Option<String>) -> Result<tauri::ipc::Respon
     Ok(tauri::ipc::Response::new(bytes.to_vec()))
 }
 
-// ─── M-IMAGES-0: the .wpdoc v2 container ─────────────────────────────────
+// ─── The .wpdoc v2 container ─────────────────────────────────────────────
 //
-// BREAKING FORMAT EVENT (#28 format note): .wpdoc v1 was a bare JSON
-// file; v2 is a zip container. Zero users at the event (the M2
-// disclaimer) — the v1→v2 converter on the TS side is PERMANENT: v1
+// BREAKING FORMAT (#28): .wpdoc v1 was a bare JSON file; v2 is a zip
+// container. The v1→v2 converter on the TS side is PERMANENT: v1
 // files open forever, saves always write v2.
 //
 // Container layout (the packager is DUMB — it writes exactly what the
@@ -348,11 +333,9 @@ async fn unpackage_document(path: String) -> Result<UnpackResult, String> {
     unpackage_wpdoc(&path).map_err(|e| e.to_string())
 }
 
-/// M-T4 — Developer Mode's "Inspect Element": opens the webview's
-/// devtools (WebKitGTK inspector / WebView2 devtools / macOS private
-/// APIs). Debug builds always allow it; RELEASE builds need the
-/// `devtools` feature flag on the tauri dependency — the JS side
-/// gates the menu item behind the Developer Mode setting either way.
+/// Developer Mode's "Inspect Element": opens the webview's devtools.
+/// Release builds need the `devtools` feature flag on the tauri
+/// dependency; the JS side gates the menu item behind the setting.
 #[tauri::command]
 fn open_devtools(window: tauri::WebviewWindow) {
     // Returns () in this tauri version; failures surface as the

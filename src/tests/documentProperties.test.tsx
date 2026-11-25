@@ -8,15 +8,10 @@ import { DocumentPropertiesDialog } from '@/components/dialogs/DocumentPropertie
 import { pasteFromSystemClipboard } from '@/lib/editor/clipboard';
 
 /**
- * M-META — the Review > Document Properties dialog. The commit-gated
- * contract (the MarginsDialog pattern, driven the same way the
- * paginated suite drives that dialog): draft edits stay local until
- * Done, Done commits exactly once and closes, Cancel discards. The
- * keywords tag box is presentation over the one-string model — chips
- * commit on comma/Enter/blur, X and Backspace remove, a pending token
- * folds in on Done. Paste (and its focused-text-control routing) is
- * covered here too: the native menu accelerator consumes Ctrl+V, so
- * pasteFromSystemClipboard must replay into the focused field.
+ * The Document Properties dialog: commit-gated (drafts stay local
+ * until Done — one commit; Cancel discards), the keyword tag box over
+ * the one-string model, and the paste routing (the native menu
+ * accelerator consumes Ctrl+V, so pasteFromSystemClipboard must replay).
  */
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({

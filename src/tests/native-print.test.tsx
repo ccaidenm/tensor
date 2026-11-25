@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * M-PRINT (#43) — THE TENSOR-NATIVE PIPELINE suite: the TS seam over
- * the Rust commands. The invoke/path/fs mocks stand in for the IPC
- * surface; the CONTRACTS: enumerate's quiet [] (the fallback
- * posture), and the submit's temp-file lifecycle (write → invoke →
- * remove, even on failure — a print job holds its own copy).
+ * #43 — the tensor-native pipeline suite: the TS seam over the Rust
+ * commands. The invoke/path/fs mocks stand in for the IPC surface;
+ * the contracts: enumerate's quiet [] (the fallback posture), and the
+ * submit's temp-file lifecycle (write → invoke → remove, even on
+ * failure — a print job holds its own copy).
  */
 
 const mocks = vi.hoisted(() => {

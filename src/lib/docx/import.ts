@@ -5,36 +5,16 @@ import type { LineNumbersSetting } from '@/lib/document/schema';
 import type { DocumentCoreProperties } from '@/lib/document/coreProperties';
 import type { StyleDefinition, StyleProperties } from '@/lib/styles/types';
 import { BUNDLED_FONTS } from '@/lib/fonts/bundled';
+import { sha256Hex } from '@/lib/media/insert';
 import { ommlToLatex } from './omml';
 import { emuToPx, halfPointsToPx, twipToPx } from './units';
 import { oKids, oSub, oat, oflag, onum, ovalNum, parseOrdered, type ONode } from './oxml';
 
 /**
- * M-DOCX — THE IMPORT MAPPING (#38a). OOXML → Tensor JSON — the inverse
- * of export.ts through the same semantic tables.
- *
- * THE PARSER LAW: document.xml is parsed with preserveOrder into the
- * ONode model — ORDER IS CONTENT in a word processor (fast-xml-parser's
- * default mode GROUPS same-named children, which reordered paragraphs
- * and tables and scrambled tab sequences in the first gate run; the
- * grouped shape is fundamentally wrong for body XML). styles.xml,
- * numbering.xml and core.xml use the same ONode model for one set of
- * traversal helpers.
- *
- * THE LOUD POSTURE, import-side: Word content Tensor cannot model is
- * counted, never silently dropped (the report surfaces as the open
- * path's notice): tracked deletions are ACCEPTED (standard), comments
- * skipped, footnote/endnote references skipped (the feature is M3),
- * TOC fields import as their cached static text, PAGE-family fields
- * are dropped (ruling 5), webp/emf/wmf images refused, inline
- * equations dropped (Tensor's equations are display-only), even/odd
- * headers collapsed, section breaks collapsed to one (#57).
- *
- * FONTS (ruling 4): the flow collects the families the file references,
- * and anything outside Tensor's bundled catalog is offered to the user
- * — keep original names (render falls back; Word round-trips true) or
- * substitute bundled families. The policy rewrites rFonts values at
- * map time; it never touches anything else.
+ * The import mapping (#38a): OOXML → Tensor JSON — the inverse of
+ * export.ts through the same semantic tables. Anything Tensor cannot
+ * model is counted, never silently dropped (the report lists each
+ * posture); fonts outside the bundled catalog go through the policy.
  */
 
 // ─── The Word styleId → Tensor styleId spelling (the export's inverse) ──
@@ -53,7 +33,7 @@ function tensorStyleId(wordId: string): string {
   }
 }
 
-// ─── Fonts (ruling 4) ────────────────────────────────────────────────────
+// ─── Fonts ────────────────────────────────────────────────────────────────
 
 const KNOWN_FAMILIES = new Set<string>([...BUNDLED_FONTS.map((f) => f.family), 'system-ui']);
 
@@ -92,9 +72,9 @@ export function substituteFontFamily(family: string): string {
   return 'Open Sans';
 }
 
-/** THE rFonts RESOLUTION: a literal ascii/hAnsi wins; the theme slot
- *  (asciiTheme="minorHAnsi" — how modern Word spells it) resolves
- *  through theme1.xml; the policy applies to the RESOLVED name. */
+/** rFonts resolution: a literal ascii/hAnsi wins; the theme slot
+ *  (asciiTheme="minorHAnsi" — modern Word's spelling) resolves through
+ *  theme1.xml; the policy applies to the resolved name. */
 function resolveFontFamily(rFonts: ONode | undefined, theme: DocxThemeFonts | undefined, policy: 'keep' | 'substitute'): string | undefined {
   if (!rFonts) return undefined;
   const literal = oat(rFonts, 'ascii') ?? oat(rFonts, 'hAnsi');
@@ -108,10 +88,6 @@ function applyFontPolicy(family: string | undefined, policy: 'keep' | 'substitut
   if (!family) return undefined;
   if (policy === 'substitute' && !KNOWN_FAMILIES.has(family)) return substituteFontFamily(family);
   return family;
-}
-
-export function isKnownFontFamily(family: string): boolean {
-  return KNOWN_FAMILIES.has(family);
 }
 
 // ─── The report ──────────────────────────────────────────────────────────
@@ -130,11 +106,11 @@ export interface DocxImportReport {
   evenOddHeaders: number;
   internalLinks: number;
   sectionBreaks: number;
-  /** #58 — a NON-first section's titlePg (per-section first-page has
-   *  no v1 model; the doc flag governs page 0 = section 0's first). */
+  /** #58 — a non-first section's titlePg (per-section first-page has
+   *  no model; the doc flag governs page 0). */
   perSectionFirstPage: number;
   textboxes: number;
-  /** #WATERMARK — Word-native watermark VML detected (not imported). */
+  /** Word-native watermark VML detected (not imported). */
   watermarks: number;
   footnotes: number;
   unknownNodes: number;
@@ -184,7 +160,6 @@ export function docxImportNoticeLines(report: DocxImportReport): string[] {
     lines.push(`Sub/superscripts dropped (${report.vertAligns}) — the feature lands in a later update`);
   }
   if (report.textboxes > 0) lines.push(`Text boxes/shapes skipped (${report.textboxes})`);
-  // #WATERMARK — the known-gap spelling (the convention's law).
   if (report.watermarks > 0) {
     lines.push(`Watermark skipped (${report.watermarks}) — watermark import lands in a later update`);
   }
@@ -279,11 +254,9 @@ function paraPropsFromPPPr(pPr: ONode | undefined): StyleProperties {
   if (jc === 'center' || jc === 'right' || jc === 'both') {
     props.textAlign = jc === 'both' ? 'justify' : jc;
   }
-  // M-FLOW — the pagination pPr block at the STYLE tier (Word's style
-  // pPr: Heading styles carry w:keepNext). ABSENT = the style says
-  // nothing (inherit); PRESENT decides (val 0/false = explicit OFF —
-  // for widowControl that is the only meaningful spelling, Word's
-  // default being ON).
+  // Pagination pPr at the style tier: absent = inherit; present decides
+  // (val 0/false = explicit off — for widowControl the only meaningful
+  // spelling, Word's default being on).
   {
     const keepNext = oSub(pPr, 'keepNext');
     if (keepNext != null) props.keepNext = oflag(keepNext) === true;
@@ -385,10 +358,9 @@ export interface DocxTrees {
   parts: Record<string, Uint8Array>;
 }
 
-/** Theme font resolution: modern Word documents reference fonts as
- *  asciiTheme="minorHAnsi" (pointing at theme1.xml), never literal
- *  names — without this the document's real font is invisible to the
- *  mapper and the ruling-4 dialog never fires. */
+/** Theme font resolution: modern Word references fonts as
+ *  asciiTheme="minorHAnsi" (→ theme1.xml), never literal names —
+ *  without this the real font is invisible and the dialog never fires. */
 function themeFonts(themePart: string | undefined): DocxThemeFonts | undefined {
   if (!themePart) return undefined;
   const root = parseOrdered(themePart);
@@ -435,10 +407,8 @@ export function parseDocxTrees(parts: Record<string, Uint8Array>): DocxTrees {
 }
 
 /** The font families the file references (styles.xml + document.xml).
- *  The theme fonts count ONLY when something references them via
- *  asciiTheme/hAnsiTheme — every docx carries a default theme part
- *  (Calibri) that the document may never use; flagging it would fire
- *  the font dialog on documents that don't touch it. */
+ *  Theme fonts count only when referenced via asciiTheme/hAnsiTheme —
+ *  every docx carries a default theme part the document may never use. */
 export function collectFontFamilies(trees: DocxTrees): { known: string[]; unknown: string[] } {
   const families = new Set<string>();
   const themeSlots = new Set<string>();
@@ -489,11 +459,9 @@ interface MapContext {
   /** the field state machine (spans paragraphs via the run mapping) */
   fieldDepth: number;
   fieldInstr: string[];
-  /** THE TOC CONVERSION (the user's ruling): a Word TOC field's cached
-   *  paragraphs are CAPTURED (never emitted as static text) and, at the
-   *  field's end, built into a Tensor referenceTable {kind: 'toc'} —
-   *  whose entries the generator immediately rebuilds from the
-   *  document's headings. A live ToC from a dead field. */
+  /** A Word TOC field's cached paragraphs are captured (never emitted as
+   *  static text) and, at the field's end, built into a referenceTable
+   *  {kind: 'toc'} whose entries regenerate from the headings. */
   tocCapture: { depth: number; entries: JSONContent[] } | null;
   tocEnd: boolean;
 }
@@ -595,18 +563,14 @@ function marksFor(format: RunFormat): { type: string; attrs?: Record<string, unk
 interface RunPieces {
   pieces: JSONContent[];
   pageBreaks: number;
-  /** #74 COLUMNS — the run's column-break brs (the pageBreak counters'
-   *  twin; the same trailing/mid-paragraph mapping rules). */
+  /** #74 — the run's column-break brs (the pageBreak counters' twin). */
   columnBreaks: number;
   hasContent: boolean;
-  /**
-   * M-FLOW — how many pieces follow the run's LAST page-break br: 0
-   * means the break is the run's trailing content (Word's
-   * break-after-this-paragraph spelling — Ctrl+Enter at the paragraph's
-   * end; the trailing-break mapping in mapParagraph reads this).
-   */
+  /** How many pieces follow the run's last page-break br: 0 = the break
+   *  is the run's trailing content (mapParagraph's trailing-break
+   *  mapping reads this). */
   piecesAfterLastBreak: number;
-  /** #74 COLUMNS — the same counter for the run's last COLUMN-break br. */
+  /** #74 — the same counter for the run's last column-break br. */
   piecesAfterLastColumnBreak: number;
 }
 
@@ -619,7 +583,7 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
   // Pieces-array length (counting unflushed buffered text as one) at
   // the last page-break br; -1 = no break in this run.
   let piecesAtLastBreak = -1;
-  // #74 — the same counter for the run's last COLUMN-break br.
+  // #74 — the same counter for the run's last column-break br.
   let piecesAtLastColumnBreak = -1;
 
   const flushText = (): void => {
@@ -631,9 +595,9 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
   };
 
   for (const kid of run.kids) {
-    // The page-field suppression is PER KID: the machine's own
-    // elements (fldChar/instrText) must run inside the field's range —
-    // only the CONTENT is suppressed (the cached page digits).
+    // Page-field suppression is per kid: the machine's own elements
+    // (fldChar/instrText) must run inside the field's range — only the
+    // content (the cached page digits) is suppressed.
     const suppressed = currentFieldKind(ctx) === 'page';
     switch (kid.tag) {
       case 't':
@@ -653,9 +617,8 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
           piecesAtLastBreak = pieces.length + (textBuffer ? 1 : 0);
         }
         else if (oat(kid, 'type') === 'column') {
-          // #74 COLUMNS — the column-break br counts its own way (the
-          // page counters' twin; the paragraph mapping decides the
-          // node/attr spelling).
+          // #74 — the column-break br counts its own way (the page
+          // counters' twin).
           columnBreaks += 1;
           piecesAtLastColumnBreak = pieces.length + (textBuffer ? 1 : 0);
         }
@@ -681,19 +644,17 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
       case 'pict':
       case 'object': {
         flushText();
-        // #WATERMARK — Word's native watermarks are VML WordArt picts
-        // whose shape id starts with 'PowerPlusWaterMarkObject' (the
-        // token Word's own remove command greps for). Detect them and
-        // count SEPARATELY: the notice names the real loss ("watermark
-        // import lands later"), not a generic shape skip.
+        // Word's native watermarks are VML WordArt picts whose shape
+        // id starts with 'PowerPlusWaterMarkObject'. Count them separately
+        // so the notice names the real loss, not a generic shape skip.
         const isWatermark = JSON.stringify(kid).includes('PowerPlusWaterMarkObject');
         if (isWatermark) ctx.report.watermarks += 1;
         else ctx.report.textboxes += 1;
         break;
       }
       case 'fldChar': {
-        // THE FIELD MACHINE (spans paragraphs via ctx): begin pushes an
-        // instr accumulator; separate counts the field's kind; end pops.
+        // The field machine (spans paragraphs via ctx): begin pushes an
+        // instr accumulator; separate counts the kind; end pops.
         const type = oat(kid, 'fldCharType');
         if (type === 'begin') {
           ctx.fieldDepth += 1;
@@ -714,8 +675,8 @@ function mapRunChildren(run: ONode, format: RunFormat, ctx: MapContext, rels: Do
           ctx.fieldDepth = Math.max(0, ctx.fieldDepth - 1);
           if (fieldKind(popped) === 'toc') ctx.tocEnd = true;
           else if (fieldKind(popped) === 'page' && !ctx.tocCapture) {
-            // M-PAGEFIELD: the field IMPORTS as the live node — the
-            // cached digits between separate/end stay suppressed.
+            // The field imports as the live node — the cached digits
+            // between separate/end stay suppressed.
             const keyword = popped.trim().split(/\s+/)[0]?.toUpperCase() ?? 'PAGE';
             pieces.push({ type: 'pageField', attrs: { kind: keyword === 'NUMPAGES' ? 'pages' : 'page' } });
             hasContent = true;
@@ -761,12 +722,9 @@ function mapDrawing(drawing: ONode, ctx: MapContext, rels: DocxTrees['rels']): J
   const mediaId = ctx.mediaPartToId.get(rel.target);
   if (!mediaId) { ctx.report.refusedImages += 1; return null; }
 
-  // THE FLOAT INVERSE: an anchored drawing → Tensor's overlay model
-  // ({dx, dy, z}). Word's offsets are EMU from the chosen relative-to
-  // (column/paragraph ≈ Tensor's anchor-relative px — the same frame).
-  // behindDoc is the z-order. Text-wrap shapes (square/tight/topAnd-
-  // Bottom) and page/margin anchoring have NO Tensor spelling — the
-  // placement approximates, LOUDLY counted.
+  // An anchored drawing → Tensor's overlay model ({dx, dy, z}): EMU
+  // offsets from column/paragraph ≈ anchor-relative px; behindDoc is
+  // the z-order. Text-wrap/page anchoring approximates, loudly counted.
   let float: { dx: number; dy: number; z: 'front' | 'behind' } | null = null;
   if (anchor) {
     const posH = oSub(anchor, 'positionH');
@@ -782,7 +740,7 @@ function mapDrawing(drawing: ONode, ctx: MapContext, rels: DocxTrees['rels']): J
   }
 
   return {
-    type: anchor ? 'image' : 'image',
+    type: 'image',
     attrs: {
       src: `media://${mediaId}`,
       width: Math.round(cx / 9525),
@@ -809,11 +767,9 @@ interface ParagraphResult {
   json: JSONContent | null;
   numPr: { numId: number; ilvl: number } | null;
   /**
-   * #58 — the paragraph's OWN sectPr when it carries one (Word's
-   * mid-doc section break spelling: the sectPr rides the section's
-   * LAST paragraph's pPr; the body-level sectPr is the final one).
-   * The body walk flushes it AFTER the paragraph's content emits (the
-   * content belongs to the ENDING section — the break follows it).
+   * #58 — the paragraph's OWN sectPr (Word's mid-doc section break
+   * spelling: the sectPr rides the section's last paragraph's pPr). The
+   * body walk flushes it after the content emits (the break follows it).
    */
   sectPr?: ONode;
 }
@@ -870,13 +826,9 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
       }));
     if (stops.length) attrs.tabStops = stops;
   }
-  // M-FLOW — the pagination pPr block (direct paragraph flags). The
-  // on/off elements carry Word's explicit-override spelling: PRESENT
-  // means the direct formatting decides (val 0/false = explicit OFF,
-  // which must beat a style's ON); ABSENT = inherit the style tier /
-  // the engine defaults. w:widowControl is the DEFAULT-ON family: only
-  // an explicit off value maps (attrs.widowControl false); absent and
-  // explicit-on are identical (engine default true), so neither writes.
+  // Direct paragraph pagination flags: present = the direct formatting
+  // decides (val 0/false = explicit off, beating a style's on); absent =
+  // inherit. widowControl is default-on — only an explicit off maps.
   {
     const keepNext = oSub(pPr, 'keepNext');
     if (keepNext != null) attrs.keepNext = oflag(keepNext) === true;
@@ -893,24 +845,18 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
   const ommlMarkers: ONode[] = [];
   let pageBreaks = 0;
   let columnBreaks = 0;
-  // M-FLOW — content-array length at the LAST page-break run: equal to
-  // the final length ⟺ nothing follows the break (Word's break-after
-  // spelling). -1 = no break seen.
+  // Content-array length at the last page-break run: equal to the final
+  // length ⟺ nothing follows the break; -1 = no break seen.
   let contentAtLastBreak = -1;
-  // #74 COLUMNS — the same counter for the paragraph's last COLUMN-break.
+  // #74 — the same counter for the paragraph's last column-break.
   let contentAtLastColumnBreak = -1;
   for (const kid of p.kids) {
     switch (kid.tag) {
       case 'pict':
       case 'object': {
-        // #WATERMARK — Word's native watermarks are VML WordArt picts
-        // whose shape id contains 'PowerPlusWaterMarkObject' (the
-        // token Word's own remove command greps for). A pict sits
-        // BOTH as a run's kid (below, mapRunChildren) and as a DIRECT
-        // paragraph child (Word's watermark spelling — no run
-        // wrapper); this arm owns the paragraph-level spelling.
-        // Detection: the shape id rides the :@ attr bag, which
-        // stringify includes; a v:textpath string is the second token.
+        // A pict sits both as a run's kid (mapRunChildren) and as a direct
+        // paragraph child (Word's watermark spelling — no run wrapper);
+        // this arm owns the paragraph-level spelling.
         const dump = JSON.stringify(kid);
         if (dump.includes('PowerPlusWaterMarkObject')) {
           ctx.report.watermarks += 1;
@@ -934,8 +880,8 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         break;
       }
       case 'hyperlink': {
-        // Internal anchors (w:anchor) have no relationship — plain text
-        // + counted (#57's bookmark model lands later).
+        // Internal anchors (w:anchor) have no relationship — plain
+        // text + counted.
         if (oat(kid, 'anchor') != null) {
           if (!ctx.tocCapture) ctx.report.internalLinks += 1;
           for (const run of oKids(kid, 'r')) {
@@ -970,10 +916,9 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         const instr = oat(kid, 'instr') ?? '';
         const kind = fieldKind(instr);
         if (kind === 'toc') {
-          // THE CONVERSION'S OTHER HALF: a Word TOC field (simple
-          // spelling — the export emits it this way) becomes a LIVE
-          // Tensor referenceTable; the generator rebuilds the entries
-          // from the document's headings on open.
+          // The simple-field spelling of the same conversion: a live
+          // referenceTable whose entries the generator rebuilds from
+          // the headings on open.
           ctx.report.tocFields += 1;
           content.push({
             type: 'referenceTable',
@@ -982,7 +927,7 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
           break;
         }
         if (kind === 'page') {
-          // M-PAGEFIELD: the field IMPORTS as the live node.
+          // The field imports as the live node.
           const keyword = instr.trim().split(/\s+/)[0]?.toUpperCase() ?? 'PAGE';
           content.push({ type: 'pageField', attrs: { kind: keyword === 'NUMPAGES' ? 'pages' : 'page' } });
           break;
@@ -1013,10 +958,8 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
         break;
       case 'oMath':
       case 'oMathPara': {
-        // INLINE math in Word's spelling — Tensor's equations are
-        // display-only: SOLO oMath(s) become the display equation; ones
-        // among text are dropped + counted. oMathPara wraps display
-        // math and rides the same resolution.
+        // Tensor's equations are display-only: SOLO oMath(s) become the
+        // display equation; ones among text are dropped + counted.
         for (const math of kid.tag === 'oMathPara' ? oKids(kid, 'oMath') : [kid]) {
           ommlMarkers.push(math);
         }
@@ -1064,30 +1007,23 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
 
   const merged = mergeRuns(content);
 
-  // M-FLOW — TRAILING page-break runs (Ctrl+Enter at the paragraph's
-  // end — Word's break-AFTER spelling): the breakAfter attr keeps the
-  // paragraph's run content AND its pagination (the engine closes the
-  // page after the block; the export re-emits the same trailing run,
-  // so the round-trip is stable). Runs BEFORE the heading return so a
-  // heading's trailing break rides too. Pre-M-FLOW this shape was
-  // silently lost.
+  // Trailing page-break runs (Word's break-AFTER spelling): the
+  // breakAfter attr keeps the content and its pagination (the export
+  // re-emits the same trailing run — stable round-trip).
   if (pageBreaks > 0 && contentAtLastBreak === content.length && content.length > 0) {
     attrs.breakAfter = 'page';
     pageBreaks = 0;
   }
-  // #74 COLUMNS — TRAILING column-break runs: the breakAfter 'column'
-  // attr (the page arm's twin — the engine closes the flow slot after
-  // the block; the export re-emits the same trailing run, so the round
-  // trip is stable). A paragraph spelling BOTH kinds maps the page one
+  // #74 — trailing column-break runs: the breakAfter 'column' attr (the
+  // page arm's twin). A paragraph spelling BOTH kinds maps the page one
   // (above) — the column counter falls through to lost+counted.
   if (pageBreaks === 0 && columnBreaks > 0 && contentAtLastColumnBreak === content.length && content.length > 0) {
     attrs.breakAfter = 'column';
     columnBreaks = 0;
   }
 
-  // THE HEADING MAPPING: Word spells headings as pStyle HeadingN — the
-  // Tensor spelling is the heading NODE with its level. The runs ride
-  // like any paragraph's (content never drops).
+  // Word spells headings as pStyle HeadingN; the Tensor spelling is the
+  // heading NODE with its level — the runs ride like any paragraph's.
   if (headingLevel) {
     return {
       json: { type: 'heading', attrs: { ...attrs, level: Number(headingLevel[1]) }, ...(merged.length ? { content: merged } : {}) },
@@ -1107,9 +1043,8 @@ function mapParagraph(p: ONode, ctx: MapContext, rels: DocxTrees['rels']): Parag
     return { json: { type: 'pageBreak' }, numPr: null };
   }
   if (columnBreaks > 0 && merged.length === 0) {
-    // #74 COLUMNS — the column break's own-paragraph spelling: the
-    // Tensor spelling is the columnBreak block (the pageBreak arm's
-    // twin; the export re-emits the run, so the round trip is stable).
+    // #74 — the column break's own-paragraph spelling: the columnBreak
+    // block (the pageBreak arm's twin).
     return { json: { type: 'columnBreak' }, numPr: null };
   }
   if (pageBreaks > 0) {
@@ -1181,8 +1116,8 @@ function mapTable(tbl: ONode, ctx: MapContext, rels: DocxTrees['rels']): JSONCon
   const rows: JSONContent[] = oKids(tbl, 'tr').map((tr) => {
     const trPr = oSub(tr, 'trPr');
     const repeatHeader = oflag(oSub(trPr, 'tblHeader')) === true;
-    // M-FLOW — w:cantSplit: the row must not break across pages (the
-    // Tensor row attr rides the same OOXML name).
+    // w:cantSplit: the row must not break across pages (the Tensor row
+    // attr rides the same OOXML name).
     const cantSplit = oflag(oSub(trPr, 'cantSplit')) === true;
     const cells: JSONContent[] = [];
     let col = 0;
@@ -1192,7 +1127,7 @@ function mapTable(tbl: ONode, ctx: MapContext, rels: DocxTrees['rels']): JSONCon
       const vMerge = tcPr ? oSub(tcPr, 'vMerge') : undefined;
       const isContinue = vMerge != null && (oat(vMerge, 'val') ?? 'continue') !== 'restart';
       if (isContinue) {
-        // THE FOLD: the continuation cell grows its origin's rowspan
+        // The fold: the continuation cell grows its origin's rowspan
         // and vanishes (Tensor carries origin cells only).
         const open = openMerges.get(col);
         if (open) {
@@ -1371,13 +1306,9 @@ function mapSection(sectPr: ONode, ctx: MapContext, trees: DocxTrees): SectionRe
   const startType: 'nextPage' | 'continuous' =
     oat(oSub(sectPr, 'type'), 'val') === 'continuous' ? 'continuous' : 'nextPage';
 
-  // #74 COLUMNS — the section's column spec (Word's w:cols): count +
-  // spacing in twips (→ pt), custom widths from the w:col entries when
-  // Word spells them (w:equalWidth="0" or unequal entries — equal
-  // entries ARE the equalWidth spelling, so no widths array). Word has
-  // no balance spelling (its sections balance implicitly at section
-  // ends) — the engine's default (true) imports; a Tensor balanced:
-  // false round-trips as true (the documented gap, Word-faithful).
+  // #74 — the section's column spec (w:cols): count + spacing in twips;
+  // unequal w:col entries (or equalWidth="0") become the widths array.
+  // Word has no balance spelling — balanced:false round-trips as true.
   const cols = oSub(sectPr, 'cols');
   if (cols) {
     const colCount = onum(cols, 'num') ?? 1;
@@ -1569,22 +1500,16 @@ export function mapDocxDocument(
 
   const body = oSub(trees.document, 'body');
 
-  // The body walk with the LIST MACHINE: consecutive numbered
-  // paragraphs (same numId, nesting by ilvl) rebuild PM lists; any
-  // non-numbered block ends the run (numbering restarts there). The
-  // ONode walk preserves document order — p/tbl interleaving is real.
+  // The body walk with the list machine: consecutive numbered paragraphs
+  // (same numId, nesting by ilvl) rebuild PM lists; any non-numbered block
+  // ends the run. The ONode walk preserves document order.
   const output: JSONContent[] = [];
   const listStack: { numId: number; list: JSONContent; lastItem: JSONContent }[] = [];
   let sectionBreaks = 0;
 
-  // ── #58 SECTIONS — the un-collapse (#57): Word's mid-doc sectPr
-  // ends the PRECEDING section (its props describe everything since
-  // the previous break); the FINAL sectPr (the walk's last) is the
-  // store's pageSetup. The walk can't know which sectPr is last, so
-  // each mapping is held PENDING and flushed when the NEXT sectPr
-  // arrives — the survivor is the final section (store props +
-  // UNTAGGED band containers = the doc default; every flushed one
-  // emits a sectionBreak node + ITS OWN tagged band containers).
+  // ── #58 sections — the un-collapse (#57): a mid-doc sectPr ends the
+  // PRECEDING section; the walk's last sectPr is the store's pageSetup.
+  // Mappings flush pending — the survivor is final; flushed ones emit sectionBreaks.
   const flushedSections: {
     setup: PageSetup;
     sectionId: string;
@@ -1617,9 +1542,8 @@ export function mapDocxDocument(
   };
 
   const feedList = (numId: number, ilvl: number, paragraph: JSONContent): void => {
-    // The stack holds levels 0..depth; feeding level L keeps 0..L —
-    // popping down to length L+1 (the old `> ilvl` popped the TARGET
-    // level and split every two-item list into two).
+    // The stack holds levels 0..depth; feeding level L keeps 0..L — pop
+    // down to length L+1 (popping the target level splits two-item lists).
     while (listStack.length > ilvl + 1) listStack.pop();
     let level = ilvl;
     if (level > 0 && !listStack[level - 1]) level = listStack.length; // orphan depth — clamp
@@ -1652,8 +1576,8 @@ export function mapDocxDocument(
     }
   };
 
-  /** THE CAPTURE-AWARE EMIT: while a TOC field is being read, mapped
-   *  paragraphs are its entries; the field's end builds the live
+  /** Capture-aware emit: while a TOC field is being read, mapped
+   *  paragraphs are its entries; the field's end builds the
    *  referenceTable. */
   const emitMapped = (mapped: ParagraphResult): void => {
     if (!mapped.json) return;
@@ -1732,14 +1656,9 @@ export function mapDocxDocument(
   }
   ctx.report.sectionBreaks = sectionBreaks;
 
-  // ── #58 — the band INHERITANCE CHAIN (Word's "link to previous" is
-  // CHAINED: section k's header = its own refs ?? section k−1's
-  // resolved). Our model is two-level (section override ?? doc
-  // default), so the chain MATERIALIZES: each flushed section whose
-  // effective bands differ from the FINAL section's effective bands
-  // gets its own tagged containers; matching sections emit NOTHING
-  // (they inherit the doc default = the final's effective — exact
-  // visual fidelity, no dead containers).
+  // ── #58 — the band inheritance chain (Word's "link to previous" chains
+  // through sections). Sections whose effective bands differ from the
+  // final's get tagged containers; matching ones inherit silently.
   const finalBands = pendingSection?.bands ?? [];
   const effectiveOf = (own: JSONContent[], inherited: JSONContent[]): JSONContent[] => {
     // Per region (headerBlock/footerBlock × variant): own wins, else
@@ -1792,9 +1711,8 @@ export function mapDocxDocument(
   const headerBlocks = finalEffective.filter((b) => b.type === 'headerBlock');
   const footerBlocks = finalEffective.filter((b) => b.type === 'footerBlock');
 
-  // titlePg: the doc-level flag governs the DOC's page 0 (section 0's
-  // first page) — the FIRST section's titlePg. A non-first section's
-  // titlePg has no v1 model (per-section first-page) — counted.
+  // titlePg: the doc-level flag governs page 0 (section 0's first page) —
+  // the FIRST section's titlePg. A non-first section's has no model — counted.
   const firstTitlePg = flushedSections[0]?.titlePg === true;
   let otherTitlePgs = 0;
   for (let i = 1; i < flushedSections.length; i++) {
@@ -1821,10 +1739,9 @@ export function mapDocxDocument(
 
 // ─── The promotion (export's inverse) ────────────────────────────────────
 
-/** A paragraph whose ONLY content is one image is the standalone-figure
- *  spelling — it becomes the BLOCK image node. The paragraph's
- *  alignment (jc) transfers to the image's align attr, so centered
- *  figures round-trip. */
+/** A paragraph whose only content is one image is the standalone-figure
+ *  spelling — it becomes the BLOCK image node, carrying the paragraph's
+ *  alignment so centered figures round-trip. */
 function promoteSoloImage(block: JSONContent): JSONContent {
   if (
     block.type === 'paragraph' &&
@@ -1845,10 +1762,9 @@ function promoteSoloImage(block: JSONContent): JSONContent {
   return block;
 }
 
-/** THE TOC CONVERSION: Word's field becomes a Tensor referenceTable —
- *  the depth rides the \o switch ("1-3" → 3); the captured entry
- *  paragraphs seed the container (the generator rebuilds them from the
- *  document's headings on open — a live ToC from a dead field). */
+/** Word's TOC field becomes a referenceTable — the depth rides the
+ *  \o switch ("1-3" → 3); the captured entry paragraphs seed the
+ *  container (the generator rebuilds them from the headings on open). */
 function parseTocDepth(instr: string): number {
   const range = /\o\s+"?([0-9])[-\u2013]([0-9])"?/i.exec(instr);
   if (range) return Math.min(6, Math.max(1, Number(range[2])));
@@ -1873,7 +1789,6 @@ export interface DocxMediaEntry { id: string; ext: string; bytes: Uint8Array }
  *  identical images dedupe naturally). Returns the part→id map for the
  *  mapper and the entries for the store. */
 export async function ingestDocxMedia(parts: Record<string, Uint8Array>): Promise<{ partToId: Map<string, string>; entries: DocxMediaEntry[] }> {
-  const { sha256Hex } = await import('@/lib/media/insert');
   const partToId = new Map<string, string>();
   const entries: DocxMediaEntry[] = [];
   const byId = new Map<string, DocxMediaEntry>();

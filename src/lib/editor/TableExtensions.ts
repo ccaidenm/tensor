@@ -11,35 +11,14 @@ import { CellSelection, TableView as ResizableTableView } from '@tiptap/pm/table
 import { tableFlowAttributes } from '@/lib/editor/ParagraphExtensions';
 
 /**
- * M-TABLES — the table model.
- *
- * The stock @tiptap/extension-table family is the DOCUMENT MODEL layer
- * (schema, commands, clipboard, fixTables normalization) — used as-is
- * via thin `.extend()`s for the Tensor-specific attributes:
- *
- *  - `borderStyle` on the TABLE ('all' | 'none' | 'outer'): the
- *    table-level border preset (Word's Borders control, v1). The
- *    pageless CSS reads the rendered data-table-border marker; the
- *    paginated engine will read the attr straight off the PM node.
- *  - `backgroundColor` on CELL/HEADER: cell shading — not in the box
- *    (the issue's own prediction). Rendered as BOTH an inline style
- *    (pageless display) and a data marker (clipboard round-trip +
- *    stable test hook). External pasted tables carry their inline
- *    background in (plain style parse — a table has no ImageNode-style
- *    media-ref security story that would justify a scoped marker).
- *
- * The `colwidth` attr (per-cell px-width array, written by the built-in
- * columnResizing plugin and by the M-T2 shell drag handles) is stock —
- * no changes needed for resizable tables.
- *
- * Row and cell ids: NO blockId on rows/cells — the paginated adapter
- * turns ONE table into ONE engine TableBlock (one blockId at the table
- * node, minted by BlockIdExtension); rows/cells are positional inside it.
+ * The table model: the stock @tiptap/extension-table family plus Tensor
+ * attrs (borderStyle on the table, shading + padding on cells) via thin
+ * `.extend()`s. NO blockId on rows/cells — one table = ONE TableBlock.
  */
 
 export type TableBorderPreset = 'all' | 'none' | 'outer';
 
-/** M-T4 — one side of a per-side edges attr (null = unset → inherit). */
+/** One side of a per-side edges attr (null = unset → inherit). */
 export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
 export interface BoxEdgesAttrs {
   top: number | null;
@@ -69,7 +48,7 @@ function edgesFromElement(element: HTMLElement, marker: string): BoxEdgesAttrs |
   }
 }
 
-/** BoxEdges attr spelling: JSON data marker (the float precedent). */
+/** BoxEdges attr spelling: JSON data marker (as the float attr does). */
 function edgesAttr(marker: string, attrName: string) {
   return {
     default: null as BoxEdgesAttrs | null,
@@ -87,14 +66,9 @@ function borderMarker(node: PMNode): string {
 }
 
 /**
- * M-TABLES — table NodeView that keeps data-table-border in sync. The
- * resizable table renders through prosemirror-tables' TableView, which
- * re-syncs the colgroup on update but NEVER re-applies node attrs to
- * the <table> element — a borderStyle setNodeMarkup would never reach
- * the pageless DOM. Thin subclass: construction AND every update
- * re-stamp the marker. (The stock non-resizable path applies its
- * HTMLAttributes in a constructor we shadow — re-applied here so either
- * construction path renders the node's attrs.)
+ * Table NodeView keeping data-table-border in sync: prosemirror-tables'
+ * TableView NEVER re-applies node attrs to the <table> element — so
+ * construction AND every update re-stamp the marker.
  */
 class TensorTableView extends ResizableTableView {
   constructor(
@@ -123,11 +97,9 @@ class TensorTableView extends ResizableTableView {
   }
 
   /**
-   * M-T4 — the pageless spacing surface: outer margins + the default
-   * cell padding as CSS VARS (index.css consumes them with the engine
-   * constants as fallbacks — the same per-side resolution the engine
-   * performs). The stock TableView never re-applies node attrs on
-   * update; the vars ride the same re-stamp as the border marker.
+   * The pageless spacing surface: outer margins + default cell padding
+   * as CSS vars (index.css consumes them with the engine constants as
+   * fallbacks), riding the same re-stamp as the border marker.
    */
   private applySpacingVars(node: PMNode): void {
     const margin = node.attrs.margin as BoxEdgesAttrs | null;
@@ -163,11 +135,8 @@ export const TensorTable = TableBase.extend({
         },
         renderHTML: (attributes) => ({ [BORDER_ATTR]: attributes.borderStyle }),
       },
-      // M-T3c — TABLE FLOW: horizontal placement of the table within
-      // the content box (Word's table alignment). The engine's
-      // TableBlock.align consumes it (alignOffset over the tracks'
-      // total); pageless CSS mirrors it (a fully-fixed-width table
-      // is the case where it visibly moves).
+      // TABLE FLOW: horizontal placement within the content box —
+      // the engine's TableBlock.align consumes it; pageless CSS mirrors.
       align: {
         default: 'left',
         parseHTML: (element) => {
@@ -178,16 +147,13 @@ export const TensorTable = TableBase.extend({
           'data-table-align': attributes.align === 'center' || attributes.align === 'right' ? attributes.align : 'left',
         }),
       },
-      // M-T4 — outer margins (t/b/l/r): top/bottom ride the engine's
-      // block spacing via the adapter; left/right narrow the engine's
-      // table box. Pageless renders them through CSS vars (the view).
+      // Outer margins: top/bottom ride the adapter's block spacing;
+      // left/right narrow the engine's table box (CSS vars in pageless).
       margin: edgesAttr('data-table-margin', 'margin'),
-      // M-T4 — default cell padding (per-side; cells override).
+      // Default cell padding (per-side; cells override).
       cellPadding: edgesAttr('data-table-cell-padding', 'cellPadding'),
-      // M-FLOW — table-level pagination flags (keepLines = keep the
-      // whole table on one page when it fits; keepNext/keepPrevious
-      // bond the table to a caption/neighbor; forced breaks around
-      // it). The engine's TableBlock accepts FlowPolicy directly.
+      // Table-level pagination flags — the engine's TableBlock accepts
+      // FlowPolicy directly.
       ...tableFlowAttributes,
     };
   },
@@ -199,12 +165,9 @@ export const TensorTable = TableBase.extend({
 });
 
 /**
- * M-T3c — the ROW's minimum height (Word's Row Height "At least"):
- * null = pure content height; a number floors the row at that px.
- * The engine's TableRowData.minHeight consumes it verbatim ("never a
- * MAXIMUM: rows grow" — the engine's documented contract; exact
- * heights are a tracked follow-up). Rendered as a data marker for the
- * clipboard round-trip.
+ * The ROW's minimum height (Word's "At least"): null = pure content
+ * height; a number floors the row at that px — never a MAXIMUM, rows
+ * grow. Rendered as a data marker for the clipboard round-trip.
  */
 export const TensorTableRow = TableRowBase.extend({
   addAttributes() {
@@ -222,15 +185,9 @@ export const TensorTableRow = TableRowBase.extend({
             ? { 'data-row-min-height': String(attributes.minHeight) }
             : {},
       },
-      // M-FLOW — Word's per-row "Allow row to break across pages",
-      // stored under the OOXML w:cantSplit spelling (the DOCX
-      // round-trip's name; the PANEL's checkbox label is Word's
-      // user-facing inverted phrasing): null = unset = the row MAY
-      // split at the cell line grid (Word's AND GDocs' DEFAULT — the
-      // engine's per-line-grid banding); true = the row is atomic,
-      // it moves wholly when it doesn't fit the page remainder. A
-      // monster row (taller than a page) fragments regardless — the
-      // engine's "can't keep together what can't fit together".
+      // Word's "Allow row to break across pages" (OOXML w:cantSplit):
+      // null = unset (the row MAY split — the default); true = the
+      // row is atomic (unless taller than a page).
       cantSplit: {
         default: null,
         parseHTML: (element) => {
@@ -259,7 +216,7 @@ export const TensorTableCell = TableCellBase.extend({
           (element.style?.backgroundColor || null),
         renderHTML: cellRenderHTML,
       },
-      // M-T4 — per-cell padding override; null sides inherit the table
+      // Per-cell padding override; null sides inherit the table
       // default, then the engine constants.
       padding: {
         default: null as BoxEdgesAttrs | null,
@@ -281,7 +238,7 @@ export const TensorTableHeader = TableHeaderBase.extend({
           (element.style?.backgroundColor || null),
         renderHTML: cellRenderHTML,
       },
-      // M-T4 — per-cell padding override (the header's own; null sides
+      // Per-cell padding override (the header's own; null sides
       // inherit the table default).
       padding: {
         default: null as BoxEdgesAttrs | null,
@@ -298,22 +255,21 @@ declare module '@tiptap/core' {
       /**
        * Set the cell shading for every cell under the selection —
        * cursor-in-cell sets that one cell; a CellSelection sets all
-       * selected cells (prosemirror-tables setCellAttr does the
-       * dispatch for both shapes). null clears back to transparent.
+       * selected cells. null clears back to transparent.
        */
       setCellBackground: (color: string | null) => ReturnType;
       /** Apply a table-level border preset to the table the selection is in. */
       setTableBorderPreset: (preset: TableBorderPreset) => ReturnType;
       /** Set the table's horizontal placement (left/center/right) within the content box. */
       setTableAlign: (align: 'left' | 'center' | 'right') => ReturnType;
-      /** M-T4 — set one side of the table's OUTER margin (null = 0). */
+      /** Set one side of the table's OUTER margin (null = 0). */
       setTableMargin: (side: EdgeSide, value: number | null) => ReturnType;
-      /** M-T4 — set one side of the table's DEFAULT cell padding (null = engine default). */
+      /** Set one side of the table's DEFAULT cell padding (null = engine default). */
       setTableCellPadding: (side: EdgeSide, value: number | null) => ReturnType;
       /**
-       * M-T4 — set one side of the CURRENT cell(s)' padding override
-       * (null = inherit the table default). A CellSelection merges EACH
-       * cell's own attr (per-cell state, not one shared value).
+       * Set one side of the CURRENT cell(s)' padding override (null =
+       * inherit the table default). A CellSelection merges EACH cell's
+       * own attr.
        */
       setCellPadding: (side: EdgeSide, value: number | null) => ReturnType;
     };
@@ -338,12 +294,9 @@ function edgesAreSet(edges: BoxEdgesAttrs): boolean {
 }
 
 /**
- * M-T4 — the CELL's combined render: the shading marker + the per-cell
- * padding override. The padding renders as SET-SIDE LONGHANDS
- * (`padding-left: 40px`) — an inline longhand beats the stylesheet's
- * table-level `padding: var(--tensor-cell-pad, ...)` for JUST that
- * side, while unset sides keep the table default (the per-side
- * inheritance the engine resolves, mirrored by the CSS cascade).
+ * The CELL's combined render: shading marker + per-cell padding
+ * override. Set sides render as LONGHANDS that beat the table-level
+ * padding var for just that side; unset sides keep the table default.
  */
 function cellRenderHTML(attributes: Record<string, unknown>) {
   const bg = attributes.backgroundColor as string | null;
@@ -397,9 +350,8 @@ function cellIsMerged(node: PMNode): boolean {
 }
 
 /**
- * True when any cell under the selection is merged (colspan/rowspan > 1)
- * — the floating toolbar's Merge⇄Split toggle reads this to pick which
- * action (and icon) the single button offers.
+ * True when any cell under the selection is merged — the Merge⇄Split
+ * toggle reads this to pick which action the single button offers.
  */
 export function selectionHasMergedCells(state: EditorState): boolean {
   const { selection } = state;

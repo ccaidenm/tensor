@@ -21,29 +21,9 @@ import type { Editor } from '@tiptap/core';
 import { cn } from 'cn';
 
 /**
- * THE SYMBOL BUBBLE — the character picker as a floating POPUP (the
- * equation-editor-bubble precedent): it pops up near the ribbon button,
- * DRAGS anywhere (tear-off model), and PERSISTS — it mounts in App.tsx
- * through the bubble store, so ribbon tab switches never touch it.
- *
- * THE CLOSE LAW (the user ruling): a menu the user never moved is a
- * transient — clicking away auto-closes it. A menu the user DRAGGED is
- * a parked tool — it persists until closed explicitly (the footer's
- * Done button, or the ribbon toggle). No X: the header is purely the
- * drag handle (the equation bubble's own law — closing belongs to
- * Done/Escape/click-away, never a hit-test inside the drag handle).
- *
- * THE BODY-PORTAL MODEL: fixed position + max z through a
- * document.body portal — it escapes the editor's scroll container.
- *
- * LAZY LAW: nothing loads until the user leaves Common — the core
- * bundle (~271KB gz) loads on the first non-Common browse or deep
- * search, each CJK/Hangul chunk only when its group is opened.
- *
- * COVERAGE LAW: cells are checked against the ACTIVE font (canvas
- * measure, cached); glyphs the font can't render are DISABLED —
- * viewable and browseable, never insertable (no tofu dressed up as a
- * normal result).
+ * The floating, draggable character picker: un-dragged it is a
+ * click-away transient; dragged, a parked tool. Group data loads
+ * lazily; glyphs the active font can't cover are never insertable.
  */
 
 const ROW_HEIGHT = 30; // 28px cell + 2px gap
@@ -67,12 +47,9 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
   const defaultFamily = useConfigStore((s) => s.config.editor.defaultFontFamily);
   const selectionFont = editor.getAttributes('textStyle')?.fontFamily as string | undefined;
   const fontStack = activeFontStack(selectionFont, defaultFamily);
-  // THE CHIP ROW (the collapse law): Common + the user's recently used
-  // groups (MRU, capped) in the row; every other group lives in the
-  // ellipsis dropdown. Recency is config-persisted — your row keeps
-  // YOUR groups across sessions. FIRST LOAD: with no history, the row
-  // fills with the most common categories (display-only — the user's
-  // own usage replaces it from the first pick; nothing is written).
+  // The chip row: Common + the user's recently used groups (MRU,
+  // capped); every other group lives in the ellipsis dropdown.
+  // Recency is config-persisted across sessions.
   const ROW_LIMIT = 4;
   const recentsRaw = useConfigStore((s) => s.config.editor.recentSymbolGroups);
   const setRecentSymbolGroups = useConfigStore((s) => s.setRecentSymbolGroups);
@@ -92,16 +69,13 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
 
   const searching = query.trim().length > 0;
 
-  // ─── DRAG (the tear-off model, simplified: always floating) ────────
-  // The initial base is the trigger rect, clamped to the viewport;
-  // pointer moves apply the delta DIRECTLY to the base (no cumulative
-  // offset — origin is fixed for the whole drag, so no batch staleness).
+  // Drag: the base is the trigger rect clamped to the viewport; moves
+  // apply the delta directly to the base (fixed origin — no batch staleness).
   const [pos, setPos] = useState({ left: 0, top: 0 });
   const posRef = useRef(pos);
   posRef.current = pos;
   const dragStartRef = useRef<{ px: number; py: number; bx: number; by: number } | null>(null);
-  /** Has the user torn the bubble off its anchor? Governs the close law
-   *  (no visual badge — the chrome stays quiet; the law is behavior). */
+  /** Torn off its anchor? Governs the click-away vs parked close behavior. */
   const [hasDragged, setHasDragged] = useState(false);
   const bubbleRef = useRef<HTMLDivElement>(null);
 
@@ -117,13 +91,9 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
     setLoadErrors({});
   }, [open, anchor]);
 
-  // THE CLICK-AWAY LAW: while NOT dragged, any pointerdown outside the
-  // bubble (and off the trigger) auto-closes. A dragged bubble is a
-  // parked tool — the listener stands down. TWO MORE GUARDS: the
-  // ellipsis dropdown's items portal OUTSIDE the bubble's DOM (they
-  // must reach their onClick, not die in a click-away), and while the
-  // dropdown is OPEN the bubble never closes from click-away (Base UI
-  // owns the menu's dismissal).
+  // Click-away closes only while NOT dragged (a dragged bubble is a
+  // parked tool). Guards: the ellipsis dropdown's items portal outside
+  // the bubble's DOM; while the dropdown is open, Base UI owns dismissal.
   const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => {
     if (!open || hasDragged) return;
@@ -159,17 +129,14 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
   }
   function endDrag() {
     if (dragStartRef.current && !hasDragged) {
-      // Any completed drag tears the bubble off — the close law flips.
+      // Any completed drag tears the bubble off — click-away no longer closes it.
       setHasDragged(true);
     }
     dragStartRef.current = null;
   }
 
-  // ─── LAZY LOADS ─────────────────────────────────────────────────────
-  // FAILURE LAW: a failed load is recorded once and surfaced with a
-  // retry — the effect must never re-fire on failure (that would loop
-  // the fetch forever; the loadedTick keyed-record pattern bumps only
-  // on success).
+  // A failed load is recorded once and surfaced with a retry — the
+  // effect must never re-fire on failure (an infinite fetch loop).
   useEffect(() => {
     if (!open) return;
     if (activeGroup !== 'common' && !getGroupChars(activeGroup) && !loadErrors[activeGroup]) {
@@ -235,8 +202,7 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
     setQuery('');
     if (gridRef.current) gridRef.current.scrollTop = 0;
     setScrollTop(0);
-    // THE RECENCY WRITE: every browse moves the group to the MRU front
-    // (Common is always pinned in the row — never tracked).
+    // Every browse moves the group to the MRU front (Common is pinned — never tracked).
     if (id !== 'common') {
       setRecentSymbolGroups([id, ...recentsRaw.filter((r) => r !== id)].slice(0, ROW_LIMIT));
     }
@@ -249,20 +215,15 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
   return createPortal(
     <div
       ref={bubbleRef}
-      // THE Z-LAW (toast.tsx): dialogs/popovers/menus/tooltips cap at
-      // z-50 and toasts sit at z-[100] topmost — a floating bubble
-      // must sit UNDER that layer (its own menus/tooltips, and every
-      // dialog, render above it) while staying above the docked
-      // panels (z-40) and the ruler (z-30).
+      // z-[45]: under the z-50 overlays and z-[100] toasts (dialogs and
+      // the bubble's own menus render above it), above panels (z-40) and ruler (z-30).
       className="fixed z-[45] flex flex-col rounded-lg border border-border bg-popover p-3 text-sm shadow-md"
       style={{ left: pos.left, top: pos.top, width: BUBBLE_WIDTH }}
       onMouseDown={(e) => e.stopPropagation()}
       data-testid="symbol-picker"
     >
-      {/* THE DRAG HEADER (the equation bubble's exact pattern): icon +
-          title, purely the drag handle — no close affordance lives
-          here (closing belongs to Done / click-away, never the drag
-          strip), and no state badges — the chrome stays quiet. */}
+      {/* The drag header: purely the drag handle — no close affordance
+          (closing belongs to Done / click-away). */}
       <div
         className="mb-2 flex cursor-grab select-none items-center gap-1.5 active:cursor-grabbing"
         style={{ touchAction: 'none' }}
@@ -284,10 +245,6 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
         data-testid="symbol-search"
       />
 
-      {/* Group chips — THE COLLAPSE LAW: one row of Common + the
-          user's last-used groups; everything else lives in the
-          ellipsis dropdown (picking from it moves the group into the
-          row — config-persisted recency). */}
       <div className="mb-2 flex flex-wrap items-center gap-1" data-testid="symbol-groups">
         <GroupChip id="common" label="Common" active={activeGroup === 'common'} onClick={() => pickGroup('common')} />
         {recentGroups.map((id) => (
@@ -301,7 +258,7 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
                 data-testid="symbol-group-more"
                 aria-label="More character groups"
                 className={cn(
-                  'flex h-6 items-center justify-center rounded border px-1.5 text-muted-foreground transition-colors hover:bg-muted',
+                  'flex h-6 items-center justify-center rounded border px-1.5 text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   restGroups.some((g) => g.id === activeGroup) && 'border-primary text-primary',
                 )}
               >
@@ -372,12 +329,9 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
               >
                 {row.chars.map((s) => {
                   const covered = isGlyphCovered(fontStack, s.char);
-                  // THE TOOLTIP LAW (shadcn native): name + codepoint +
-                  // coverage ride the app's Tooltip, not a title attr.
                   // Uncovered cells are ARIA-disabled (not the native
-                  // attribute) so hover — and the explanation of WHY
-                  // the cell is dead — still reaches them; insertion
-                  // is guarded in the handler instead.
+                  // attribute) so the tooltip still explains why the cell
+                  // is dead; insertion is guarded in the handler.
                   return (
                     <Tooltip key={s.cp}>
                       <TooltipTrigger
@@ -392,7 +346,7 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
                             className={cn(
                               'flex items-center justify-center rounded border text-base',
                               covered
-                                ? 'border-transparent hover:bg-muted hover:border-border'
+                                ? 'border-transparent hover:bg-muted hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
                                 : 'cursor-not-allowed border-transparent opacity-40',
                             )}
                             style={{ width: CELL, height: CELL }}
@@ -416,10 +370,8 @@ export function SymbolBubble({ editor }: { editor: Editor }) {
         )}
       </div>
 
-      {/* THE FOOTER — the equation bubble's band (edge-to-edge rule,
-          muted, py-2) holding ONLY the Done button (the user ruling:
-          the character preview lived in the cell tooltips already —
-          the footer is chrome, not information). */}
+      {/* The footer holds only the Done button — the preview already
+          lives in the cell tooltips. */}
       <div
         data-testid="symbol-preview"
         className="-mx-3 -mb-3 mt-2 flex items-center justify-end rounded-b-lg border-t bg-muted/50 px-3 py-2"
@@ -441,7 +393,7 @@ function GroupChip({ id, label, active, onClick }: { id: string; label: string; 
       onClick={onClick}
       data-testid={`symbol-group-${id}`}
       className={cn(
-        'rounded border px-1.5 py-0.5 text-[11px] transition-colors',
+        'rounded border px-1.5 py-0.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
       )}
     >

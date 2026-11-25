@@ -16,7 +16,7 @@ import { brandMarkUrl, resetBrandMarksForTests } from '@/lib/fonts/catalogs/bran
 import { enqueuePreview, resetPreviewQueue, queueStats } from '@/lib/fonts/catalogs/previewQueue';
 import { releasePreviewFace, previewAlias } from '@/lib/fonts/catalogs/preview';
 
-// ─── Fixtures (receipts, trimmed) + the fetch_url mock ────────────────────
+// Fixtures (receipts, trimmed) + the fetch_url mock
 
 const fixtures = vi.hoisted(() => ({
   googleMeta: JSON.stringify({
@@ -30,8 +30,8 @@ const fixtures = vi.hoisted(() => ({
         fonts: { '400': {}, '500': {}, '700': {}, '700i': {} },
       },
       {
-        // M-FONTS-B.1's failing family: multi-word, 400-only, NO
-        // italics — the single-axis shape the old tuple syntax broke.
+        // The failing family: multi-word, 400-only, NO italics — the
+        // single-axis shape the tuple syntax broke.
         family: 'Rubik 80s Fade', displayName: null, category: 'Display', subsets: ['latin'],
         fonts: { '400': {} },
       },
@@ -236,7 +236,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. Normalization + dedupe (pure) ─────────────────────────────────────
+// 1. Normalization + dedupe (pure)
 
 describe("normalizeFamilyKey (A's ruling + the variable-suffix strip)", () => {
   it('variable packages collapse onto the static family', () => {
@@ -256,7 +256,7 @@ describe("normalizeFamilyKey (A's ruling + the variable-suffix strip)", () => {
   });
 });
 
-// ─── 2. Adapter parsing vs fixtures ───────────────────────────────────────
+// 2. Adapter parsing vs fixtures
 
 describe('catalog adapters vs receipt fixtures', () => {
   it('google: metadata search + css2 latin parsing (the Roboto receipt)', async () => {
@@ -351,9 +351,9 @@ describe('catalog adapters vs receipt fixtures', () => {
   });
 });
 
-// ─── M-FONTS-B.1: sparse + multi-word families (the hotfix) ───────────────
+// Sparse + multi-word families
 
-describe('M-FONTS-B.1: the axis-syntax fix (Rubik 80s Fade vs Lora receipts)', () => {
+describe('the axis-syntax fix (Rubik 80s Fade vs Lora receipts)', () => {
   it('single-axis families request PLAIN values — the tuple form was the 400', () => {
     // The OLD code emitted "wght@0,400" for 400-only families → HTTP
     // 400 (the Rubik 80s Fade receipt); plain values return 200.
@@ -438,10 +438,10 @@ describe('M-FONTS-B.1: the axis-syntax fix (Rubik 80s Fade vs Lora receipts)', (
   });
 });
 
-// ─── 3. Privacy gate ─────────────────────────────────────────────────────
+// 3. Privacy gate
 
 describe('privacy gate (no network module even constructed while OFF)', () => {
-  it('OFF: getCatalogSources() is empty and prefetch does nothing', async () => {
+  it('OFF: getCatalogSources is empty and prefetch does nothing', async () => {
     expect(getCatalogSources()).toEqual([]);
     await prefetchCatalogs();
     expect(fetchCalls()).toHaveLength(0);
@@ -452,8 +452,7 @@ describe('privacy gate (no network module even constructed while OFF)', () => {
     act(() => {
       useFontBrowserStore.getState().open();
     });
-    // The slim assurance line (icon + title, no link — guidance moved
-    // to the Online tab):
+    // The slim assurance line (icon + title, no link):
     const banner = document.querySelector('[data-testid="catalogs-off-banner"]')!;
     expect(banner.textContent).toBe('Online catalogs are off');
     // The Online tab is ALWAYS visible — even with catalogs off:
@@ -472,7 +471,7 @@ describe('privacy gate (no network module even constructed while OFF)', () => {
       fireEvent.click(onlineTab);
     });
     expect(document.querySelector('[data-testid="catalogs-off-link"]')).not.toBeNull();
-    expect(fetchCalls()).toHaveLength(0); // the no-silent-network law
+    expect(fetchCalls()).toHaveLength(0); // zero network
     act(() => {
       fireEvent.click(document.querySelector('[data-testid="catalogs-off-link"]')!);
     });
@@ -524,7 +523,7 @@ describe('privacy gate (no network module even constructed while OFF)', () => {
   });
 });
 
-// ─── 4. Preview lifecycle ─────────────────────────────────────────────────
+// 4. Preview lifecycle
 
 describe('preview: lazy single-slot temp face', () => {
   it('the queue serializes — the second task starts only after the first settles', async () => {
@@ -608,7 +607,7 @@ describe('preview: lazy single-slot temp face', () => {
   });
 });
 
-// ─── 5. Catalog install (all files, registry entry, epoch) ───────────────
+// 5. Catalog install (all files, registry entry, epoch)
 
 describe('catalog install', () => {
   async function selectAndInstall() {
@@ -664,8 +663,8 @@ describe('catalog install', () => {
     );
     expect(osWrites.map(([p]) => (p as string).split('/').pop())).toContain('roboto-regular.woff2');
 
-    // PERSISTENCE: fonts.json carries the CATALOG entry (the
-    // restart-wipe fix — closing Tensor must not lose downloads):
+    // PERSISTENCE: fonts.json carries the CATALOG entry (closing
+    // Tensor must not lose downloads):
     const persistCall = (writeTextFile as ReturnType<typeof vi.fn>).mock.calls.find(
       ([path]) => (path as string).endsWith('fonts.json'),
     );
@@ -691,7 +690,7 @@ describe('catalog install', () => {
   });
 });
 
-// ─── 6. Failure: all-or-nothing cleanup ───────────────────────────────────
+// 6. Failure: all-or-nothing cleanup
 
 describe('download failure → no registry entry, no orphaned files, retryable', () => {
   it('a mid-install failure cleans up every written file', async () => {
@@ -748,7 +747,7 @@ describe('download failure → no registry entry, no orphaned files, retryable',
   });
 });
 
-// ─── 7. No-silent-network ─────────────────────────────────────────────────
+// 7. No-silent-network
 
 describe('no-silent-network', () => {
   it('OFF + the full OFF dialog surface: ZERO fetch_url invocations', async () => {
@@ -781,10 +780,9 @@ describe('no-silent-network', () => {
     await prefetchCatalogs();
     expect(fetchCalls()).toHaveLength(5); // 2 metadata + 3 favicons
     await prefetchCatalogs();
-    // 6, not 10: metadata caches are idempotent and the two REAL
-    // favicons (google, fontsource) are not re-fetched — only the
-    // still-missing fontshare mark retried (HTML shell in the
-    // fixture world — the retry-when-missing staleness fix).
+    // 6, not 10: metadata caches are idempotent; the two REAL
+    // favicons are not re-fetched — only the still-missing fontshare
+    // mark retried (HTML shell in the fixture world).
     expect(fetchCalls()).toHaveLength(6);
     const byUrl = fetchCalls().map(([, args]) => (args as { url: string }).url);
     expect(byUrl.filter((u) => u.includes('fonts.google.com/metadata'))).toHaveLength(1);
@@ -816,7 +814,7 @@ describe('no-silent-network', () => {
     const loraRow = document.querySelector('[data-testid="catalog-row-lora"]')!;
     expect(loraRow).not.toBeNull();
     // Google's chip is its favicon <img> too — one mark source for
-    // ALL catalogs now (the user's favicon ruling):
+    // ALL catalogs:
     const gChip = loraRow.querySelector('[data-testid="catalog-chip-google"]')!;
     expect(gChip.querySelector('img[data-testid="brand-mark"]')).not.toBeNull();
     // Font Share served HTML → sniff rejected → no mark <img>, the

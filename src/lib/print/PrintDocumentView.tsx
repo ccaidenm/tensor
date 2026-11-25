@@ -3,16 +3,9 @@ import { parseEquation, renderEquation } from '@/lib/equations/render';
 import type { PrintElement, PrintPage, PrintWatermark } from './types';
 
 /**
- * M-PRINT (#43) — THE PRINT DOCUMENT VIEW: one component renders the
- * print walk's pages for BOTH consumers — the preview modal and the
- * window.print() container — so what previews is EXACTLY what prints
- * (the Mark-1 contract: one walk, one view, two mounts).
- *
- * All elements are absolutely positioned in page-relative px; the
- * page divs carry the paper size (the @page size in the print CSS
- * matches them — margins are ZERO because the layout's contentBox
- * already IS the page frame). Images/equations load from the same
- * sources the on-screen view uses.
+ * #43 — one component renders the walk's pages for both consumers (the
+ * preview modal and window.print()), so what previews is what prints.
+ * Elements are page-relative px; margins 0 (the contentBox is the frame).
  */
 
 function elementKey(el: PrintElement, i: number): string {
@@ -20,11 +13,9 @@ function elementKey(el: PrintElement, i: number): string {
 }
 
 /**
- * #WATERMARK — the page's overlay, painted BEFORE the elements (the
- * mount order = the paint order law). Centered, rotated,
- * translucent — the same transform math as the on-screen
- * WatermarkLayer; resolveWatermark resolved everything at build
- * time, this only positions.
+ * The page's overlay, painted before the elements (mount order = paint
+ * order). resolveWatermark resolved everything at build time; this only
+ * positions (the on-screen WatermarkLayer's transform math).
  */
 function PrintWatermarkView({ wm }: { wm: PrintWatermark }) {
   const centered: React.CSSProperties = {
@@ -141,21 +132,18 @@ function PrintElementView({ el }: { el: PrintElement }) {
         />
       );
     case 'equation': {
-      // THE BROKEN-GLYPH LAW (the node view's): never KaTeX's red
-      // error text, never a silent blank. Valid → the KaTeX projection
-      // (DOM, shared fonts — crisp in print); invalid/empty → the
-      // styled faces with the source visible.
+      // Never KaTeX's red error text, never a silent blank: valid →
+      // the KaTeX projection (DOM, shared fonts — crisp in print);
+      // invalid/empty → the styled faces with the source visible.
       const empty = el.latex.trim() === '';
       const invalid = !empty && parseEquation(el.latex) !== null;
       const html = empty || invalid ? '' : renderEquation(el.latex);
       return (
         <div
-          // .tensor-equation: THE shared class stack (index.css) — the
-          // node view, the EquationLayer, AND the measurement probe all
-          // render under it, so the measured box is the painted box by
-          // construction. Without it KaTeX's own display margins and
-          // font sizing mislay the content inside the placed rect (the
-          // reported invisible-in-preview bug).
+          // .tensor-equation: the shared class stack — the node view,
+          // EquationLayer, and measurement probe all render under it,
+          // so the measured box is the painted box; without it
+          // KaTeX's margins/font sizing mislay the content.
           className="tensor-equation"
           style={{
             position: 'absolute',
@@ -195,10 +183,9 @@ export const PrintDocumentView = memo(function PrintDocumentView({
     <div
       data-testid="print-document"
       className="print-document"
-      // THE SHEET GAP (the user's spacing report): the pages stack in
-      // a column with a visible gutter — the modal's preview consumer
-      // styles the gap (PAGE_GAP in the dialog); the PRINT container
-      // (Mark 2) sets gap 0 (the @page breaks separate sheets there).
+      // The sheet gap: the preview styles a visible gutter (PAGE_GAP
+      // in the dialog); the print container sets gap 0 (the @page
+      // breaks separate sheets there).
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -222,8 +209,8 @@ export const PrintDocumentView = memo(function PrintDocumentView({
               boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
               // #48 — the page's own background fill (unset = white).
               // The print-time color-adjust lives on the .print-page-
-              // sheet CSS (index.css's @media print — browsers strip
-              // inline-adjust spellings at snapshot time).
+              // sheet CSS (browsers strip inline-adjust spellings at
+              // snapshot time).
               backgroundColor: page.background ?? '#fff',
               overflow: 'hidden',
               flex: 'none',

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Bug, Lightbulb, ScrollText, Users, ExternalLink, ChevronDown, FolderGit2 } from 'lucide-react';
+import { t } from '@/lib/i18n';
+import { Bug, Heart, Lightbulb, ScrollText, Users, ExternalLink, ChevronDown, FolderGit2 } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { TensorLogo } from '@/components/icons/TensorIcon';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import type { SettingsSectionDefinition } from '@/lib/settings/types';
 import licensesData from '@/generated/licenses.json';
+import { APP_VERSION } from '@/generated/version';
 import { cn } from 'cn';
 
 export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
@@ -16,9 +18,9 @@ export const ABOUT_PANEL_SECTIONS: SettingsSectionDefinition[] = [
   { id: 'licenses', label: 'Third-Party Licenses' },
 ];
 
-// TODO: replace with the real GitHub org/repo once decided.
-const GITHUB_REPO_URL = 'https://github.com/aestriex/word-processor';
-const APP_VERSION = '0.1.0'; // TODO: wire to actual package.json/Cargo.toml version at build time
+// #97 — the repo is the app; the version is single-sourced from
+// tauri.conf.json at build time (src/generated/version.ts).
+const GITHUB_REPO_URL = 'https://github.com/ccaidenm/tensor';
 const LICENSE = 'AGPL-3.0';
 
 interface LicenseEntry {
@@ -57,59 +59,63 @@ export function AboutPanel() {
 
   return (
     <div className="flex flex-col">
-      <SettingsSection id="info" title="Info">
+      <SettingsSection id="info" title={t('about.info.title')}>
         <div className="flex items-center gap-4 py-2">
           <TensorLogo size={48} className="text-primary"/>
           <div>
             <div className="font-heading text-2xl font-semibold">Tensor</div>
             <div className="text-sm text-muted-foreground">
-              Version {APP_VERSION} · {LICENSE}
+              {t('about.info.version', { version: APP_VERSION, license: LICENSE })}
             </div>
           </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection id="links" title="Links">
+      <SettingsSection id="links" title={t('about.links.title')}>
         <div className="flex flex-col gap-0.5">
           <LinkRow
             icon={<FolderGit2 className="h-4 w-4" />}
-            label="View on GitHub"
-            description="Source code, releases, and issue tracker"
+            label={t('about.links.github.label')}
+            description={t('about.links.github.description')}
             onClick={() => openUrl(GITHUB_REPO_URL)}
           />
-          <LinkRow icon={<Bug className="h-4 w-4" />} label="Report a Bug" onClick={() => openUrl(`${GITHUB_REPO_URL}/issues/new?labels=bug`)} />
+          <LinkRow icon={<Bug className="h-4 w-4" />} label={t('about.links.bug.label')} onClick={() => openUrl(`${GITHUB_REPO_URL}/issues/new?labels=bug`)} />
           <LinkRow
             icon={<Lightbulb className="h-4 w-4" />}
-            label="Request a Feature"
+            label={t('about.links.feature.label')}
             onClick={() => openUrl(`${GITHUB_REPO_URL}/issues/new?labels=enhancement`)}
           />
           <LinkRow
             icon={<Users className="h-4 w-4" />}
-            label="Contributors"
-            description="Everyone who has helped build Tensor"
+            label={t('about.links.contributors.label')}
+            description={t('about.links.contributors.description')}
             onClick={() => openUrl(`${GITHUB_REPO_URL}/graphs/contributors`)}
           />
           <LinkRow
             icon={<ScrollText className="h-4 w-4" />}
-            label="Tensor's License"
+            label={t('about.links.license.label')}
             description={LICENSE}
             onClick={() => openUrl(`${GITHUB_REPO_URL}/blob/main/LICENSE`)}
           />
         </div>
       </SettingsSection>
 
-      <SettingsSection id="licenses" title="Third-Party Licenses">
+      <SettingsSection id="licenses" title={t('about.licenses.title')}>
         <div>
           <p className="mb-3 text-xs text-muted-foreground">
-            Tensor is built with {licenses.length} open-source packages — thank you to their authors and
-            maintainers! Tensor couldn't be built without you. 🧡
+            {t('about.licenses.intro', { count: licenses.length })}{' '}
+            {/* #97 — the heart speaks the accent (text-primary follows the brand token). */}
+            <Heart
+              className="inline h-3.5 w-3.5 fill-current text-primary align-text-bottom"
+              aria-hidden="true"
+            />
           </p>
 
           <Collapsible open={licensesOpen} onOpenChange={setLicensesOpen}>
             <CollapsibleTrigger
               render={
                 <Button variant="outline" size="sm" className="gap-1.5">
-                  {licensesOpen ? 'Hide licenses' : 'Show licenses'}
+                  {licensesOpen ? t('about.licenses.hide') : t('about.licenses.show')}
                   <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', licensesOpen && 'rotate-180')} />
                 </Button>
               }
@@ -119,7 +125,7 @@ export function AboutPanel() {
               <Input
                 value={licenseQuery}
                 onChange={(e) => setLicenseQuery(e.target.value)}
-                placeholder="Filter by package or license…"
+                placeholder={t('about.licenses.filter')}
                 className="mb-3 h-8"
               />
 
@@ -139,12 +145,12 @@ export function AboutPanel() {
                         className="flex flex-none items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                       >
                         <ExternalLink className="h-3 w-3" />
-                        Repo
+                        {t('about.licenses.repo')}
                       </button>
                     )}
                   </div>
                 ))}
-                {filteredLicenses.length === 0 && <div className="py-6 text-center text-sm text-muted-foreground">No matches.</div>}
+                {filteredLicenses.length === 0 && <div className="py-6 text-center text-sm text-muted-foreground">{t('about.licenses.noMatches')}</div>}
               </div>
             </CollapsibleContent>
           </Collapsible>

@@ -6,12 +6,9 @@ import { useConfigStore } from '@/lib/config/store';
 import type { SpellInstallProgress } from './types';
 
 /**
- * THE LOCAL-RUNTIME INSTALLER — one spelling shared by the setup
- * dialog and Settings → Proofing (never two flows to keep in sync).
- * Wraps `spell_install_local` (Rust): progress rides the
- * `spell-install-progress` events, success writes the config consent
- * (provider=local, configured, enabled) and fires the confirmation
- * toast; the caller decides what to close afterwards.
+ * THE LOCAL-RUNTIME INSTALLER — one flow shared by the setup dialog and
+ * Settings → Proofing. Wraps `spell_install_local`; progress rides events;
+ * success writes the config and fires the toast.
  */
 
 export const STAGE_LABELS: Record<string, string> = {

@@ -1,18 +1,10 @@
 import type { PaintedRect } from '@/lib/paginated/positionMap';
 
 /**
- * #COMMENTS — the PAGES-mode projection of the comment tracking
- * plugin's ranges (commentTrackingKey), mapped through positionMap —
- * the SearchHighlights pattern (one state, two projections; the
- * pageless side renders via the mark's own spans + the active-class
- * decoration). One tinted rect group per anchored thread; the ACTIVE
- * thread (the caret's) paints a second, deeper tier on top — the
- * search `current` pattern.
- *
- * Geometry = textRangeTextExtents' TEXT EXTENT (the search law): the
- * rects hug the glyphs, so adjacent lines never bleed. The overlay is
- * pointer-events-none + absolutely positioned — comments can never
- * change pagination or intercept clicks (the layout-invisibility law).
+ * Pages-mode projection of the comment plugin's ranges via positionMap;
+ * the active thread paints a deeper tier on top. Rects use the text
+ * extent (textRangeTextExtents) — no line bleed; pointer-events-none —
+ * comments never change pagination or intercept clicks.
  */
 const COMMENT_HIGHLIGHT_ALPHA = '0.55';
 

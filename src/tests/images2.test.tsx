@@ -20,14 +20,13 @@ import { renderTensor, settleLayout, GEOMETRY } from './harness';
 import { FakeMetrics } from './fakeMetrics';
 
 /**
- * M-IMAGES-2 — inline mode + floats + resize completeness. The engine
- * is committed (E-IMG-2/3); this suite pins the SHELL's wiring to it:
+ * Inline mode + floats + resize completeness — the SHELL's wiring:
  * the node-kind switch, the U+FFFC offset identity, the segmentsFor
  * correlation, float drag → anchor-relative attrs, paint order split,
- * z-aware hit-testing, and the GC/round-trip laws.
+ * z-aware hit-testing, and the GC/round-trip behavior.
  */
 
-// M-IMAGES-0 container simulator (the save/open layer rides it).
+// .wpdoc container simulator (the save/open layer rides it).
 const wpdocFiles = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -105,7 +104,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. Inline conversion both directions (the node-kind switch) ────────
+// 1. Inline conversion both directions
 
 describe('inline conversion', () => {
   it('block → inline: the node-kind SWITCH (different PM shapes), attrs carried', async () => {
@@ -121,7 +120,6 @@ describe('inline conversion', () => {
     act(() => {
       convertBlockToInline(editor);
     });
-    // The inline node exists inside a paragraph; the block is GONE:
     expect(imagePosOf(editor)).toBe(-1);
     expect(imagePosOf(editor, 'inlineImage')).toBeGreaterThan(0);
     editor.state.doc.descendants((n) => {
@@ -167,7 +165,7 @@ describe('inline conversion', () => {
   });
 });
 
-// ─── 2+3. Inline mid-paragraph: paint within the line + offsets ──────────
+// 2+3. Inline mid-paragraph: paint within the line + offsets
 
 describe('inline in a line (the segmentsFor correlation)', () => {
   async function setupFlanked(): Promise<Editor> {
@@ -258,7 +256,7 @@ describe('inline in a line (the segmentsFor correlation)', () => {
   });
 });
 
-// ─── 6. Float drag → anchor-relative attrs → engine placed[] ────────────
+// 6. Float drag → anchor-relative attrs → engine placed[]
 
 describe('floats (E-IMG-3)', () => {
   it('drag commits dx/dy (anchor-relative); placed = anchor + offset, engine-clamped', async () => {
@@ -304,7 +302,7 @@ describe('floats (E-IMG-3)', () => {
       editor.commands.setNodeSelection(pos);
       getCommand('imageWrapFront')!.run();
     });
-    // An absurd offset — the engine's clamp is the law:
+    // An absurd offset — the engine clamps:
     act(() => {
       commitFloatDrag(editor, pos, { dx: 0, dy: 0, z: 'front' }, 5000, 5000);
     });
@@ -366,7 +364,7 @@ describe('floats (E-IMG-3)', () => {
   });
 });
 
-// ─── 7+8. Paint order + hit-test layering (z-aware) ──────────────────────
+// 7+8. Paint order + hit-test layering (z-aware)
 
 describe('paint order + click layering (z)', () => {
   async function floatedEditor(z: 'front' | 'behind'): Promise<Editor> {
@@ -409,9 +407,8 @@ describe('paint order + click layering (z)', () => {
       await settleLayout();
       const ops = paintOps().filter((o) => o.op === 'drawImage' || o.op === 'fillText');
       // The FINAL commit's tree order is the receipt: compare the LAST
-      // drawImage against the LAST fillText (the ImageLayer repaints
-      // every render — config-only renders pollute the head of the
-      // window; the settled tail is the deterministic order).
+      // drawImage against the LAST fillText (config-only renders pollute
+      // the head of the window; the settled tail is deterministic).
       const lastDraw = ops.map((o) => o.op).lastIndexOf('drawImage');
       const lastText = ops.map((o) => o.op).lastIndexOf('fillText');
       expect(lastDraw).toBeGreaterThan(-1);
@@ -450,10 +447,8 @@ describe('paint order + click layering (z)', () => {
     expect(sel.node?.type?.name).toBe('image'); // front wins over text
 
     // BEHIND: a click inside the TEXT LINE's band (y 0..16, the
-    // float's x) goes to the TEXT — the line is above in paint order.
-    // NOTE the float was dragged ON TOP of that band too, so the
-    // FRONT-check (z !== 'behind') must NOT fire; the text track
-    // check must. Debug receipt: print both.
+    // float's x) goes to the TEXT — the line is above in paint order
+    // (the float was dragged onto that band too).
     const behind = await floatedEditor('behind');
     act(() => {
       fireEvent.mouseDown(
@@ -492,7 +487,7 @@ describe('paint order + click layering (z)', () => {
   });
 });
 
-// ─── 11. Round-trip + GC (inline + floated media refs) ───────────────────
+// 11. Round-trip + GC (inline + floated media refs)
 
 describe('save/reopen + GC', () => {
   it('float attrs + inline images persist; the GC sees ALL referenced media (inline + floated)', async () => {
@@ -507,8 +502,8 @@ describe('save/reopen + GC', () => {
       getCommand('imageWrapFront')!.run();
       commitFloatDrag(editor, pos, { dx: 0, dy: 0, z: 'front' }, 12, -8);
     });
-    // A SECOND image goes inline — the caret moves to the doc end
-    // first (insertContent at a NodeSelection would REPLACE #1):
+    // A SECOND image goes inline — move the caret to the doc end
+    // first (insertContent at a NodeSelection would REPLACE the first):
     const png2 = fixturePng(40, 30);
     const sha2 = await sha256Hex(png2);
     act(() => {
@@ -537,11 +532,10 @@ describe('save/reopen + GC', () => {
   });
 });
 
-// ─── M-IMAGES-2.1: the inline paint path, end-to-end (the repair
-// receipt: every station wired, the placeholder fires ONLY while the
-// bitmap is pending). ─────────────────────────────────────────────
+// The inline paint path, end-to-end: every station wired, the
+// placeholder fires ONLY while the bitmap is pending.
 
-describe('inline paint path (M-IMAGES-2.1)', () => {
+describe('inline paint path', () => {
   it('the painted op is drawImage (baseline-seated at the token advance) once the bitmap lands; gray placeholder only while pending', async () => {
     const { editor } = renderTensor('<p>text</p>');
     await settleLayout();
@@ -558,10 +552,10 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
     // identical geometry to the future bitmap:
     const pendingRects = paintOps().filter((o) => o.op === 'fillRect');
     expect(pendingRects.length).toBeGreaterThan(0);
-    // The arrival: the bitmap lands → the version bumps → the block
-    // canvases repaint once (the arrival law) → drawImage fires with
-    // the ENGINE's clamped dims, baseline-seated. (Fresh ops window:
-    // the pre-conversion block paints must not pollute the receipt.)
+    // The bitmap lands → the version bumps → the canvases repaint
+    // once → drawImage fires with the ENGINE's clamped dims,
+    // baseline-seated. (Fresh ops window: the pre-conversion block
+    // paints must not pollute it.)
     paintOps().length = 0;
     __bitmapTestSeam.resolve(sha, new Image());
     await act(async () => {
@@ -570,10 +564,9 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
     const draws = paintOps().filter((o) => o.op === 'drawImage');
     expect(draws.length).toBeGreaterThan(0);
     const lastDraw = draws[draws.length - 1]!.args as [unknown, number, number, number, number];
-    // Baseline-seated: the draw y = baseline − clampedHeight; the
-    // line's baseline comes from the engine (20×16 fits: no clamp).
-    // Correlate via the SEGMENT (the paint contract): the line whose
-    // segment's runIndex names the inlineImage run.
+    // Baseline-seated: draw y = baseline − clampedHeight; the engine
+    // supplies the baseline (20×16 fits: no clamp). Correlate via the
+    // SEGMENT: the line whose segment's runIndex names the inlineImage run.
     const { result, adapted } = directLayout(editor);
     const objBlockIdx = adapted.blocks.findIndex(
       (b) => (b as { runs?: { kind?: string }[] }).runs?.some((r) => r.kind === 'inlineImage')
@@ -585,10 +578,8 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
       (l) => l.blockId === objBlockId && l.segments.some((seg) => seg.runIndex === runIndex)
     )!;
     expect(line).toBeDefined();
-    // Canvas y is block-relative: (line.rect.y − minY) + baseline − h.
-    // Single-line object-only block: minY == line.rect.y → y == baseline − h.
-    // The baseline is the ENGINE's (the seating rule: the object
-    // rides bottom-at-baseline):
+    // Canvas y is block-relative: (line.rect.y − minY) + baseline − h;
+    // here minY == line.rect.y → y == baseline − h (bottom-at-baseline).
     expect(line.baseline).toBeGreaterThanOrEqual(16);
     expect(lastDraw[2]).toBe(line.baseline - 16); // baseline-seated
     void GEOMETRY;
@@ -596,7 +587,7 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
     expect(lastDraw[4]).toBe(16); // height
   });
 
-  it('STEP 2: clicking the inline OBJECT selects the image node; the text around stays text; Backspace deletes it', async () => {
+  it('clicking the inline OBJECT selects the image node; the text around stays text; Backspace deletes it', async () => {
     const { editor } = renderTensor('<p>hello world</p>');
     await settleLayout();
     const png = fixturePng(48, 16);
@@ -634,7 +625,7 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
     void sha;
   });
 
-  it('STEP 3: drag-THROUGH on each corner — dims floor at 16, the anchored corner never flips, no jump on release', async () => {
+  it('drag-THROUGH on each corner — dims floor at 16, the anchored corner never flips, no jump on release', async () => {
     const { editor } = renderTensor('<p>t</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(200, 100), 'png');
@@ -678,7 +669,7 @@ describe('inline paint path (M-IMAGES-2.1)', () => {
   });
 });
 
-// ─── 12b. The Wrap menu wiring (registry dispatch) ──────────────────────
+// 12b. The Wrap menu wiring (registry dispatch)
 
 describe('wrap commands', () => {
   it('setWrapMode round the modes: inline → front → behind → inline (the menu wiring)', async () => {

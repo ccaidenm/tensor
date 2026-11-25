@@ -1,9 +1,7 @@
 /**
- * M-FONTS-B preview strategy: lazy-load ONLY the previewed font — one
- * active download at a time (the deliberate-action principle: no
- * list-wide fetching, respect rate limits). A single-slot serial
- * queue; the dialog's preview flow enqueues its byte fetch through
- * this module so rapid preview-clicking can never overlap requests.
+ * Single-slot serial queue for preview byte fetches: one active
+ * download at a time, so rapid preview-clicking can never overlap
+ * requests (deliberate-action rate limiting).
  */
 
 let active: Promise<unknown> | null = null;

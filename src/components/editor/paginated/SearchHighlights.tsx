@@ -1,17 +1,8 @@
 import type { PaintedRect } from '@/lib/paginated/positionMap';
 
-/**
- * Projection of the search plugin's match positions (read from PM
- * plugin state, mapped through positionMap). FIND-HIGHLIGHT GEOMETRY
- * (P1): the rects arrive as the matched TEXT EXTENT
- * (baseline−ascent .. baseline+descent — positionMap's
- * textRangeTextExtents), NOT the leading box, so adjacent
- * non-matching lines show no highlight bleed. The fill is
- * SEMI-TRANSPARENT (~0.3 alpha) over the existing theme color — the
- * matched text stays readable through the highlight (a different
- * feature with different geometry than selection, which keeps the
- * full leading box by standing ruling).
- */
+/** Search-match projection: rects are the matched TEXT EXTENT
+ * (positionMap.textRangeTextExtents), not the leading box — no bleed
+ * onto adjacent lines. Semi-transparent fill keeps text readable. */
 const FIND_HIGHLIGHT_ALPHA = '0.3';
 
 export function SearchHighlights({

@@ -5,13 +5,8 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 import { cn } from "cn"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
-/**
- * The shadcn-over-Base-UI context menu — the dropdown-menu.tsx pattern
- * applied to the ContextMenu parts (right-click / long-press opens; the
- * positioner anchors at the pointer by default). M-T4: the app-wide
- * replacement for the WebView's native menu (App suppresses `contextmenu`
- * globally; this is the custom surface).
- */
+// The app-wide custom context menu — App suppresses the WebView's native
+// `contextmenu` globally; this is the replacement surface.
 
 function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
   return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />

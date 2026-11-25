@@ -9,68 +9,41 @@ import {
   type CollectionScan,
   type ReferenceKind,
 } from './scan';
-// M-REFS-10: the leader ADOPTION — the resolved dot counts from the
-// last layout (the two-pass lag precedent); the generator rewrites
-// the spans to the full visible count so the entire leader is real,
-// selectable text.
+// The leader adoption: the generator rewrites dots spans to the resolved
+// count from the last layout so the entire leader is real, selectable text.
 import { adoptedLeaderCount } from '@/lib/paginated/referenceLeaders';
 
 /**
- * M-REFS — THE GENERATOR (the container model's engine): a reference
- * table's entries are REAL paragraphs — plain body text, natively
- * selectable/formattable (the GDocs ruling) — and this plugin keeps
- * them in sync with the live scan. It runs in appendTransaction
- * (before paint, same tick), reconciling CHILDREN against the scan:
- *
- *  - KEYED BY refId (the target's stable blockId; the term for
- *    index): an entry whose key is unchanged is NEVER rewritten —
- *    the user's bold/color/edits on it SURVIVE every refresh. Only
- *    genuinely changed entries get rebuilt (new text carries the old
- *    entry's first-run marks, the closest honest carry).
- *  - REFRESH-WINS (the field law): entry TEXT is owned by the
- *    document — when a heading retitles, its entry's text follows.
- *  - DEFER-WHILE-INSIDE: reconciliation of a container the selection
- *    sits INSIDE is deferred (the user is editing entries; a rebuild
- *    under the caret would fight them). The deferred pass runs on the
- *    next transaction after the selection leaves.
- *  - UNDO-CLEAN: regeneration writes with addToHistory:false — undo
- *    steps never replay regenerations; PM's history rebases over
- *    them, and the next pass re-syncs entries after any undo.
- *
- * Positions: containers reconcile in REVERSE document order (later
- * containers first — a replace never invalidates an earlier one).
+ * The generator: a reference table's entries are real paragraphs —
+ * plain body text, natively selectable/formattable — kept in sync with
+ * the live scan. Unchanged entries are never rewritten.
  */
 
-const INDENT_STEP = 32; // the list gutter precedent — levels step 32px
+const INDENT_STEP = 32; // levels step 32px, matching the list gutter
 
 /**
- * M-REFS — THE LEADER DOTS: the generator writes a short dots run
- * ('.' × DOT_SEED) after each entry's text — REAL TEXT (the user's
- * ruling: selectable, formattable, normal ink). The paginated ENGINE
- * stretches the painted dots to fill the measured gap at the run's
- * OWN style (smaller font ⇒ more dots — the run responds to its
- * formatting); pageless shows the seeded dots as ordinary text (no
- * page numbers exist there, so there is no gap to fill).
+ * The leader dots: a short dots run after each entry's text — real,
+ * selectable text. The paginated engine stretches it to fill the
+ * measured gap at the run's own style; pageless shows the seed as-is.
  */
 const DOT_SEED = 12;
 
 interface CurrentEntry {
   refId: string | null;
-  /** The row's lineHeight attr (the round-7 spacing) — the gate
-   *  compares it so pre-spacing rows reconvert on first touch. */
+  /** The row's lineHeight attr — the gate compares it so pre-spacing
+   *  rows reconvert on first touch. */
   lineHeight: string;
-  /** The row's ENTRY text — the leader-dots span (refLeader-marked) is
-   *  EXCLUDED: the dots are generator-owned ink, not entry content
+  /** The row's entry text — the leader-dots span (refLeader-marked) is
+   *  excluded: the dots are generator-owned ink, not entry content
    *  (their text never participates in the structural compare). */
   text: string;
-  /** The WRITTEN indentLeft attr — compared DIRECTLY in the structural
-   *  gate (never re-derived into a "level": a derive-then-write round
-   *  trip with different conventions loops the generator forever —
-   *  the app-freeze bug, pinned by the app-flow tests). */
+  /** The written indentLeft attr — compared directly in the gate,
+   *  never re-derived into a "level": a derive-then-write round trip
+   *  with different conventions loops the generator forever. */
   indentLeft: number;
-  /** The row's leader-dots SPAN length (the refLeader-marked text;
-   *  0 = no span). The ADOPTION rewrites it to the resolved count —
-   *  the entire leader becomes real, selectable text (M-REFS-10). */
+  /** The row's leader-dots span length (0 = no span). The adoption
+   *  rewrites it to the resolved count — the entire leader becomes
+   *  real, selectable text. */
   leaderLen: number;
   node: PMNode;
 }
@@ -86,9 +59,8 @@ function currentEntries(node: PMNode): CurrentEntry[] {
   const out: CurrentEntry[] = [];
   node.forEach((child) => {
     if (child.type.name !== 'paragraph') return;
-    // Entry text = the child's text EXCLUDING the refLeader-marked
-    // dots span (generator-owned ink the ADOPTION owns the length of);
-    // leaderLen = the span's current length.
+    // Entry text = the child's text excluding the refLeader-marked dots
+    // span; leaderLen = the span's current length.
     let text = '';
     let leaderLen = 0;
     child.forEach((inline) => {
@@ -111,13 +83,11 @@ function currentEntries(node: PMNode): CurrentEntry[] {
   return out;
 }
 
-/** Structural equality — the NO-OP gate (the formatting-survival law:
- * an unchanged table writes NOTHING, so user formatting lives on).
- * LOOP-PROOF BY CONSTRUCTION: the compare uses the WRITTEN attr
- * (indentLeft) on both sides — never a re-derived level. The EMPTY
- * collection is NEVER "equal" to a childless container here: its
- * desired shape is the ONE placeholder paragraph (checked by the
- * caller) — a 0===0 equality would starve it of its placeholder. */
+/**
+ * Structural equality — the no-op gate: an unchanged table writes
+ * nothing. The compare uses the written attr (indentLeft) on both
+ * sides; the empty collection is never equal (caller's placeholder).
+ */
 function structurallyEqual(
   current: CurrentEntry[],
   desired: ReturnType<typeof entriesForKind>,
@@ -133,9 +103,8 @@ function structurallyEqual(
     if (c.refId !== refIdOf(d, kind)) return false;
     if (c.text !== d.text) return false;
     if (c.indentLeft !== Math.max(0, (d.level - 1) * INDENT_STEP)) return false;
-    // THE LEADER (M-REFS-10): presence per the toggle + LENGTH per the
-    // adoption (a stale seed length ≠ the resolved count → rebuild —
-    // the entire leader becomes real text at the resolved count).
+    // The leader: presence per the toggle, length per the adoption (a
+    // stale seed length ≠ the resolved count → rebuild).
     if (wantLeaders) {
       const adopted = adoptedLeaderCount(blockId, i);
       if (adopted != null ? c.leaderLen !== adopted : c.leaderLen === 0) return false;
@@ -147,12 +116,9 @@ function structurallyEqual(
   return true;
 }
 
-/** Reconcile ONE container into `tr` (positions valid on tr.doc's
- * pre-replace state — callers go reverse doc order). `forced` (the
- * Refresh button) bypasses the structural gate — untouched entries
- * are still reused verbatim, so a refresh reverts stale TEXT but
- * keeps matching formatting (refresh-wins, the field law). Returns
- * whether anything was written. */
+/** Reconcile one container into `tr` (positions valid on tr.doc's
+ * pre-replace state — callers go reverse doc order). `forced` bypasses
+ * the gate but still reuses untouched entries verbatim. */
 function reconcileContainer(
   tr: Transaction,
   node: PMNode,
@@ -164,18 +130,16 @@ function reconcileContainer(
   const depth = typeof node.attrs.depth === 'number' ? node.attrs.depth : 3;
   const desired = entriesForKind(scan, kind, depth);
   const current = currentEntries(node);
-  // The container's STABLE ID — the adoption's key (the resolved dot
-  // counts are per container, M-REFS-10).
+  // The container's stable id — the adoption's key (resolved dot counts
+  // are per container).
   const blockId = String(node.attrs.blockId ?? '');
-  // THE LEADERS TOGGLE (the node's attr): rows carry the dots span iff
-  // on. The dots' MARKS stay user-owned once written (rebuilds carry
-  // the prior row's leader marks — same carry as the entry text);
-  // their LENGTH is the ADOPTION's to own (the resolved count — the
-  // entire leader becomes real, selectable text).
+  // The leaders toggle: rows carry the dots span iff on. The dots'
+  // marks stay user-owned once written; their length is the adoption's
+  // (the resolved count).
   const wantLeaders = node.attrs.leaders !== false;
 
-  // Structural equality → NO-OP. The empty collection's desired shape
-  // is its ONE placeholder ROW (a null-key child carrying the hint
+  // Structural equality → no-op. The empty collection's desired shape
+  // is its one placeholder row (a null-key child carrying the hint
   // text) — equal only in that exact shape.
   if (
     !forced &&
@@ -192,13 +156,13 @@ function reconcileContainer(
   const schema = tr.doc.type.schema;
   const paragraph = schema.nodes.paragraph;
   const children: PMNode[] = [];
-  // Whether THIS pass actually rebuilds/creates/removes anything —
-  // a forced in-sync pass reuses every child and writes NOTHING.
+  // Whether this pass actually rebuilds/creates/removes anything —
+  // a forced in-sync pass reuses every child and writes nothing.
   let changed = current.length !== desired.length;
 
   if (desired.length === 0) {
-    // The placeholder: ONE real paragraph, italic-marked (real
-    // formatting — visible in both modes, honest to copy).
+    // The placeholder: one real paragraph, italic-marked (visible in
+    // both modes, honest to copy).
     changed = true;
     children.push(
       paragraph.create(
@@ -211,33 +175,23 @@ function reconcileContainer(
       const entry = desired[i]!;
       const key = refIdOf(entry, kind);
       const prior = current.find((c) => c.refId === key);
-      // ORDER: reuse is order-stable — the desired entry at index i
-      // must map to the CURRENT child at the SAME index (a reorder
-      // reuses all nodes but must still rewrite the sequence).
+      // Reuse is order-stable: the desired entry at index i must map to
+      // the current child at the same index (a reorder reuses all
+      // nodes but must still rewrite the sequence).
       if (prior !== current[i]) changed = true;
       const indentLeft = Math.max(0, (entry.level - 1) * INDENT_STEP);
       const attrs = {
         refId: key,
         styleId: 'normal',
         indentLeft,
-        // ROW SPACING (round 7 — the "not a full line per entry"
-        // report): 1.5 leading on every row — the standard ToC look,
-        // one fact in BOTH modes (the engine's lineHeight runs through
-        // the resolved style; pageless renders it as CSS line-height).
+        // 1.5 leading on every row — the standard ToC look, one fact in
+        // both modes (the engine's lineHeight runs through the resolved
+        // style; pageless renders it as CSS line-height).
         lineHeight: '1.5',
       };
-      // THE LEADER DOTS' carry: the prior row's refLeader span keeps
-      // the USER's marks on it (size/bold/color — the stretch responds
-      // to them); absent rows seed the dots unmarked (normal ink).
-      // THE SEMANTIC LINK (M-REFS-11 — the user's ruling: the TOC is
-      // ALWAYS a hyperlink, invisible in the editor, Ctrl+click to
-      // follow, and the data rides to PDF/DOCX export): every row's
-      // runs carry the app's link mark with the INTERNAL scheme
-      // `tensor-ref:<targetBlockId>` — never a URL; the bubble's
-      // editor refuses it, the adapters recognize it quietly, and the
-      // future exporters map it to a real anchor. The target is the
-      // entry's FIRST location's stable blockId (index rows: the term
-      // has multiple locations — the first is the sane default).
+      // Leader dots carry the prior row's marks (the stretch responds
+      // to them); every row carries the link mark `tensor-ref:<blockId>`
+      // (internal scheme, never a URL; the first location's blockId).
       const targetBlockId = entry.targets[0]?.blockId ?? '';
       const linkMark = targetBlockId
         ? [schema.marks.link.create({ href: `tensor-ref:${targetBlockId}` })]
@@ -251,19 +205,15 @@ function reconcileContainer(
         });
         return marks;
       };
-      // THE ADOPTED COUNT (M-REFS-10): the resolved dot count for this
-      // row — undefined when no measurement exists (pageless, pre-
-      // layout, no number) → keep the row's own current length (never
-      // adopt blind); a NEW row seeds at DOT_SEED and the next layout
-      // adopts the full count.
+      // The resolved dot count for this row — undefined when no
+      // measurement exists (pageless/pre-layout): keep the row's own
+      // current length; a new row seeds at DOT_SEED.
       const wantDots = (i: number, prior: CurrentEntry | undefined): number => {
         if (!wantLeaders) return 0;
         const adopted = adoptedLeaderCount(blockId, i);
         if (adopted != null) return adopted;
-        // No measurement (pageless / pre-layout): KEEP a positive span
-        // (never adopt blind), but a ZERO-length span RE-SEEDS — the
-        // leaders toggle turning ON wants dots, and the next layout
-        // adopts the resolved count.
+        // No measurement: keep a positive span (never adopt blind), but
+        // a zero-length span re-seeds — the toggle turning on wants dots.
         return prior && prior.leaderLen > 0 ? prior.leaderLen : DOT_SEED;
       };
       const dotsSpan = (prior: CurrentEntry | undefined, count: number) => {
@@ -285,28 +235,24 @@ function reconcileContainer(
         prior.leaderLen === want &&
         prior.lineHeight === '1.5'
       ) {
-        // UNTOUCHED — reuse the node verbatim (marks preserved). The
-        // lineHeight and the leader LENGTH are part of the touch
-        // test: pre-spacing rows rebuild once to gain the 1.5
-        // leading; a stale seed length rebuilds to the ADOPTED count
-        // (the entire leader becomes real text — M-REFS-10).
+        // Untouched — reuse verbatim (marks preserved). lineHeight and
+        // leader length are part of the touch test: pre-spacing rows and
+        // stale seed lengths rebuild once.
         children.push(prior.node);
       } else if (prior) {
         changed = true;
         // Changed entry: rebuild. Same key ⇒ the old entry's first-run
-        // marks carry to the new text (the closest honest carry —
-        // wholesale text replacement has no range mapping); the dots
-        // span carries ITS OWN marks (the leader stays formatted).
+        // marks carry to the new text (replacement has no range mapping);
+        // the dots span carries its own marks (the leader stays formatted).
         let marks = undefined;
         const firstText = prior.node.childCount > 0 ? prior.node.child(0) : null;
         if (firstText?.isText) marks = firstText.marks;
         // The carried marks LOSE the stale link (the old target) — the
         // fresh link mark (the new target) replaces it below.
         const carried = marks?.filter((m) => m.type.name !== 'link') ?? undefined;
-        // EMPTY TEXT (a heading backspaced bare — the ghost bug):
-        // schema.text('') THROWS; an empty entry is an EMPTY
-        // PARAGRAPH (legal, renders as a blank row — Word keeps empty
-        // headings in its ToC).
+        // Empty text (a heading backspaced bare): schema.text('') throws;
+        // an empty entry is an empty paragraph (a blank row — Word keeps
+        // empty headings in its ToC).
         children.push(
           entry.text
             ? paragraph.create(attrs, [
@@ -341,13 +287,9 @@ function selectionInside(tr: Transaction, pos: number, size: number): boolean {
   return from > pos && to < pos + size;
 }
 
-/** DEAD entries: current ROWS (title excluded) whose refId no longer
- *  exists in the desired set (their source heading/caption/term is
- *  GONE). Dead rows reconcile EVEN WHILE THE CARET SITS INSIDE — the
- *  defer rule protects the user's LIVE editing, never a stale row:
- *  backspacing a heading bare merges the caret into its entry, and a
- *  deferred dead row would linger as a ghost line that swallows the
- *  next keystroke (the reported bug, pinned by the join test). */
+/** Dead entries: rows whose refId no longer exists in the desired set.
+ *  They reconcile even with the caret inside — a deferred dead row
+ *  would linger as a ghost line swallowing the next keystroke. */
 function hasDeadEntry(
   currentRows: CurrentEntry[],
   desired: ReturnType<typeof entriesForKind>,
@@ -373,12 +315,9 @@ export const ReferenceGeneratorExtension = Extension.create({
           });
           if (containers.length === 0) return null;
 
-          // The doc changed, OR the selection moved (the deferred
-          // containers reconcile when the caret leaves them), OR the
-          // user hit REFRESH (the contextual tab's button — the
-          // GDocs-style belt-and-braces affordance over the same-tick
-          // auto-update): the structural gate makes the no-change pass
-          // cost ~nothing.
+          // The doc changed, the selection moved (deferred containers
+          // reconcile when the caret leaves), or the user hit refresh —
+          // the structural gate makes the no-change pass cost ~nothing.
           const docChanged = transactions.some((t) => t.docChanged);
           const selectionMoved = transactions.some((t) => t.selectionSet);
           const forced = transactions.some((t) => t.getMeta('refRefresh') === true);
@@ -387,23 +326,17 @@ export const ReferenceGeneratorExtension = Extension.create({
           const scan = scanCollections(newState.doc);
           const tr = newState.tr;
           let wrote = false;
-          // M-REFS — THE GHOST DEBUG SEAM (fires in BOTH view modes,
-          // unlike the canvas-only seam): set
-          // window.__tensorPaintDebug = { log: [] } and reproduce —
-          // generator decisions land alongside any BlockCanvas
-          // entries; an EMPTY canvas section with generator activity
-          // proves the stale ink lives in the pageless DOM, not the
-          // canvas.
+          // Debug seam (both view modes): set
+          // window.__tensorPaintDebug = { log: [] } to log generator
+          // decisions alongside BlockCanvas paint entries.
           const dbg = (globalThis as { __tensorPaintDebug?: { log: unknown[] } }).__tensorPaintDebug;
-          // REVERSE document order — a replace never invalidates an
+          // Reverse document order — a replace never invalidates an
           // earlier container's positions.
           for (let i = containers.length - 1; i >= 0; i--) {
             const { node, pos } = containers[i]!;
-            // DEFER-WHILE-INSIDE — the LIVE-edit protection: the user
-            // is editing this table's entries, never rebuild under
-            // their caret. DEAD entries break the deferral (a source
-            // heading vanished — the stale row must go even with the
-            // caret inside it, or it ghosts on: hasDeadEntry).
+            // Defer while inside (never rebuild under the user's
+            // caret); dead entries break the deferral — the stale row
+            // must go even with the caret inside it.
             const kind = refKindOf(node);
             const depth = typeof node.attrs.depth === 'number' ? node.attrs.depth : 3;
             const desired = entriesForKind(scan, kind, depth);
@@ -421,27 +354,15 @@ export const ReferenceGeneratorExtension = Extension.create({
                 desiredN: desired.length,
               });
             }
-            // FORCED (the Refresh button, the layout presets' attr
-            // writes) bypasses the defer too: explicit user intent —
-            // the refresh-wins semantics apply under the caret (the
-            // in-progress row edit reverts, GDocs' update-button
-            // behavior). Without this, attr toggles silently no-op
-            // while the caret is inside — the user's dead-Leaders-
-            // button report (the number vanished because it is
-            // ADAPTER-side; the dots stayed because they are
-            // GENERATOR-side and deferred).
+            // Forced (the Refresh button, the layout presets' attr
+            // writes) bypasses the defer too: without this, attr toggles
+            // silently no-op while the caret is inside.
             if (!dead && inside && !forced) continue;
             const wroteThis = reconcileContainer(tr, node, pos, scan, forced || dead);
             if (wroteThis) wrote = true;
-            // THE POST-JOIN SELECTION HARDENING (round 7 — the crash
-            // at the join point): a DEAD-row removal takes the
-            // paragraph HOLDING THE CARET with it; PM maps the
-            // selection to the replacement's edge — a boundary
-            // position the REAL input path can choke on (typing the
-            // first character after backspacing a header bare — the
-            // reported app crash). Set the caret EXPLICITLY to the
-            // container's first row's text start (reconcileContainer
-            // always writes ≥ 1 child): a known-good text target.
+            // A dead-row removal takes the caret's paragraph with it; PM
+            // maps the selection to a boundary position the input path can
+            // choke on — set the caret to the first row's text start.
             if (wroteThis && inside) {
               try {
                 tr.setSelection(TextSelection.create(tr.doc, pos + 2));
@@ -453,9 +374,8 @@ export const ReferenceGeneratorExtension = Extension.create({
             }
           }
           if (!wrote) return null;
-          // UNDO-CLEAN: regeneration is a derived write — undo steps
-          // never replay it; PM's history rebases over it and the
-          // next pass re-syncs after any undo.
+          // Regeneration is a derived write: undo steps never replay it;
+          // PM's history rebases over it and the next pass re-syncs.
           tr.setMeta('addToHistory', false);
           return tr;
         },

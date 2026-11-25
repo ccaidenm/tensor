@@ -13,10 +13,8 @@ import {
 import { insertPageField } from '@/lib/editor/PageFieldNode';
 
 /**
- * M-HEADER-FOOTER-2 — the Header & Footer contextual tab's groups
- * (surfaced while the selection sits in a band container). Formatting
- * is DELIBERATELY absent: the Home tab's groups work on band content
- * unchanged — ONE editor, one formatting system.
+ * The Header & Footer contextual tab. Formatting is deliberately absent:
+ * the Home tab's groups work on band content unchanged.
  */
 export function HeaderFooterTools() {
   const editor = useDocumentStore((s) => s.editor);
@@ -36,8 +34,8 @@ export function HeaderFooterTools() {
           inBand = true;
           variant = $from.node(d).attrs.variant === 'first' ? 'first' : 'default';
           which = name === 'headerBlock' ? 'header' : 'footer';
-          // #58 — the WORKING section: a tagged container's tag rides
-          // with the selection (Go to Header/Footer stays in it).
+          // #58 — the working section: the tag rides with the selection
+          // (Go to Header/Footer stays in it).
           const tag = $from.node(d).attrs.sectionId;
           sectionId = typeof tag === 'string' && tag ? tag : null;
         }
@@ -45,8 +43,6 @@ export function HeaderFooterTools() {
       return { inBand, first: inBand && variant === 'first', sectionId, which };
     },
   });
-  // The selector's shape (inBand/first) is consumed below under the
-  // hook's historical name — the alias keeps the JSX untouched.
   const sectionId = inBand?.sectionId ?? null;
 
   const differentFirstPage = settings?.differentFirstPage ?? false;
@@ -54,11 +50,8 @@ export function HeaderFooterTools() {
   const goTo = (which: 'header' | 'footer') => {
     if (!editor) return;
     const first = differentFirstPage;
-    // Under differentFirstPage, focus the FIRST-page region when
-    // possible (falling back to whatever exists) — Word's flow.
-    // #58: the WORKING section's containers come first (a tagged
-    // override the selection sits in — jumping to the doc default
-    // would yank the user out of their section).
+    // #58: the working section's containers come first (jumping to the
+    // doc default would yank the user out of their section).
     const workingSection = sectionId ?? undefined;
     const target =
       (workingSection
@@ -86,11 +79,9 @@ export function HeaderFooterTools() {
         />
       </RibbonGroup>
       <RibbonGroup>
-        {/* #58 — the per-section LINK law (Word's "Link to Previous"):
-            the caret's in a section's own override → the section is
-            UNLINKED; re-linking deletes the override and the section
-            inherits the doc default again (its custom content is lost,
-            Word's own relink behavior — one undo step restores it). */}
+        {/* #58 — Word's "Link to Previous": the caret in a section's own
+            override means unlinked; re-linking deletes the override (its
+            custom content is lost — one undo restores it). */}
         {inBand?.inBand && inBand.sectionId != null && inBand.which && editor && (
           <IconButton
             label="Link to Previous (inherit the document's header/footer)"
@@ -121,8 +112,7 @@ export function HeaderFooterTools() {
           onClick={() => goTo('footer')}
         />
       </RibbonGroup>
-      {/* M-PAGEFIELD: the page-number fields — enabled while the
-          selection sits in a band (the caret is the insertion point). */}
+      {/* Page-number fields — enabled only in a band (the caret is the insertion point). */}
       <RibbonGroup>
         <IconButton
           label="Insert Page Number"

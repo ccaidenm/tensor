@@ -10,7 +10,7 @@ import {
 import { currentIndentLeft, normalizeTabStops, caretEditableParagraph } from '@/lib/editor/ParagraphExtensions';
 
 /**
- * M-RULER — pure ruler math. No DOM, no React, no canvas: everything
+ * Pure ruler math. No DOM, no React, no canvas: everything
  * here is a function of (engine px geometry, display unit). The Ruler
  * component multiplies by zoom at paint time; nothing here knows zoom
  * exists.
@@ -27,7 +27,7 @@ import { currentIndentLeft, normalizeTabStops, caretEditableParagraph } from '@/
  * vertically centered on a transparent background. */
 export const RULER_HEIGHT = 18;
 
-/** The VERTICAL ruler bar's width (Phase 5): a touch thinner than the
+/** The VERTICAL ruler bar's width: a touch thinner than the
  * horizontal bar's height — the rotated numbers + full-width majors
  * read heavier at the same size, so the vertical trims 2px. */
 export const RULER_WIDTH = 16;
@@ -197,12 +197,9 @@ export interface RulerModel {
  */
 export function deriveRulerModel(state: EditorState): RulerModel | null {
   const { $from } = state.selection;
-  // M-HEADER-FOOTER-3: the caret's RULER-EDITABLE paragraph via the
-  // shared helper — `$from.node(1)` is the BAND CONTAINER for
-  // header/footer paragraphs, so the old spelling returned null and
-  // the ruler went margins-only there (every tab-stop click eaten by
-  // the !model guards; list/blockquote paragraphs stay margins-only
-  // by the helper's acceptance rule, unchanged).
+  // The caret's RULER-EDITABLE paragraph via the shared helper —
+  // `$from.node(1)` is the BAND CONTAINER for header/footer
+  // paragraphs, so the direct spelling returned null there.
   const hit = caretEditableParagraph($from);
   if (!hit) return null;
   const block = hit.node as { attrs?: Record<string, unknown> };

@@ -1,16 +1,9 @@
 import { XMLParser } from 'fast-xml-parser';
 
 /**
- * M-DOCX — the ORDERED XML node model (#38a). Document.xml is parsed
- * with preserveOrder into this shape because ORDER IS CONTENT in a
- * word processor: fast-xml-parser's default mode GROUPS same-named
- * children, which reordered paragraphs/tables and scrambled tab
- * sequences (the first round-trip gate run caught it). One model, one
- * helper set, shared by the import mapper and the OMML converter.
- *
- * Empty elements (no attrs/children) become kids-less ONodes with
- * empty text — presence checks are plain kid lookups, no empty-string
- * ambiguity anywhere.
+ * The ordered XML node model (#38). Document.xml is parsed with
+ * preserveOrder — the parser's default mode groups same-named children
+ * and scrambles paragraph/tab order. Shared by import and OMML.
  */
 
 export interface ONode {

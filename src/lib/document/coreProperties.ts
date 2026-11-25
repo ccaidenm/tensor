@@ -1,14 +1,8 @@
 /**
- * M-META — the document's standard core properties (title, author,
- * subject, keywords, comments): the .wpdoc metadata fields the
- * Properties dialog edits and the exporters embed. Out of scope by
- * ruling: custom/arbitrary user-defined fields — the standard five
- * cover the common case.
- *
- * Keywords are ONE string. Word's Properties dialog, OOXML
- * `cp:keywords`, and PDF `/Keywords` all spell keywords that way (a
- * single, conventionally comma-separated string) — storing the same
- * shape means no split/join rules exist anywhere in the pipeline.
+ * The document's standard core properties (title, author, subject,
+ * keywords, comments) — the .wpdoc metadata the Properties dialog
+ * edits and the exporters embed. Keywords are ONE string, matching
+ * Word/OOXML/PDF, so no split/join rules exist in the pipeline.
  */
 
 export interface DocumentCoreProperties {
@@ -21,12 +15,7 @@ export interface DocumentCoreProperties {
 
 const CORE_KEYS = ['title', 'author', 'subject', 'keywords', 'comments'] as const;
 
-/**
- * Trim every field; whitespace-only → omitted. Empty in, empty out —
- * saves write only real content (the lineNumbers conditional-spread
- * precedent: absent means "never set", never ""). The document store
- * normalizes on write, so nothing downstream ever sees "".
- */
+/** Trim each field; whitespace-only → omitted. Absent means "never set", never "" — nothing downstream sees "". */
 export function normalizeCoreProperties(
   raw: DocumentCoreProperties | null | undefined,
 ): DocumentCoreProperties {
@@ -39,11 +28,7 @@ export function normalizeCoreProperties(
   return out;
 }
 
-/**
- * THE EXPORT CONTRACT — DOCX export (#37) consumes this. OOXML
- * `cp:coreProperties` spellings: the document's author is `creator`
- * (the Dublin Core term) and comments are `description` (dc:description).
- */
+/** DOCX export (#37) consumes this: OOXML spells author as `creator` (Dublin Core) and comments as `description` (dc:description). */
 export interface DocxCoreProperties {
   title?: string;
   subject?: string;
@@ -65,11 +50,7 @@ export function toDocxCoreProperties(
   };
 }
 
-/**
- * THE EXPORT CONTRACT — PDF export (#39) consumes this. PDF Info
- * dictionary keys. PDF has no standard comments field, so comments
- * never map (pinned by test — a future mapping can't invent one).
- */
+/** PDF export (#39) consumes this. PDF has no standard comments field, so comments never map (pinned by test). */
 export interface PdfInfo {
   Title?: string;
   Author?: string;

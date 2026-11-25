@@ -10,9 +10,8 @@ export interface SettingsPanelDefinition {
   label: string;
   icon: ComponentType<{ className?: string }>;
   component: ComponentType;
-  /** Sub-items shown under this panel's nav entry when it's active,
-   *  with scroll-spy highlighting (see useActiveSection) — the Discord-
-   *  style nested nav. Omit or provide a single-item array for panels
+  /** Sub-items shown under this panel's nav entry when active, with
+   *  scroll-spy highlighting (see useActiveSection). Omit for panels
    *  too simple to need it. */
   sections?: SettingsSectionDefinition[];
 }

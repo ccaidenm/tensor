@@ -53,6 +53,32 @@ describe('PaginatedView integration', () => {
     expect(contiguityErrors).toEqual([]);
   });
 
+  it('the empty-document placeholder paints as muted ink on an empty doc and disappears after typing', async () => {
+    const paintOps = (globalThis as { __paintOps?: Array<{ op: string; args: unknown[]; fillStyle?: string }> }).__paintOps!;
+    const before = paintOps.length;
+    const { editor } = renderTensor();
+    await settle();
+
+    // Boot with the empty <p></p>: the placeholder draws once, muted —
+    // decoration ink, never document text (nothing to delete).
+    const mine = paintOps
+      .slice(before)
+      .filter((o) => o.op === 'fillText' && o.args[0] === 'Start typing…');
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine[0]!.fillStyle).toBe('rgba(0, 0, 0, 0.35)');
+
+    // The first keystroke retires it.
+    act(() => {
+      editor.commands.insertContent('x');
+    });
+    await settle();
+    const after = paintOps
+      .slice(before)
+      .filter((o) => o.op === 'fillText' && o.args[0] === 'Start typing…' && o !== mine[0]);
+    // The ops list only grows; a NEW placeholder op after typing is the bug.
+    expect(after).toHaveLength(0);
+  });
+
   it('b. typing at a page-boundary line: no scroll jump', async () => {
     const { editor } = renderTensorInScrollContainer(threePageDoc);
     await settle();
@@ -78,7 +104,7 @@ describe('PaginatedView integration', () => {
     const { editor } = renderTensor();
     await settle();
 
-    // REGRESSION PIN: the editor's initial content ("<p>Start typing…</p>")
+    // REGRESSION PIN: the editor's initial content ("<p></p>")
     // is created WITHOUT a transaction — ensureBlockIds (onCreate) must
     // have minted its id, or the very first layout would throw and boot
     // into the pageless fallback.
@@ -143,7 +169,7 @@ describe('PaginatedView integration', () => {
   it('e. sentinel-only fallback: a hardBreak doc degrades to pageless; lists now render PAGINATED', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // M6.1 parity: lists PROJECT — a list doc renders sheets, no throw.
+    // Parity: lists PROJECT — a list doc renders sheets, no throw.
     const { editor } = renderTensor();
     await settle();
     act(() => {
@@ -258,7 +284,7 @@ describe('PaginatedView integration', () => {
   });
 });
 
-// ─── M5.13/M6: margins — presets, commit-gated Apply, persistence ────────
+// Margins: presets, commit-gated Apply, persistence
 
 describe('margins (M5.13 presets, M6 Apply dialog)', () => {
   it('k. presets convert to Word’s physical sizes in engine px; Normal ≡ DEFAULT_MARGINS', () => {

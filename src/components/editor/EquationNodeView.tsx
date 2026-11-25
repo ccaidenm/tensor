@@ -2,21 +2,13 @@ import { NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { parseEquation, renderEquation } from '@/lib/equations/render';
 
 /**
- * M-EQ — the equation node view. The visible rendering in PAGELESS
- * mode (KaTeX HTML projected from the node's latex attr — the ONE
- * render surface, lib/equations/render.ts). In PAGINATED mode this
- * same view renders invisibly inside the hidden-input view (opacity 0,
- * NOT aria-hidden — the M5 a11y mirror): KaTeX's default
- * 'htmlAndMathml' output carries a visually-hidden MathML copy, so the
- * formula is in the accessibility tree exactly like the <img alt>
- * receipt.
- *
- * THE BROKEN-GLYPH LAW (the image family's): the document never shows
- * KaTeX's red error text or a silent empty box. An EMPTY equation
- * renders the dashed placeholder (it is a just-inserted equation
- * awaiting input); an INVALID one renders its source in a styled
- * invalid face — the edit path (the popover) is always one click away,
- * and the popover's own validation surfaces the ParseError message.
+ * The equation node view: KaTeX HTML of the node's latex attr
+ * (renderEquation is the one render surface). In paginated mode it
+ * renders invisibly (opacity 0, NOT aria-hidden): KaTeX's
+ * 'htmlAndMathml' output carries a visually-hidden MathML copy, keeping
+ * the formula in the a11y tree. Never KaTeX's red error text — an empty
+ * equation renders the dashed placeholder, an invalid one its source
+ * in the invalid face.
  */
 
 type EquationNodeViewProps = ReactNodeViewProps;
@@ -35,12 +27,9 @@ export function EquationNodeView({ node, selected }: EquationNodeViewProps) {
     <NodeViewWrapper
       data-equation-node="true"
       data-resolved={empty ? 'empty' : parseError ? 'invalid' : 'ok'}
-      // Alignment is the node's attr (the engine reads the same attr —
-      // one derivation): flex justify positions the shrink-wrapped
-      // math box. Color: the node's paint-only attr; null INHERITS the
-      // container (the pageless container carries the document's
-      // default text color — text-black plus the StylesStylesheet's
-      // normal-style override when one exists).
+      // Alignment: the engine reads the same attr (one derivation);
+      // flex justify positions the shrink-wrapped math box. Color is
+      // paint-only; null inherits the container's text color.
       style={{
         justifyContent: align === 'right' ? 'flex-end' : align === 'left' ? 'flex-start' : 'center',
         ...(color ? { color } : {}),
@@ -68,8 +57,7 @@ export function EquationNodeView({ node, selected }: EquationNodeViewProps) {
           data-testid="equation-render"
           role="math"
           className="tensor-equation-math"
-          // KaTeX's output — generated HTML from THIS node's latex, the
-          // display-only projection (never persisted anywhere).
+          // KaTeX HTML from this node's latex — display-only, never persisted.
           dangerouslySetInnerHTML={{ __html: renderEquation(latex) }}
         />
       )}

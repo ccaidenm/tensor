@@ -11,12 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useSpellStore } from '@/lib/editor/spell/store';
 
-/**
- * The PERSONAL DICTIONARY manager — every word added via the suggestion
- * bubble or this dialog, removable here. The backing file is plain text
- * ({appConfigDir}/spell/dictionary-<lang>.txt, one word per line) —
- * hand-editable, mergeable, FLOSS-tool friendly.
- */
+// The personal dictionary manager. The backing file is plain text
+// ({appConfigDir}/spell/dictionary-<lang>.txt, one word per line) —
+// hand-editable and merge-friendly.
 export function DictionaryDialog() {
   const open = useSpellStore((s) => s.dictionaryOpen);
   const closeDictionary = useSpellStore((s) => s.closeDictionary);
@@ -41,7 +38,7 @@ export function DictionaryDialog() {
       <DialogContent className="max-w-sm" data-testid="dictionary-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <BookA size={15} /> Personal Dictionary
+            <BookA size={16} /> Personal Dictionary
           </DialogTitle>
           <DialogDescription>
             Words Tensor stops flagging. Saved as plain text in your config folder.

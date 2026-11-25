@@ -3,20 +3,9 @@ import { create } from 'zustand';
 import { scanCollections } from './scan';
 
 /**
- * M-REFS — the reactive seam between doc changes and the pageless
- * NodeView (the search/spell store pattern, minimal form). The scan
- * itself is pure + memoized (scan.ts); this store only carries a
- * VERSION counter that bumps (debounced) after doc-changing
- * transactions so subscribed NodeViews re-render against the fresh
- * scan. The ADAPTER never touches this store — it calls the memoized
- * scan synchronously per conversion (paginated needs zero debounce:
- * the engine's incremental cache makes a synchronous rescan cheap).
- *
- * DEBOUNCE (the issue's performance note): every keystroke in a
- * RETITLED heading would otherwise rescan + re-render every reference
- * table node. One trailing-edge timer (~250ms) collapses bursts; the
- * last doc version wins. The NodeView reads the LIVE doc at render
- * time, so the debounce only delays the bump, never the data.
+ * The reactive seam between doc changes and the NodeView: a version
+ * counter bumped (debounced ~250ms) after doc-changing transactions so
+ * NodeViews re-render; the adapter rescans synchronously instead.
  */
 
 interface ReferenceStoreState {
@@ -45,9 +34,9 @@ function scheduleScan(editor: Editor): void {
   }, REFERENCE_SCAN_DEBOUNCE_MS);
 }
 
-/** Mounted in tensorExtensions: the ONE doc-change listener. onCreate
- * covers the initial-content path (never dispatches a transaction the
- * debounce would see); onUpdate covers every doc change after. */
+/** Mounted in tensorExtensions: the one doc-change listener. onCreate
+ *  covers the initial-content path (never dispatches a transaction the
+ *  debounce would see); onUpdate covers every doc change after. */
 export const ReferenceScanExtension = Extension.create({
   name: 'referenceScanSync',
 

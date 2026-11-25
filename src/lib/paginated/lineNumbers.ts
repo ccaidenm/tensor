@@ -1,7 +1,7 @@
 import type { LineBox } from '@tensor-editor/engine';
 
 /**
- * M-LINENUMS — pure counting. The engine emits LineBox[]; this file
+ * Pure counting. The engine emits LineBox[]; this file
  * consumes it. No engine session, no DOM, no React: numbers are
  * derived per layout call, so a mid-document edit re-numbers
  * everything after it in the SAME render (the no-debounce law).

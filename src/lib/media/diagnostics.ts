@@ -2,17 +2,10 @@ import type { Editor } from '@tiptap/core';
 import { useMediaStore } from './store';
 
 /**
- * M-IMAGES-2.2 — the unresolved-ref report. A media:// ref whose id is
- * NOT in the MediaStore paints the placeholder in every surface with
- * zero trace of WHY — the missing-media half of the gray-placeholder
- * story (the decode-failure half lives in bitmapCache's onerror
- * diagnostic). Dev-only: an external doc opened without its container
- * is a legitimate placeholder state, not an error.
- *
- * Two triggers, both dev-only: the relayout (fresh scan on every
- * layout pass) and the MediaStore subscription (a store REMOVAL must
- * re-scan even with no PM transaction — the store change alone
- * triggers no relayout).
+ * The unresolved-ref report (dev-only): a media:// ref missing from
+ * the MediaStore otherwise paints a placeholder with no trace.
+ * Triggers: every relayout scan, plus the MediaStore subscription —
+ * a store removal alone triggers no relayout.
  */
 export function reportUnresolvedRefs(editor: Editor): void {
   const seen = new Set<string>();

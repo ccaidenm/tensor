@@ -7,10 +7,9 @@ import {
 import { DocumentFileSchema, CURRENT_DOCUMENT_VERSION } from '@/lib/document/schema';
 
 /**
- * M-META — the standard core properties: normalization, the export
- * contract spellings (DOCX #37 / PDF #39 consume these), and schema
- * back-compat. The dialog/store/plumbing behavior lives in
- * documentProperties.test.tsx and wpdoc.test.tsx.
+ * The standard core properties: normalization, the export contract
+ * spellings (DOCX #37 / PDF #39 consume these), and schema back-compat
+ * (dialog/store behavior: documentProperties.test.tsx, wpdoc.test.tsx).
  */
 
 describe('normalizeCoreProperties', () => {

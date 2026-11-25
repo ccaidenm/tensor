@@ -4,23 +4,9 @@ import { PrintDocumentView } from '@/lib/print/PrintDocumentView';
 import { usePrintStore, ptToCssSize } from '@/lib/print/printCss';
 
 /**
- * M-PRINT (#43, Mark 2) — THE PRINT CONTAINER: the preview's Print
- * button arms this with the SAME walk the preview rendered (the
- * one-walk contract: what previews is what prints — no second
- * build), the container mounts the print DOM display:none on
- * screen, two rAFs let the DOM/paints settle, window.print() hands
- * it to the OS dialog (printer/copies/range — the OS's, per #43),
- * and the afterprint disarms.
- *
- * PRINT CSS LAW: @page size derives from the document's OWN
- * pageSetup (pt → CSS pt string), margin 0 — the walk's
- * coordinates are page-frame-absolute (the contentBox rides inside
- * them), so any @page margin would double-apply and shift every
- * element. The screen chrome suppresses itself under @media print
- * (index.css: [data-screen-chrome] display:none), the container
- * reveals. Sheets: --print-page-gap 0 (the @page breaks separate
- * paper pages — no 24px gutters on paper), and each sheet is
- * break-after so pages land on their own physical page.
+ * #43 — the preview's Print button arms this with the same walk the
+ * preview rendered (what previews is what prints). @page margin is 0:
+ * the walk's coordinates are page-frame-absolute.
  */
 
 export function PrintContainer() {
@@ -29,7 +15,7 @@ export function PrintContainer() {
   const cssPageSize = usePrintStore((s) => s.cssPageSize);
   const armed = pages != null && cssPageSize != null;
 
-  // afterprint + Escape disarm (the dialog can be cancelled).
+  // afterprint disarm (the dialog can be cancelled).
   useEffect(() => {
     if (!armed) return;
     const disarm = () => usePrintStore.getState().disarm();
@@ -40,8 +26,8 @@ export function PrintContainer() {
   return (
     <div
       data-testid="print-container"
-      // THE SCREEN/HIDE LAW: display:none on screen; @media print
-      // (index.css) reveals it while hiding [data-screen-chrome].
+      // display:none on screen; @media print (index.css) reveals it
+      // while hiding [data-screen-chrome].
       style={{ display: armed ? 'block' : 'none' }}
       data-print-page-size={cssPageSize ?? undefined}
     >
@@ -77,9 +63,8 @@ export function printPageSizeOf(pageSetup: PageSetup): string {
   return ptToCssSize(widthPt, heightPt, pageSetup.orientation === 'landscape');
 }
 
-/** THE PRINT FLOW (the preview's Print button body): arm with the
- *  PREVIEW'S OWN pages (one walk — no rebuild), let the container
- *  mount + paints settle (two rAFs), call window.print(). */
+/** The preview's Print button body: arm with the preview's own pages
+ *  (one walk — no rebuild), settle two rAFs, then window.print(). */
 export async function printFromPreview(pages: import('@/lib/print/types').PrintPage[], pageSetup: PageSetup): Promise<void> {
   usePrintStore.getState().arm({
     pages,
@@ -88,7 +73,7 @@ export async function printFromPreview(pages: import('@/lib/print/types').PrintP
   });
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   window.print();
-  // Disarm rides afterprint (the dialog's own close); a same-tick
-  // disarm would unmount before some webviews snapshot the DOM.
+  // Disarm rides afterprint; a same-tick disarm would unmount before
+  // some webviews snapshot the DOM.
 }
 

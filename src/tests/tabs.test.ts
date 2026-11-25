@@ -5,12 +5,11 @@ import { useConfigStore } from '@/lib/config/store';
 import { DEFAULT_MARGINS, PAGE_GAP } from '@/lib/document/pageSetup';
 import { GEOMETRY, renderTensor, renderTensorInScrollContainer, settleLayout, mockRects } from './harness';
 
-// M-RULER Phase 4 — the \t advance rule, end to end through the REAL
-// production editor: the engine's breaker places tab jumps (FakeMetrics:
-// 10px/char), the painter consumes the engine's segment x (a tab paints
-// NOTHING), the Tab key inserts a REAL tab character whose cursor lands
-// ON the stop, and clicks inside a tab span resolve by the midpoint
-// rule over the jump.
+// The \t advance rule, end to end through the REAL production editor:
+// the engine's breaker places tab jumps (FakeMetrics: 10px/char), the
+// painter consumes the segment x (a tab paints NOTHING), Tab inserts a
+// REAL tab character whose cursor lands ON the stop, and clicks inside
+// a tab span resolve by the midpoint rule.
 //
 // All x numbers are CANVAS-relative (BlockCanvas sits at the content
 // box): an unindented paragraph's line pen starts at 0, so a stop at
@@ -67,7 +66,7 @@ async function loadWithTabs(html: string, tabPositions: number[]) {
   return { editor };
 }
 
-describe('tab advance (M-RULER Phase 4)', () => {
+describe('tab advance', () => {
   it('a mid-line tab jumps the pen to the next default stop (0.5" grid) and paints nothing', async () => {
     const { editor } = await loadWithTabs('<p>abcd</p>', [3]);
     const ops = (globalThis as unknown as {
@@ -155,7 +154,7 @@ describe('tab advance (M-RULER Phase 4)', () => {
     expect(editor.state.selection.$from.parentOffset).toBe(3); // after the \t
   });
 });
-describe('Shift+Tab backtrack (M-RULER Phase 4)', () => {
+describe('Shift+Tab backtrack', () => {
   it('backtracks the caret one tab section at a time, non-destructive', async () => {
     // 'ab\tcd\tef': text a0 b1 \t2 c3 d4 \t5 e6 f7.
     const { editor } = await loadWithTabs('<p>abcdef</p>', [3, 6]);
@@ -183,7 +182,7 @@ describe('Shift+Tab backtrack (M-RULER Phase 4)', () => {
   });
 });
 
-describe('Enter strips tab stops (the M-RULER ruling)', () => {
+describe('Enter strips tab stops', () => {
   it('Enter splits AND strips the new block in one transaction (one undo step)', async () => {
     const { editor } = renderTensor('<p data-tab-stops="200:left,300:center">abc</p>');
     await settleLayout();

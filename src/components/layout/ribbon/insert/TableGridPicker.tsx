@@ -7,10 +7,9 @@ import { useInsertTableStore } from '@/components/dialogs/InsertTableDialog';
 import { insertTableAtSelection } from '@/lib/editor/tableInsert';
 
 /**
- * M-TABLES — the Word-style insertion grid: hover to size (cells light
- * up as an rows×cols preview), click to insert. "Insert Table…" hands
- * off to the exact-dimension dialog. All three entry points (grid,
- * dialog, palette) converge on editor.commands.insertTable.
+ * The Word-style insertion grid: hover to size, click to insert;
+ * "Insert Table…" opens the exact-dimension dialog. All entry points
+ * (grid, dialog, palette) converge on the same insert path.
  */
 
 const MAX_GRID = 8;
@@ -59,7 +58,7 @@ export function TableGridPicker() {
                   data-testid={`table-grid-cell-${r}-${c}`}
                   role="gridcell"
                   aria-label={`${r} by ${c} table`}
-                  className={`h-[18px] w-[18px] rounded-[2px] border transition-colors ${
+                  className={`h-[18px] w-[18px] rounded-xs border transition-colors ${
                     active
                       ? 'border-primary bg-primary/25'
                       : 'border-border/60 bg-transparent'

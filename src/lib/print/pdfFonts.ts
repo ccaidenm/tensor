@@ -2,20 +2,9 @@ import { StandardFonts, type PDFFont, type PDFDocument } from 'pdf-lib';
 import { decompress } from 'wawoff2';
 
 /**
- * M-PRINT (#39) — THE PDF FONT BOOK. The synthesizer resolves every
- * drawn run's (fontFamily, bold, italic) through this book:
- *
- *  1. BUNDLED families (the @fontsource catalog): the latin woff2
- *     files decode to TTF (wawoff2 — WASM brotli, the same decoder
- *     the format deserves) and EMBED (selectable, searchable text —
- *     #39's core AC). Decode is lazy per family+face and cached per
- *     book; a failed fetch/decode quietly falls to the standard map
- *     (a PDF with substituted glyphs beats no PDF — and tests, whose
- *     jsdom fetch of a ?url path fails, exercise exactly this path).
- *  2. EVERYTHING ELSE (system fonts, 'system-ui', 'monospace',
- *     unknown) → the PDF standard 14: serif→Times, sans→Helvetica,
- *     mono→Courier — universally renderable, no embedding rights
- *     questions (a system font's file is not ours to ship).
+ * #39 — the PDF font book: bundled families decode woff2 → TTF and
+ * embed (selectable text); failures and non-bundled families fall to
+ * the standard-14 map (serif→Times, sans→Helvetica, mono→Courier).
  */
 
 /** The bundled latin font files (family → faces). ?url: Vite emits the

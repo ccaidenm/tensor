@@ -5,30 +5,9 @@ import type { TranslatedBlock, TranslateApplyMode } from './types';
 import { useDocumentStore } from '@/lib/document/store';
 
 /**
- * THE APPLY STEP — the translated preview becomes document content.
- *
- * FOUR COMMIT PATHS (the panel's actions):
- *   replace            each block's parsed translation REPLACES it
- *   insert-interleaved each translation is INSERTED right after its
- *                      block (the bilingual layout — the block's kind
- *                      is inherited by construction: the parsed
- *                      fragment re-parses <h1> as a heading, <ul> as
- *                      a list)
- *   insert-appended    the whole translated copy lands at the
- *                      document's end (the appended twin)
- *
- * LAWS:
- *  - ONE transaction for the whole apply — a single undo step (the
- *    replaceAll precedent in SearchExtension).
- *  - DESCENDING positions: later operations sit at lower positions
- *    than earlier ones, so no shift ever invalidates them.
- *  - STALENESS: the doc reference captured when the run STARTED must
- *    still be current, or the whole apply is refused ('stale') — the
- *    panel tells the user to translate again (the spell controller's
- *    capturedDoc law). Positions into a changed doc would be lies.
- *  - FAILED blocks never apply — a parse failure keeps the ORIGINAL
- *    block (disclosed in the preview), never a lossy plain-text
- *    drop-in.
+ * THE APPLY STEP — the preview becomes content: 'replace' swaps each
+ * block, 'insert-interleaved' inserts after each, 'insert-appended'
+ * lands at the end. ONE transaction, DESCENDING positions; stale → refuse.
  */
 
 /** Parse translated HTML into document content, or null on failure.
@@ -52,7 +31,7 @@ export type ApplyOutcome = 'applied' | 'stale' | 'nothing';
 
 /**
  * Commit the preview. Returns 'stale' when the document changed since
- * the run began (the panel shows the translate-again message).
+ * the run began.
  */
 export function applyTranslation(
   editor: Editor,

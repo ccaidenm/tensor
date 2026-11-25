@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
 import { Editor } from './components/editor/Editor';
+import { StartScreen } from './components/StartScreen';
+import { TitleBarRow } from './components/layout/TitleBarRow';
+import { cn } from 'cn';
 import { SearchPanel } from './components/editor/SearchPanel';
 import { TablePanel } from './components/editor/TablePanel';
 import { SearchResultsSidebar } from './components/editor/SearchResultsSidebar';
@@ -30,11 +33,12 @@ import { ExitFocusButton } from './components/layout/ExitFocusButton';
 import { Toaster } from '@/components/ui/toast';
 import { CommandPalette } from './components/palette/CommandPalette';
 import { useConfigStore } from './lib/config/store';
+import { SetupWizard } from './components/setup/SetupWizard';
 import { useConfigPersistence } from './lib/config/useConfigPersistence';
+import { startUpdateCheck } from './lib/updater/check';
 import './index.css';
 import { useAppShortcuts } from './lib/shortcuts/useAppShortcuts';
 import { useAutosave } from './lib/document/useAutosave';
-import { useMenuEvents } from './lib/menu/useMenuEvents';
 import { useStyleRegistryStore } from './lib/styles/registry';
 import { useFontRegistryStore } from './lib/fonts/registry';
 import { prefetchCatalogs } from './lib/fonts/catalogs';
@@ -43,46 +47,49 @@ import { StatusBar } from './components/layout/StatusBar';
 import { Ribbon } from './components/layout/Ribbon';
 import { SidebarHost } from './lib/layout/sidebar/SidebarHost';
 import { useDocumentStore } from './lib/document/store';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 
 function App() {
   useConfigPersistence();
   useAutosave();
-  useMenuEvents();
   useAppShortcuts();
-  // THE SYMBOL BUBBLE'S EDITOR HANDLE: the floating picker mounts at
-  // App level (not inside the Insert tab) so it persists across ribbon
-  // tab switches — park it in a corner, switch tabs, keep inserting.
+  // The floating symbol picker mounts at App level so it persists
+  // across ribbon tab switches.
   const editor = useDocumentStore((s) => s.editor);
-  // M-STYLES: load the global registry (appConfigDir/styles.json) once
-  // at bootstrap — merges over the code builtins; first run seeds the
-  // file (hyperlink custom, builtins.ts). Doc layers apply on open.
+  // #103 — the start screen owns the window until a document exists.
+  const startActive = useDocumentStore((s) => s.startActive);
+  // #103 — the wizard rides beside the start screen until completed
+  // or skipped (once, ever).
+  const firstRunCompleted = useConfigStore((s) => s.config.firstRunCompleted);
+  // Load the global style registry (appConfigDir/styles.json) once at
+  // bootstrap; doc layers apply on open.
   useEffect(() => {
     void useStyleRegistryStore.getState().loadGlobal();
   }, []);
 
-  // M-T4 — the app-wide native-menu REPLACEMENT: the WebView's own
-  // right-click menu dies everywhere (document surface, chrome, desk);
-  // the custom DocumentContextMenu (Editor.tsx's routing wrap) is the
-  // document surface's menu, and the ruler's band menus bring their
-  // own handlers. Suppression is inert for both (preventDefault is
-  // idempotent).
+  // The opt-in update check: once per launch, a beat after first
+  // paint, and only when the user turned it on.
+  useEffect(() => {
+    startUpdateCheck();
+  }, []);
+
+  // Kill the WebView's own right-click menu everywhere — the custom
+  // DocumentContextMenu and the ruler's band menus own their
+  // surfaces.
   useEffect(() => {
     const suppress = (e: MouseEvent) => e.preventDefault();
     window.addEventListener('contextmenu', suppress);
     return () => window.removeEventListener('contextmenu', suppress);
   }, []);
 
-  // M-FONTS-A: re-register uploaded fonts from appDataDir()/fonts/
-  // once at bootstrap (fonts.json is the entry list) — before the
-  // paginated view's font gate settles its first layout.
+  // Re-register uploaded fonts from appDataDir()/fonts/ once at
+  // bootstrap, before the first layout.
   useEffect(() => {
     void useFontRegistryStore.getState().loadFromDisk();
   }, []);
 
-  // M-FONTS-B: when the user has opted into online catalogs, warm the
-  // list-all metadata (Google + Fontsource) once per session — the
-  // ON-toggle consent ruling. No code path reaches the network while
-  // the toggle is off.
+  // Warm the online-catalog metadata once per session when opted in;
+  // nothing reaches the network while the toggle is off.
   const allowFontCatalogs = useConfigStore((s) => s.config.privacy.allowFontCatalogs);
   useEffect(() => {
     if (allowFontCatalogs) {
@@ -91,9 +98,8 @@ function App() {
   }, [allowFontCatalogs]);
 
   // Differential benchmark. Triggers: URL #bench/?bench, OR five
-  // rapid clicks on the StatusBar (mouse-only driving — the test box's
-  // keyboard injection is unreliable). Output goes to a visible <pre>
-  // (readable via AT-SPI from the WebKitGTK app) + console.
+  // rapid clicks on the StatusBar (mouse-only driving). Output goes
+  // to a visible <pre> (AT-SPI readable) + console.
   useEffect(() => {
     const mark = (s: string) => {
       document.title = s.slice(0, 150);
@@ -102,10 +108,7 @@ function App() {
     // plugin — readable from the shell regardless of a11y/console/title.
     const writeResult = async (text: string, suffix = '') => {
       try {
-        const [{ writeTextFile }, { appDataDir, join }] = await Promise.all([
-          import('@tauri-apps/plugin-fs'),
-          import('@tauri-apps/api/path'),
-        ]);
+        const { appDataDir, join } = await import('@tauri-apps/api/path');
         await writeTextFile(await join(await appDataDir(), `bench-result${suffix}.txt`), text);
       } catch {
         // non-Tauri (plain browser) — console + <pre> still carry it
@@ -134,7 +137,6 @@ function App() {
         const text =
           '=== DIFFERENTIAL ===\n' + fb(small) + '\n' + fb(big);
         await writeResult(text);
-        // eslint-disable-next-line no-console
         console.log(text);
         document.getElementById('bench-output')?.remove();
         const pre = document.createElement('pre');
@@ -168,20 +170,32 @@ function App() {
   return (
     <>
       <main data-screen-chrome className="flex h-screen flex-col bg-background text-foreground">
-        {/* FOCUS MODE — the ribbon and status bar own their own hides
-            (component-level gates: any mount context unmounts them;
-            nothing hidden keeps running). */}
-        <Ribbon />
-        {/* data-desk-wrapper: the M-RULER portal target — the ruler bar
-            mounts here as static overlay chrome (flush under the Ribbon,
-            outside the scroller's flow; show/hide reflows nothing). */}
-        <div data-desk-wrapper className="relative flex-1 overflow-hidden">
-          {/* Desk: the editor scroll surface — the muted token reads
-              as the classic gray desk in light mode and adapts in dark.
-              data-desk-scroll: the ruler reads this element's clientWidth
-              (scrollbar-correct page centering) and scrollLeft (horizontal
-              overflow tracking). pt-8 leaves room for the 18px ruler
-              overlay + a 14px gap to the page. */}
+        {/* #103 — THE START SCREEN: every launch opens on Home. The
+            desk stays mounted but hidden (lifecycle, doc flows, and
+            portal targets keep working); before the wizard completes,
+            the start screen steps aside too — Finish reveals Home. */}
+        {startActive ? (
+          <>
+            <TitleBarRow variant="home" />
+            {firstRunCompleted && <StartScreen />}
+          </>
+        ) : (
+          /* FOCUS MODE — the ribbon and status bar own their own hides
+             (component-level gates: any mount context unmounts them;
+             nothing hidden keeps running). */
+          <Ribbon />
+        )}
+        {/* data-desk-wrapper: the ruler's portal target — static
+            overlay chrome, flush under the Ribbon, outside the
+            scroller's flow; show/hide reflows nothing. */}
+        <div
+          data-desk-wrapper
+          className={cn('relative flex-1 overflow-hidden', startActive && 'hidden')}
+        >
+          {/* Desk: the editor scroll surface. data-desk-scroll: the
+              ruler reads clientWidth (scrollbar-correct centering) and
+              scrollLeft (overflow tracking); pt-8 leaves room for the
+              ruler overlay + gap. */}
           <div className="absolute inset-0 overflow-auto bg-muted pt-8 pb-6" data-desk-scroll>
             <Editor />
           </div>
@@ -189,81 +203,69 @@ function App() {
           <SidebarHost id="search" anchor="right">
             <SearchResultsSidebar />
           </SidebarHost>
-          {/* M-T3c — the Table side panel: the same docked-panel
-              infrastructure as Find/Replace (the draggable/resizable
-              panel future upgrades once for every panel). */}
+          {/* The Table side panel — the same docked-panel
+              infrastructure as Find/Replace. */}
           <SidebarHost id="table" anchor="right">
             <TablePanel />
           </SidebarHost>
-          {/* M-A11Y — the Accessibility Check panel: the document-content
-              checker's results list (the search sidebar's docked-list
-              twin; scan runs live while open, never in the background). */}
+          {/* The accessibility checker's results list — live while
+              open, never in the background. */}
           <SidebarHost id="accessibilityCheck" anchor="right">
             <AccessibilityCheckPanel />
           </SidebarHost>
-          {/* #WATERMARK — the watermark panel: the decorative overlay's
-              LIVE editor (paint-only commits — the page behind the open
-              panel is the preview). */}
+          {/* The watermark panel: the LIVE editor — the page behind
+              the open panel is the preview. */}
           <SidebarHost id="watermark" anchor="right">
             <WatermarkPanel />
           </SidebarHost>
-          {/* TRANSLATE — the Review tab's on-demand translation: the
-              consented run panel (scope → run → preview → apply),
-              docked beside its Review siblings. The SETUP dialog is
-              store-driven with one mount like its spell twin. */}
+          {/* The Review tab's translate panel (consented runs) + its
+              store-driven setup dialog, one mount. */}
           <SidebarHost id="translate" anchor="right">
             <TranslatePanel />
           </SidebarHost>
-          {/* STATISTICS — the Review tab's dashboard sidebar: the
-              headline-number cards + the heading-delimited region list,
-              live while open (the StatusBar debounce pattern). */}
+          {/* The Review tab's statistics dashboard — live while
+              open. */}
           <SidebarHost id="statistics" anchor="right">
             <StatisticsPanel />
           </SidebarHost>
         </div>
-        <StatusBar />
+        {!startActive && <StatusBar />}
       </main>
+      {startActive && <SetupWizard />}
       <SettingsDialog />
       <CommandPalette />
       <StyleDialog state={styleDialog} onClose={styleDialog.close} />
       <FontBrowserDialog />
       <AltTextDialog />
       <InsertTableDialog />
-      {/* M-MD/M-DOCX: THE export lossy confirm — one gate for every
-          export flow, store-driven, one mount like its
-          InsertTableDialog twin (the developer-mode warning's in-app
-          spelling; never a native popup). */}
+      {/* THE export lossy confirm — one store-driven gate for every
+          export flow. */}
       <ExportConfirmDialog />
-      {/* M-DOCX: the import options surface (the font policy) — the
-          same promise-bridge pattern, one mount. */}
+      {/* The import options surface (the font policy). */}
       <ImportOptionsDialog />
-      {/* M-MD/M-DOCX: the import report (what an import dropped or
-          converted) — the loud posture's in-app surface. */}
+      {/* The import report — what an import dropped or converted. */}
       <ImportReportDialog />
-      {/* M-PRINT (#43, Mark 3): the print preview — the palette opens
-          it; Mark 2's Print command joins it. */}
+      {/* #43 — the print preview; the palette opens it. */}
       <PrintPreviewDialog />
-      {/* M-PRINT (#43, Mark 2): THE PRINT CONTAINER — hidden on
-          screen, revealed by @media print (index.css) while
-          [data-screen-chrome] hides; the preview's Print button arms
-          it with the SAME walk the preview rendered. */}
+      {/* #43 — THE PRINT CONTAINER: hidden on screen, revealed by
+          @media print; the preview's Print button arms it with the
+          same walk. */}
       <PrintContainer />
-      {/* M-REFS: the ToC insert dialog (depth picker) — store-driven,
-          one mount like its InsertTableDialog twin. */}
+      {/* The ToC insert dialog (depth picker) — store-driven, one
+          mount. */}
       <InsertReferenceTableDialog />
       <DocumentPropertiesDialog />
       <Toaster />
       {editor && <SymbolBubble editor={editor} />}
-      {/* THE EXIT BUTTON — Focus Mode's floating affordance (the same
-          command body as every other surface). */}
+      {/* Focus Mode's floating exit — the same command body as every
+          other surface. */}
       <ExitFocusButton />
       <CustomPageSizeDialog />
-      {/* #58 — the ONE Page Setup dialog (paper/orientation/margins
-          with an Apply-to scope: whole document / this section / this
-          point forward). */}
+      {/* #58 — the one Page Setup dialog (Apply-to scope: document /
+          section / point forward). */}
       <PageSetupDialog />
-      {/* #74 COLUMNS — the ONE Columns dialog (the spec with an
-          Apply-to scope; the ArrangeGroup's "More columns…" opens it). */}
+      {/* #74 — the one Columns dialog (the spec with an Apply-to
+          scope). */}
       <ColumnsDialog />
       {/* Spell check: the provider-choice consent surface + the
           personal dictionary manager (both store-driven, one mount). */}

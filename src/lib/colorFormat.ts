@@ -1,5 +1,3 @@
-export type ColorDisplayFormat = 'hex' | 'rgb' | 'hsl';
-
 function hexToRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '');
   const r = parseInt(clean.substring(0, 2), 16);
@@ -28,7 +26,7 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
 }
 
-export function formatColor(hex: string, format: ColorDisplayFormat): string {
+export function formatColor(hex: string, format: 'hex' | 'rgb' | 'hsl'): string {
   if (format === 'hex') return hex;
 
   const [r, g, b] = hexToRgb(hex);
@@ -38,10 +36,8 @@ export function formatColor(hex: string, format: ColorDisplayFormat): string {
   return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
-/** Hex -> rgba() with an explicit alpha. Returns the input unchanged
- * for anything the hex parser can't read (already-rgba strings pass
- * through). Used by the painted selection overlay so a picked color
- * never paints as an opaque block over the text. */
+/** Hex -> rgba(); unparseable input passes through unchanged (the
+ * selection overlay must never paint a picked color opaque over text). */
 export function withAlpha(color: string, alpha: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
   if (!m) return color;

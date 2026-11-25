@@ -14,10 +14,10 @@ import {
 } from '@/lib/editor/documentStats';
 
 /**
- * THE STATISTICS COMPUTATION — the sectioned walk (regions, sentences,
+ * The statistics computation — the sectioned walk (regions, sentences,
  * syllables), the readability math against hand-computed values, and
- * the no-drift law: the sidebar's totals must equal the status bar's
- * whole-document numbers exactly (one computation, many surfaces).
+ * the no-drift invariant: the sidebar's totals must equal the status
+ * bar's whole-document numbers exactly (one computation, many surfaces).
  */
 
 function makeEditor(html: string): Editor {

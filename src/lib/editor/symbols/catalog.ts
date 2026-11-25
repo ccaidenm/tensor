@@ -1,22 +1,7 @@
 /**
- * THE SYMBOLS CATALOG — the runtime half of the generated dataset
- * (scripts/generate-symbols.mjs). The picker's design, in one place:
- *
- *  - "Common" (the curated ~150 in symbols.ts) is ALWAYS available —
- *    bundled, instant, zero dataset.
- *  - The CORE dataset (~44k chars: every graphic symbol/script family
- *    except CJK/Hangul) ships gzipped (~271KB) and loads ONCE, lazily,
- *    when the user browses beyond Common or searches deep.
- *  - CJK/Hangul groups (~114k chars) are INDIVIDUAL lazy chunks
- *    (~660KB total across 7 files) that load only when their group is
- *    opened — the user-ruled scope: viewable on demand, never part of
- *    the core load or search set until opened.
- *
- * DECOMPRESSION: the chunks are gzip at build time; the runtime
- * decompresses with the native DecompressionStream (WebKitGTK 2.40+ /
- * all modern WebViews). If the runtime lacks it, the catalog degrades
- * honestly: Common still works, expanded groups report the requirement
- * (never a broken picker).
+ * THE SYMBOLS CATALOG — "Common" (~150 curated) is bundled; the CORE
+ * dataset (~44k chars, ~271KB gz) loads once, lazily; CJK/Hangul groups
+ * (~114k chars) are lazy chunks that load only when opened.
  */
 
 import symbolsIndex from '@/generated/symbols-index.json';
@@ -34,9 +19,8 @@ export interface CatalogGroup {
  *  tiny, stable, lets the chips render before anything loads). */
 export const GROUP_INDEX = symbolsIndex.groups as CatalogGroup[];
 
-/** The lazy chunks' base path (public/, served from the app origin —
- *  the bergamot artifacts' pattern). The .symbols extension (not .gz —
- *  see the generator's extension law) keeps transport encodings off. */
+/** The lazy chunks' base path (public/, served from the app origin).
+ *  The .symbols extension (not .gz) keeps transport encodings off. */
 const CHUNK_BASE = '/symbols';
 
 export interface CatalogChar {
@@ -51,18 +35,15 @@ interface LoadedChunk {
 
 /** Loaded-group cache: groupId → chars (Common cached eagerly). */
 const loaded = new Map<string, LoadedChunk>();
-/** The core bundle's per-group slices (the group-boundary law): core
- *  groups have no chunks of their own — their lists are sections of
- *  the one core.symbols load. */
+/** The core bundle's per-group slices: core groups have no chunks of
+ *  their own — their lists are sections of the one core.symbols load. */
 const coreSlices = new Map<string, CatalogChar[]>();
 /** In-flight loads — concurrent chips/search share one fetch. */
 const pending = new Map<string, Promise<LoadedChunk>>();
 
-/** Parse the wire format: one "hex;NAME" per line, with optional
- *  `>groupId` section headers (the core bundle's group-boundary law).
- *  DEFENSIVE: lines with unparseable hex or out-of-range codepoints
- *  are SKIPPED, never thrown on — a corrupted/partial response
- *  degrades to a smaller list, never a crashed picker. */
+/** Parse the wire format: one "hex;NAME" per line, optional `>groupId`
+ *  section headers. DEFENSIVE: unparseable lines are SKIPPED, never
+ *  thrown on — a corrupted response degrades, never crashes. */
 export interface ParsedChunk {
   /** Every entry in the chunk, headers or not (the search surface). */
   chars: CatalogChar[];
@@ -84,8 +65,8 @@ export function parseChunkGrouped(text: string): ParsedChunk {
     const sep = line.indexOf(';');
     if (sep < 0) continue;
     const cp = parseInt(line.slice(0, sep), 16);
-    // The codepoint range law: String.fromCodePoint throws beyond
-    // 0x10FFFF (and NaN) — validate instead of trusting the wire.
+    // String.fromCodePoint throws beyond 0x10FFFF (and on NaN) —
+    // validate instead of trusting the wire.
     if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) continue;
     const entry: CatalogChar = { cp, char: String.fromCodePoint(cp), name: line.slice(sep + 1) };
     chars.push(entry);
@@ -114,10 +95,9 @@ export function commonChars(): CatalogChar[] {
   return chars;
 }
 
-/** THE DECOMPRESSION SEAM — production uses fflate's pure-JS
- *  gunzipSync (the wpdoc zip's own dependency — no runtime
- *  DecompressionStream dependency, whose availability/behavior varies
- *  by WebKit build); tests inject a passthrough. */
+/** THE DECOMPRESSION SEAM — fflate's gunzipSync (no runtime
+ *  DecompressionStream dependency, whose availability varies by
+ *  WebKit build); tests inject a passthrough. */
 const defaultDecompress = async (bytes: ArrayBuffer): Promise<string> => {
   const out = gunzipSync(new Uint8Array(bytes));
   return new TextDecoder().decode(out);
@@ -130,11 +110,9 @@ export function __setDecompressor(fn?: (bytes: ArrayBuffer) => Promise<string>):
   decompress = fn ?? defaultDecompress;
 }
 
-/** Load one group's chars, routed by kind (the group-boundary law):
- *  LAZY groups (CJK/Hangul) fetch their own chunk; CORE groups are
- *  sections of the one core bundle — loading them loads core, then
- *  reads the slice. Shared promise so a chip click + a search racing
- *  each other fetch once. */
+/** Load one group's chars: LAZY groups fetch their own chunk; CORE
+ *  groups are sections of the one core bundle. Shared promise — a
+ *  chip click + a search racing each other fetch once. */
 export async function loadGroup(groupId: string): Promise<CatalogChar[]> {
   // Lazy groups (and 'core' itself): their own chunk, cached forever.
   const isLazy = groupId === 'core' || GROUP_INDEX.some((g) => g.id === groupId && g.lazy);
@@ -156,11 +134,9 @@ async function loadChunk(chunkId: string): Promise<CatalogChar[]> {
     const res = await fetch(`${CHUNK_BASE}/${chunkId}.symbols`);
     if (!res.ok) throw new Error(`Dataset chunk ${chunkId} failed to load (HTTP ${res.status})`);
     const bytes = await res.arrayBuffer();
-    // THE TRANSPORT SNIFF: some serving layers (vite dev, the Tauri
-    // asset protocol) transparently decode .gz files — the runtime
-    // then hands us ALREADY-DECODED bytes and a blind decompression
-    // pass fails. The gzip magic (1f 8b) decides: decode only when
-    // the bytes are still gzipped.
+    // Some serving layers (vite dev, the Tauri asset protocol)
+    // transparently decode .gz — the gzip magic (1f 8b) decides:
+    // decompress only when the bytes are still gzipped.
     const head = new Uint8Array(bytes, 0, 2);
     const gzipped = head[0] === 0x1f && head[1] === 0x8b;
     const text = gzipped ? await decompress(bytes) : new TextDecoder().decode(bytes);
@@ -210,12 +186,9 @@ export function __resetCatalog(): void {
   pending.clear();
 }
 
-// ─── THE COMMAND PALETTE'S CODEPOINT PATH ──────────────────────────────
-// Typing a codepoint straight into the palette ("U+03A9", "u+2192")
-// inserts that character — the power user's keyboard-first sibling of
-// the bubble picker. THE FORM: 'u+' (case-insensitive) followed by
-// 1–6 hex digits — unambiguous (bare hex would fight the command
-// search), the same shorthand the bubble's search accepts.
+// ─── Command palette codepoint path ────────────────────────────────
+// Typing "U+03A9" inserts that char. THE FORM: 'u+' (case-insensitive)
+// + 1–6 hex digits — bare hex would fight the command search.
 
 /** Parse a palette query into a codepoint, or null (not a codepoint
  *  spec / out of range / surrogate — fromCodePoint's crash class). */

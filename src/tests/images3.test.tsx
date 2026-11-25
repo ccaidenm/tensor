@@ -22,20 +22,12 @@ import { renderTensor, renderTensorInScrollContainer, mockRects, settleLayout, G
 import { FakeMetrics } from './fakeMetrics';
 
 /**
- * M-IMAGES-2.1/2.2 — the inline-selection + diagnostics suite. Pins
- * the 2.1 fix set: BOTH HALVES of an inline object are click surface
- * (the glyph-midpoint rule never applies to objects), the selection
- * overlay projects the object's PAINTED rect (baseline-seated), the
- * conversions split/extract without mangling the doc (no husk
- * paragraphs, no RangeError on the last block, the float offset rides
- * the round-trip), the image commands run on inline selections (align
- * honestly block-only), captions EXTRACT-then-caption, and the
- * placeholder states are distinguished (pending tint vs failed box).
- * Plus the clipboard-scoped round-trip: internal copy/paste keeps
- * images; external <img> HTML still never parses in.
+ * The inline-image suite: click surface, the selection overlay's
+ * painted-rect projection, block↔inline conversions (shape + captions),
+ * placeholder states (pending vs failed), and the clipboard round-trip.
  */
 
-// M-IMAGES-0 container simulator (same wire contract as wpdoc.test).
+// Container simulator (same wire contract as wpdoc.test).
 const wpdocFiles = vi.hoisted(() => new Map<string, unknown>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[] }) => {
@@ -109,8 +101,8 @@ function selNodeName(editor: Editor): string {
   return sel.node?.type?.name ?? 'text';
 }
 
-/** jsdom cleanup note (the images2 precedent): the suite never
- *  unmounts between tests — query the LATEST mounted surface. */
+/** The suite never unmounts between tests — query the latest
+ *  mounted surface. */
 const latest = (selector: string) => {
   const all = document.querySelectorAll(selector);
   return all[all.length - 1] as HTMLElement | undefined;
@@ -166,9 +158,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. The click surface: BOTH halves of an object (the 2.1 fix) ───────
-
-describe('inline click surface (M-IMAGES-2.1)', () => {
+describe('inline click surface', () => {
   it('a click ANYWHERE inside the object selects it (left AND right half); beyond it resolves to text', async () => {
     const { editor, pos } = await setupInlineMidText('<p>hello world</p>', 6);
     // The object is 150 wide starting after 'hello ' (60px at 10px/char
@@ -191,7 +181,7 @@ describe('inline click surface (M-IMAGES-2.1)', () => {
 
     act(() => { editor.commands.setTextSelection(0); });
     await settleLayout();
-    click(60 + 130, 8); // the RIGHT half — the 2.1 fix (was dead surface)
+    click(60 + 130, 8); // the right half
     expect(selNodeName(editor)).toBe('inlineImage');
 
     // A click BEYOND the object's right edge resolves to the text
@@ -223,9 +213,7 @@ describe('inline click surface (M-IMAGES-2.1)', () => {
   });
 });
 
-// ─── 2. The selection overlay: the object's PAINTED rect ────────────────
-
-describe('inline selection overlay (M-IMAGES-2.1)', () => {
+describe('inline selection overlay', () => {
   it('a NodeSelection on the inline object projects the ImageSelection overlay at its painted rect (baseline-seated), NO text band, handles present', async () => {
     const { editor, pos } = await setupInlineOwnParagraph('<p>hello world</p>');
     act(() => { editor.commands.setNodeSelection(pos); });
@@ -243,7 +231,7 @@ describe('inline selection overlay (M-IMAGES-2.1)', () => {
     // The text selection band is NOT painted over the object's line
     // (the overlay owns the visualization):
     expect(document.querySelectorAll('[data-testid="selection-rect"]').length).toBe(0);
-    // M-T4: the image ops surface is the document context menu —
+    // The image ops surface is the document context menu —
     // right-click carries the image variant live:
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
@@ -283,7 +271,6 @@ describe('inline selection overlay (M-IMAGES-2.1)', () => {
     const img = editor.state.doc.nodeAt(pos)!;
     expect(img.attrs.width).toBe(200);
     expect(img.attrs.height).toBe(120);
-    // The engine re-fits: the object's line grew for the taller object.
     const { adapted, result } = directLayout(editor);
     const line = result.lines.find((l) =>
       l.segments.some((s) => (adapted.blocks.find((b) => b.id === l.blockId)!.runs[s.runIndex] as { kind?: string } | undefined)?.kind === 'inlineImage'),
@@ -304,15 +291,13 @@ describe('inline selection overlay (M-IMAGES-2.1)', () => {
       fireEvent.pointerUp(overlay, { pointerId: 1 });
     });
     await settleLayout();
-    // NO float attr was written (an in-flow object has no float
-    // placement of its own to drag into).
+    // NO float attr was written (an in-flow object has none to drag into).
     expect(editor.state.doc.nodeAt(pos)!.attrs.float).toEqual(before ?? null);
   });
 });
 
-// ─── 3. The image commands work on inline selections (align honestly doesn't) ──
-
-describe('image commands on inline selections (M-IMAGES-2.1)', () => {
+// Image commands on inline selections — align doesn't
+describe('image commands on inline selections', () => {
   it('radius writes through the shared clamp path; align is BLOCK-ONLY (enablement false, no write)', async () => {
     const { editor, pos } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(pos); });
@@ -330,9 +315,8 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     const alignBefore = editor.state.doc.nodeAt(pos)!.attrs.align;
     act(() => { getCommand('imageAlignCenter')!.run(); });
     expect(editor.state.doc.nodeAt(pos)!.attrs.align).toBe(alignBefore);
-    // And the same align command DOES run on a BLOCK image (a second
-    // editor — this doc's only image is inline now; the images2
-    // precedent: multiple editors coexist, assertions read their own).
+    // The same align command DOES run on a BLOCK image (a second
+    // editor — multiple editors coexist, assertions read their own).
     const block = renderTensor('<p>block</p>');
     await settleLayout();
     await insertImageBytes(block.editor, fixturePng(150, 90), 'png');
@@ -347,7 +331,7 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     const { editor, pos } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(pos); });
     await settleLayout();
-    // M-T4: the image ops moved to the document context menu.
+    // The image ops live on the document context menu.
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
@@ -360,10 +344,9 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     act(() => { fireEvent.change(input!, { target: { value: 'An inline diagram' } }); });
     act(() => { fireEvent.click(latest('[data-testid="alt-text-save"]')!); });
     expect(editor.state.doc.nodeAt(pos)!.attrs.alt).toBe('An inline diagram');
-    // The a11y surface: the hidden PM view's real <img alt>. (jsdom
-    // portal-leak note: the hidden view re-mounts across the view
-    // branch flips — fallback/empty/main — so STALE copies of the img
-    // linger; the receipt is that the alt EXISTS in the a11y tree.)
+    // The a11y surface: the hidden PM view's real <img alt>. The hidden
+    // view re-mounts across the view branch flips, so stale copies of
+    // the img linger — assert the alt EXISTS in the a11y tree.
     await settleLayout();
     const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.pm-input-only img'));
     expect(imgs.some((i) => i.alt === 'An inline diagram')).toBe(true);
@@ -388,7 +371,7 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect((editor.state.selection as unknown as { from: number }).from).toBe(imgPos + imgSize + 1);
   });
 
-  it('M-T4: the context menu radius presets write the INLINE node\'s own attrs (both node kinds qualify)', async () => {
+  it('the context menu radius presets write the INLINE node\'s own attrs (both node kinds qualify)', async () => {
     const { editor } = await setupInlineOwnParagraph('<p>before</p>');
     const pos = imagePosOf(editor, 'inlineImage');
     act(() => { editor.commands.setNodeSelection(pos); });
@@ -426,7 +409,7 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(String(cmd!.keywords)).toContain('image');
   });
 
-  it('M-T4 polish: the floating toolbar on an image selection shows Link/Comment/Clear-Formatting ONLY', async () => {
+  it('the floating toolbar on an image selection shows Link/Comment/Clear-Formatting ONLY', async () => {
     const { editor } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(imagePosOf(editor, 'inlineImage')); });
     await settleLayout();
@@ -442,14 +425,12 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(toolbar.querySelector('[aria-label="Table Properties"]')).toBeNull();
   });
 
-  it('M-T4: the menu\'s Alignment cluster RENDERS only when usable — hidden for an inline selection (not disabled), present for a block image', async () => {
+  it('the menu\'s Alignment cluster RENDERS only when usable — hidden for an inline selection (not disabled), present for a block image', async () => {
     const { editor } = await setupInlineOwnParagraph('<p>before</p>');
     act(() => { editor.commands.setNodeSelection(imagePosOf(editor, 'inlineImage')); });
     await settleLayout();
-    // Inline selection: the menu is live with the image variant, but
-    // the Alignment submenu is ABSENT (M-IMAGES-2.2's hide-don't-
-    // disable ruling, carried to the menu surface) while Caption/Alt/
-    // Radius/Wrap remain reachable.
+    // Inline selection: the Alignment submenu is hidden (not
+    // disabled) while Caption/Alt/Radius/Wrap remain reachable.
     act(() => {
       fireEvent.contextMenu(document.querySelector('[data-testid="paginated-root"]')!);
     });
@@ -489,7 +470,7 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
           editor.state.schema.text('Cap'),
         ),
       );
-      // The bond (caption.ts's law: keepNext on the image):
+      // The bond (caption.ts: keepNext on the image):
       tr.setNodeAttribute(pos, 'keepNext', true);
       editor.view.dispatch(tr);
     });
@@ -498,7 +479,7 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(docShape(editor)).toBe('[p[text(hello ),inlineImage,text(world)], p[text(Cap)], p[EMPTY]]');
     act(() => { editor.commands.setNodeSelection(pos); convertInlineToBlock(editor); });
     await settleLayout();
-    // THE CAPTION IS DIRECTLY BENEATH THE IMAGE (before the world-half;
+    // The caption sits directly beneath the image (before the world-half;
     // the trailing husk predates the conversion):
     expect(docShape(editor)).toBe('[p[text(hello )], image, p[text(Cap)], p[text(world)], p[EMPTY]]');
     const imgPos = imagePosOf(editor);
@@ -532,31 +513,26 @@ describe('image commands on inline selections (M-IMAGES-2.1)', () => {
     expect(docShape(editor)).toBe('[p[text(before)], image, p[text(Cap)]]');
     act(() => { editor.commands.setNodeSelection(imgPos); convertBlockToInline(editor); });
     await settleLayout();
-    // The object now lives in its own paragraph; the caption follows it:
     expect(docShape(editor)).toBe('[p[text(before)], p[inlineImage], p[text(Cap)]]');
   });
 });
 
-// ─── 5. The toolbar placement: never clipped at the desk's top (M-IMAGES-2.2) ──
+// Toolbar placement: never clipped at the desk's top
 
-describe('image toolbar placement (M-IMAGES-2.2)', () => {
+describe('image toolbar placement', () => {
   it('renders BELOW the image when the anchor has no room above (the ribbon-clip case); above when it fits', async () => {
     const { editor } = renderTensorInScrollContainer('<p>x</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(120, 80), 'png');
     const pos = imagePosOf(editor);
-    // The image's stack-local top: contentY + placed.y (page 1, after
-    // the first line). mockRects pins the stack + desk rects; scrolling
-    // the image to the desk's top edge = the stack top far above the
-    // desk's top (the desk's overflow-hidden wrapper clips at its top
-    // edge — the ribbon line).
+    // The image's stack-local top: contentY + placed.y. mockRects pins
+    // the stack + desk rects; the desk's overflow-hidden wrapper clips
+    // at its top edge (the ribbon line).
     const { result } = directLayout(editor);
     const placed = result.placed[0]!;
-    // aboveTop (viewport) = stackTop + imgStackY * z — derive the desk
-    // rects FROM it so the test pins the RULE, not guessed geometry:
-    // CASE 1 puts the desk's top 10px BELOW the image's viewport top
-    // (the image touching the desk's top edge — the ribbon line), so
-    // NO room above can ever fit; CASE 2 puts it 300px above (ample).
+    // aboveTop (viewport) = stackTop + imgStackY * z — the desk rects
+    // derive from it, pinning the RULE not guessed geometry: CASE 1
+    // leaves no room above; CASE 2 leaves 300px (ample).
     const imgStackY = GEOMETRY.contentY + placed.rect.y;
 
     // CASE 1 — no room above (the image at the desk's top edge):
@@ -579,9 +555,9 @@ describe('image toolbar placement (M-IMAGES-2.2)', () => {
     const above = latest('[data-floating-toolbar]') as HTMLElement;
     expect(above.style.transform).toContain('-100%');
 
-    // CASE 3 — THE SCROLL LAW: a toolbar computed with room above must
-    // FLIP below when the user scrolls the image into the clip zone —
-    // without any new selection (the projection tracks the viewport).
+    // CASE 3: a toolbar computed with room above must flip below when
+    // the user scrolls the image into the clip zone — without any new
+    // selection (the projection tracks the viewport).
     act(() => { editor.commands.setTextSelection(0); });
     await settleLayout();
     act(() => { editor.commands.setNodeSelection(pos); });
@@ -597,15 +573,13 @@ describe('image toolbar placement (M-IMAGES-2.2)', () => {
   });
 });
 
-// ─── Resize: WYSIWYG against engine-fitted uploads (M-IMAGES-2.2) ───────
+// Resize: WYSIWYG against engine-fitted uploads
 
-describe('resize (M-IMAGES-2.2 — dragged size is the truth)', () => {
+describe('resize (dragged size is the truth)', () => {
   it('resize commits the DRAGGED size (WYSIWYG): a huge upload resizes to exactly the dragged rect', async () => {
-    // A 2000×1000 upload: the engine FITS it down for display
-    // (placed ≈ 624×312) while the intrinsic attrs stay 2000×1000 —
-    // the old ratio-over-intrinsic commit recomputed attrs the engine
-    // re-fitted right back to the SAME placed rect (the reported
-    // "accepted the input and did nothing").
+    // A 2000×1000 upload: the engine FITS it down for display while the
+    // attrs stay 2000×1000 — the old commit recomputed attrs the engine
+    // re-fitted back to the same placed rect ("did nothing" symptom).
     const { editor } = renderTensor('<p>end</p>');
     await settleLayout();
     await insertImageBytes(editor, fixturePng(2000, 1000), 'png');
@@ -650,7 +624,7 @@ describe('resize (M-IMAGES-2.2 — dragged size is the truth)', () => {
   });
 });
 
-describe('conversions: exact shapes (M-IMAGES-2.1)', () => {
+describe('conversions: exact shapes', () => {
   it('the caption is GATHERED even when husk paragraphs separate it (the pre-2.1 mangle legacy)', async () => {
     const { editor } = renderTensor('<p>end</p>');
     await settleLayout();
@@ -677,7 +651,6 @@ describe('conversions: exact shapes (M-IMAGES-2.1)', () => {
     expect(docShape(editor)).toBe('[p[text(end)], image, p[EMPTY], p[text(Cap)], p[EMPTY]]');
     act(() => { editor.commands.setNodeSelection(imgPos); convertBlockToInline(editor); });
     await settleLayout();
-    // The caption GATHERED right beneath the object's paragraph:
     expect(docShape(editor)).toBe('[p[text(end)], p[inlineImage], p[text(Cap)], p[EMPTY], p[EMPTY]]');
   });
 
@@ -710,7 +683,7 @@ describe('conversions: exact shapes (M-IMAGES-2.1)', () => {
     act(() => { editor.commands.setNodeSelection(pos); convertInlineToBlock(editor); });
     await settleLayout();
     // (The trailing p[EMPTY] predates the conversion — insertImage's
-    // split; the law is the SPLIT is clean and NOTHING accumulates.)
+    // split; the split is clean, nothing accumulates.)
     expect(docShape(editor)).toBe('[p[text(hello )], image, p[text(world)], p[EMPTY]]');
     // The NEW node is selected (the toolbar stays in image mode):
     expect(selNodeName(editor)).toBe('image');
@@ -804,9 +777,9 @@ describe('conversions: exact shapes (M-IMAGES-2.1)', () => {
   });
 });
 
-// ─── 5. The placeholder states: pending vs FAILED (M-IMAGES-2.2) ────────
+// Placeholder states: pending vs failed
 
-describe('placeholder states (M-IMAGES-2.2)', () => {
+describe('placeholder states', () => {
   it('PENDING stays the light tint; TERMINAL failure paints the FAILED box (darker + cross-hatch) — never re-kicks', async () => {
     const { editor } = renderTensor('<p>text</p>');
     await settleLayout();
@@ -852,10 +825,9 @@ describe('placeholder states (M-IMAGES-2.2)', () => {
     });
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     // NOTE: the bitmap-cache failure state is CANVAS-side; the <img>
-    // node view flips via its OWN onerror (a second decode path —
-    // jsdom never fires it). The UNRESOLVED branch (media absent)
-    // renders the placeholder box — assert THAT here and the failed
-    // box via a store-less ref: clear the store so the ref misses.
+    // node view flips via its OWN onerror (jsdom never fires it). The
+    // UNRESOLVED branch renders the placeholder box — clear the store
+    // so the ref misses.
     useMediaStore.getState().clear();
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     const placeholder = document.querySelector('[data-testid="image-placeholder"]');
@@ -876,8 +848,7 @@ describe('placeholder states (M-IMAGES-2.2)', () => {
     await settleLayout();
     // The media IS present — no report:
     errSpy.mockClear();
-    // Drop the store entry OUT from under the doc (the external-doc-
-    // without-its-container state):
+    // Drop the store entry out from under the doc (external-doc-without-container state):
     useMediaStore.getState().remove(sha);
     await settleLayout();
     const calls = errSpy.mock.calls.map((c) => String(c[0]));
@@ -886,9 +857,7 @@ describe('placeholder states (M-IMAGES-2.2)', () => {
   });
 });
 
-// ─── 6. The clipboard-scoped round-trip (C — internal fidelity in, external HTML still refused) ──
-
-describe('clipboard round-trip (M-IMAGES-2.2)', () => {
+describe('clipboard round-trip', () => {
   it('a BLOCK image survives the internal HTML round-trip: copy (renderHTML) → paste (parseHTML) keeps the node + attrs', async () => {
     const { editor } = renderTensor('<p>before</p>');
     await settleLayout();
@@ -901,10 +870,9 @@ describe('clipboard round-trip (M-IMAGES-2.2)', () => {
       tr.setNodeAttribute(imagePosOf(editor), 'radius', 12);
       editor.view.dispatch(tr);
     });
-    // THE PROXY: PM's clipboard serializes the slice through the SAME
-    // DOMSerializer (renderHTML → toDOM) and parses pastes through the
-    // SAME DOMParser rules — getHTML → setContent is the exact
-    // round-trip minus the OS clipboard plumbing.
+    // THE PROXY: PM's clipboard uses the same DOMSerializer/DOMParser
+    // rules — getHTML → setContent is the exact round-trip minus the
+    // OS clipboard plumbing.
     const html = editor.getHTML();
     expect(html).toContain('data-tensor-image="true"');
     const second = renderTensor('<p>other</p>');
@@ -942,7 +910,7 @@ describe('clipboard round-trip (M-IMAGES-2.2)', () => {
     expect(second.editor.state.doc.textContent).toContain('hello ');
   });
 
-  it('EXTERNAL <img> HTML still never parses in (the original M-IMAGES-1 law stands)', async () => {
+  it('EXTERNAL <img> HTML still never parses in (the original image law stands)', async () => {
     const { editor } = renderTensor('<p>safe</p>');
     await settleLayout();
     act(() => {

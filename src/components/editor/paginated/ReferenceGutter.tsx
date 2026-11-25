@@ -3,21 +3,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { ReferenceKind } from '@/lib/references/scan';
 
 /**
- * M-REFS / M-GUTTER — the reference-table gutter chrome, mounted
- * INSIDE the page sheet in the LINE NUMBER's slot (the contextual-
- * replacement law: an icon renders exactly where the covered line's
- * number would sit — right-aligned 8px off the content edge,
- * vertically centered on the line box — and the number hides):
- *
- *  - ReferenceTableBadges: one icon per collection table, at its
- *    FIRST line (wherever it starts — mid-page included), naming the
- *    kind at a glance. Clicking the badge selects the block.
- *  - IndexLineMarks: one bookmark per LINE containing an indexEntry
- *    mark (GDocs bookmarks) — the marked terms in the tooltip.
- *
- * Tooltips are the shadcn/base-ui surface (portaled to body — immune
- * to the zoom transform). Pageless has no gutter chrome (the NPC
- * dotted underline is the pageless mark affordance).
+ * Reference-table gutter chrome, mounted INSIDE the sheet in the LINE
+ * NUMBER's slot (the covered number hides; icon right-aligned 8px off
+ * the content edge, centered on the line box): badges per collection
+ * table at its first line (click selects the block), one bookmark per
+ * indexEntry-bearing line. Tooltips portal to body — immune to the zoom
+ * transform. Pageless has no gutter chrome.
  */
 
 export interface ReferenceTableBadge {
@@ -60,9 +51,9 @@ interface GeometryLike {
   contentBox: { x: number; y: number };
 }
 
-/** THE NUMBER SLOT (M-GUTTER): the shared position style — the icon's
- *  right edge 8px off the content edge (the number's right edge), the
- *  box spanning the line's height with the icon centered. */
+/** The NUMBER SLOT position style: the icon's right edge 8px off the
+ *  content edge (the number's right edge), box spanning the line's
+ *  height with the icon centered. */
 const slotStyle = (geometry: GeometryLike, y: number, height: number) => ({
   left: `${geometry.contentBox.x - 28}px`,
   top: `${geometry.contentBox.y + y}px`,
@@ -132,11 +123,9 @@ export function IndexLineMarks({
               <span
                 data-testid="index-line-mark"
                 aria-label={`Index entries on this line: ${mark.terms.join(', ')}`}
-                // Pointer-events AUTO (hover for the tooltip) but the
-                // mousedown FALLS THROUGH to the sheet (no
-                // stopPropagation): the bookmark is an indicator, not a
-                // click target — a click passes through like any
-                // margin click (the gutter contract).
+                // Pointer-events AUTO (tooltip hover), but mousedown
+                // FALLS THROUGH to the sheet (no stopPropagation) —
+                // an indicator, not a click target.
                 className="pointer-events-auto absolute flex items-center justify-end text-muted-foreground/70"
                 style={slotStyle(geometry, mark.y, mark.height)}
               />

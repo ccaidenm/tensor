@@ -5,27 +5,9 @@ import { createWarmableFontBook, type WarmableFontBook } from './pdfFonts';
 import type { PrintPage } from './types';
 
 /**
- * M-PRINT (#39) — THE PDF SYNTHESIS. The print walk's positioned
- * elements → pdf-lib drawing. ONE GEOMETRY SOURCE: the walk's
- * coordinates are the engine's placement facts (the same walk the
- * preview and the OS print path render), converted px → pt at
- * 0.75 (96dpi CSS px → 72pt PDF points). No re-measurement, no
- * re-breaking — #39's "breaks match the paginated view" is by
- * construction, and every drawn run sits at its engine position
- * (kerning drift never shifts anything).
- *
- * TEXT SELECTS/SEARCHES (the AC): text draws as text through
- * EMBEDDED bundled fonts (the woff2→TTF decode in pdfFonts) with
- * the standard-14 as fallback (serif→Times, sans→Helvetica,
- * mono→Courier) — substituted families are reported.
- *
- * EQUATIONS: KaTeX has no PDF path (its output is HTML+CSS). The
- * v1 law: render MathML through an offscreen SVG-foreignObject
- * raster (Chromium's built-in math layout) and EMBED the bitmap at
- * the placed rect; a failed raster falls to the LaTeX source as
- * selectable text (the broken-glyph family's spirit — never a
- * blank). jsdom (no rasterization) takes the fallback — the tests
- * pin it.
+ * #39 — the PDF synthesis: the walk's positioned elements → pdf-lib
+ * drawing, px → pt at 0.75, text selectable via embedded fonts;
+ * equation rasters fall to LaTeX text on failure.
  */
 
 const PT_PER_PX = 72 / 96;
@@ -75,10 +57,9 @@ function parseColor(color: string): { r: number; g: number; b: number; alpha?: n
   return null;
 }
 
-/** THE MATHML RASTER (the default equation path): KaTeX's MathML
- *  output in an SVG foreignObject → Image → canvas → PNG bytes.
- *  Chromium renders MathML with its built-in math layout — no
- *  external font deps (the classic foreignObject limitation). */
+/** The MathML raster (the default equation path): KaTeX's MathML
+ *  output in an SVG foreignObject → Image → canvas → PNG. Chromium
+ *  renders MathML with built-in math layout — no external font deps. */
 async function rasterizeEquationViaMathMl(
   latex: string,
   fontSizePx: number,
@@ -89,8 +70,7 @@ async function rasterizeEquationViaMathMl(
       displayMode: true,
       throwOnError: false,
     });
-    // A generous raster box (the placed rect is the CROP target); the
-    // drawn bitmap scales into the placed rect regardless.
+    // A generous raster box (the placed rect is the crop target).
     const w = 1200;
     const h = 400;
     const svg =
@@ -109,19 +89,14 @@ async function rasterizeEquationViaMathMl(
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(img, 0, 0);
-    // THE CONTENT CROP (the reported tiny-equations bug): the 1200×400
-    // raster box dwarfs the math; embedding the whole box into the
-    // placed rect shrank the content to a corner. Crop to the content's
-    // pixel bounds (non-white), then export the tight bitmap — the PDF
-    // embeds the math at the rect's scale, exactly like every other
-    // element.
+    // The raster box dwarfs the math; embedding it whole would shrink
+    // the content to a corner — crop to the ink bounds (non-white).
     const data = ctx.getImageData(0, 0, w, h).data;
     let minX = w, minY = h, maxX = -1, maxY = -1;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = (y * w + x) * 4;
-        // non-white = ink (any channel below ~250; the anti-alias edge
-        // counts — padding half a pixel each side keeps it crisp).
+        // non-white = ink (any channel below ~250; anti-alias edges count).
         if (data[i]! < 250 || data[i + 1]! < 250 || data[i + 2]! < 250) {
           if (x < minX) minX = x;
           if (x > maxX) maxX = x;
@@ -164,8 +139,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
 
   const book: WarmableFontBook = await createWarmableFontBook(doc);
 
-  // THE WARMUP: every (family × bold/italic) the walk's texts use —
-  // embedding is async; the draw is sync off the book.
+  // Warm every (family × bold/italic) the walk uses — embedding is
+  // async; the draw is sync off the book.
   const seen = new Set<string>();
   for (const page of pages) {
     for (const el of page.elements) {
@@ -179,9 +154,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
     }
   }
 
-  // #WATERMARK — the text overlay's fonts ride the SAME warmup (the
-  // overlay is bold; unwarmed families would resolve to a substitute
-  // or skip).
+  // The text overlay's fonts ride the same warmup (the overlay is
+  // bold; unwarmed families would substitute).
   for (const page of pages) {
     const wm = page.watermark;
     if (wm?.kind === 'text') {
@@ -224,9 +198,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
     const H = printPage.height * PT_PER_PX;
     const page = doc.addPage([W, H]);
 
-    // #48 — the page background: a full-page fill UNDER the content
-    // (drawn first = painted first — the element order law). Unset =
-    // the PDF's own white paper.
+    // #48 — full-page fill under the content (drawn first = painted
+    // first); unset = the PDF's own white paper.
     if (printPage.background) {
       const bg = parseColor(printPage.background);
       if (bg) {
@@ -234,14 +207,10 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
       }
     }
 
-    // #WATERMARK — the overlay, drawn SECOND (over the paper fill,
-    // under every element — the paint-order law). Both spellings
-    // rotate about their (x, y) ANCHOR (pdf-lib: the text baseline
-    // origin / the image's lower-left), so centering solves the
-    // anchor: place it so the rotated center lands at page-center.
-    // The sign flip (degrees(−θ)) is the y-up/y-down convention: CSS
-    // rotate(−45deg) is 45° counterclockwise; PDF degrees() is
-    // counterclockwise-positive in y-up space, so −45 CSS = +45 PDF.
+    // The watermark: drawn over the paper fill, under every element.
+    // pdf-lib rotates about the anchor (baseline origin / image
+    // lower-left), so place it so the rotated center lands at
+    // page-center; degrees(−θ) converts y-down CSS rotation to y-up.
     const wm = printPage.watermark;
     if (wm?.kind === 'text') {
       const font = book.resolve(wm.fontFamily, true, false);
@@ -264,9 +233,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
             opacity: wm.opacity,
           });
         } catch {
-          // WinAnsi-standard fonts reject exotic glyphs — the watermark
-          // skips (never fails the export); the on-screen/print-DOM
-          // renderings keep the full text.
+          // WinAnsi fallback fonts reject exotic glyphs — the watermark
+          // skips (never fails the export).
         }
       }
     } else if (wm?.kind === 'image') {
@@ -303,9 +271,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
               color: rgb(color.r, color.g, color.b),
             });
           } catch {
-            // WinAnsi-standard fonts reject non-Latin glyphs; a
-            // substituted family's exotic text skips (the loud report
-            // names the substitution; full Unicode is embed-scope).
+            // WinAnsi fallback fonts reject non-Latin glyphs — such runs
+            // skip (the report names the substitution).
           }
           // Decorations (the paint's underline/strike ink).
           if (el.decoration) {
@@ -370,19 +337,15 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
           break;
         }
         case 'equation': {
-          // THE RASTER PATH: MathML → PNG at the placed rect; a null
-          // raster falls to the LaTeX source as selectable text.
+          // MathML → PNG at the placed rect; a null raster falls to
+          // the LaTeX source as selectable text.
           const png = el.latex.trim() ? await rasterize(el.latex, el.fontSize) : null;
           if (png) {
             const img = await doc.embedPng(png);
-            // CONTAIN-FIT (the rect was measured off KaTeX's HTML
-            // render; the raster is MathML — the same math at slightly
-            // different natural sizes). Draw at the raster's natural
-            // size (its px are 3× CSS px — hence /3), clamped into the
-            // placed rect, centered: never squashed, never overflowing.
-            // The bitmap's px are the math at 3× CSS px (the raster
-            // box's supersampling) — natural size in pt = (px/3) ×
-            // PT_PER_PX.
+            // Contain-fit: the raster is MathML at 3× CSS px (the rect was
+            // measured off KaTeX's HTML render), so natural size in pt =
+            // (px/3) × PT_PER_PX — clamped into the placed rect,
+            // centered: never squashed, never overflowing.
             const naturalW = (img.width / 3) * PT_PER_PX;
             const naturalH = (img.height / 3) * PT_PER_PX;
             const maxW = el.width * PT_PER_PX;
@@ -397,8 +360,8 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
               height: drawH,
             });
           } else {
-            // THE FALLBACK: the LaTeX source as selectable text (never
-            // a blank; a raster failure is environmental — jsdom).
+            // Fallback: the LaTeX source as selectable text (a raster
+            // failure is environmental — jsdom).
             fallbackEquations += 1;
             await book.warm('monospace', false, false);
             const font = book.resolve('monospace', false, false);
@@ -414,7 +377,7 @@ export async function exportPdf(input: PdfExportInput): Promise<PdfExportResult>
                   maxWidth: el.width * PT_PER_PX,
                 });
               } catch {
-                // the exotic-glyph skip (the text path's law)
+                // the exotic-glyph skip (same as the text path)
               }
             }
           }

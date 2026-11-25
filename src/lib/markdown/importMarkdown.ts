@@ -6,19 +6,10 @@ import { markdownToJSON } from './manager';
 import { dirName, joinPath } from './paths';
 
 /**
- * M-MD — the import flow: read → parse (the manager + specs, with the
- * top-level image promotion) → ingest images → JSON for setContent.
- *
- * Image ingestion rides the ONE pipeline (media/insert.ts): bytes →
- * sha256 (the content-address contract) → MediaStore → media:// ref.
- * Markdown carries no dimensions, so the src arrives size-less and the
- * standard dim backfill (media/backfill.ts, the same pass openDocument
- * runs) fills them in after the content lands in the editor.
- *
- * THE REFUSALS (never silent): a remote http(s) src is refused without
- * any network call (the insert.ts deliberate-action posture); a missing
- * or unreadable file drops the node. Both COUNT, and the open path
- * surfaces the count as one loud dialog after the content lands.
+ * The import flow: read → parse → ingest images → JSON for setContent.
+ * Markdown carries no dimensions — the standard backfill fills them in
+ * after the content lands. Remote/missing/unreadable images are refused
+ * or dropped (never silently — the open path surfaces the count).
  */
 
 export interface MarkdownImport {

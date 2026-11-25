@@ -6,10 +6,9 @@ interface SearchUIState {
   replaceTerm: string;
   caseSensitive: boolean;
   useRegex: boolean;
-  /** bumped whenever something wants to force-refocus whichever search
-   *  input is currently visible (popup or sidebar), even if it was already
-   *  open — e.g. pressing Ctrl+F again while the sidebar already has focus
-   *  elsewhere in the document. */
+  /** bumped to force-refocus whichever search input is visible, even
+   *  if already open — e.g. Ctrl+F again while the sidebar has focus
+   *  elsewhere. */
   focusToken: number;
 
   /** Opens the popup (used by Ctrl+F when no search UI is active yet). */

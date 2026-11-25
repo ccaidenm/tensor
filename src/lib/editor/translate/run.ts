@@ -8,16 +8,9 @@ import type { InstalledPair } from './local/types';
 import { translateHtmlsLocal } from './local/engine';
 
 /**
- * THE RUN — everything between "Translate" clicked and "the preview is
- * ready". Batches whole blocks (the spell layer's CHUNK_CHARS law),
- * reports progress per batch, honors the cancel token BETWEEN batches,
- * and captures the doc reference the apply step's staleness law
- * checks. On-demand only — nothing here runs in the background.
- *
- * TWO TRANSPORTS, ONE SHAPE: online providers go through the Rust wire
- * (invoke); the local provider goes through the WASM engine with the
- * DOWNLOADED models — both produce the same {htmls, detected} per
- * batch, so the row building below never branches on the provider.
+ * THE RUN — batches whole blocks, reports progress per batch, honors the
+ * cancel token between batches, captures the doc for the staleness
+ * check. Online rides the Rust wire, local the WASM engine.
  */
 
 /** One request's budget (whole blocks per batch; LibreTranslate
@@ -89,10 +82,9 @@ async function translateGroup(
 }
 
 /**
- * Run a translation. Throws on any failure (network, gate, wire) —
- * the store surfaces it; rows for batches that already landed are
- * reported through onBatch so a mid-run failure still shows what
- * succeeded.
+ * Run a translation. Throws on any failure (the store surfaces it);
+ * rows for batches that already landed are reported through onBatch
+ * so a mid-run failure still shows what succeeded.
  */
 export async function runTranslation(
   editor: Editor,

@@ -1,16 +1,10 @@
 import type { LineBox, Rect } from '@tensor-editor/engine';
 
 /**
- * M-LINENUMS — the left-margin gutter, pure projection. Derives
- * ONLY from LayoutResult facts (LineBox rects) + the document's
- * setting; computes nothing. It is overlay chrome over the sheet:
- * pointer-events NONE, so margin clicks fall straight through to
- * the sheet's existing nearest-line handling (hitTest.ts — the M5
- * legacy fixtures own that behavior, not this file).
- *
- * Lives INSIDE the zoom transform (a child of the scaled stack, like
- * every painted element): positions are logical pre-zoom px and
- * NOTHING here compensates for scale.
+ * Pure projection from LayoutResult LineBox rects — computes nothing;
+ * inside the zoom transform (pre-zoom px, no scale compensation).
+ * pointer-events: none so margin clicks reach the sheet's nearest-line
+ * handling (hitTest.ts).
  */
 
 interface GutterEntry {
@@ -23,16 +17,11 @@ interface LineNumberGutterProps {
   /** Page content box (logical px) — contentBox.x IS the left margin. */
   contentBox: Rect;
   entries: GutterEntry[];
-  /**
-   * M-GUTTER — CONTEXTUAL REPLACEMENT: the y-offsets (content-
-   * relative, the shared key with the icon layers) of lines whose
-   * number YIELDS its slot to a contextual gutter element (a ref-
-   * table badge, a table-header pin, an index bookmark). The icon
-   * renders IN the number's place; the number is hidden — never both.
-   */
+  /** Content-relative y-offsets (the shared key with the icon layers) of
+   *  lines whose number yields its slot to a contextual gutter element
+   *  (ref badge, pin, bookmark) — icon in place, never both. */
   suppressed?: ReadonlySet<number>;
-  /** The document's baseStyle (resolveNormalBase) — the gutter speaks
-   *  the document's font, at a muted, smaller voice. */
+  /** The document's baseStyle font (resolveNormalBase). */
   fontFamily: string;
   fontSize: number;
 }
@@ -55,7 +44,7 @@ export function LineNumberGutter({ contentBox, entries, suppressed, fontFamily, 
             right: '8px',
             lineHeight: `${line.rect.height}px`,
             fontSize: `${Math.round(fontSize * 0.75)}px`,
-            // M-GUTTER: the number gives way to the contextual icon.
+            // The number gives way to the contextual icon.
             ...(suppressed?.has(line.rect.y) ? { visibility: 'hidden' } : {}),
           }}
         >

@@ -18,23 +18,9 @@ import type { Editor } from '@tiptap/core';
 const HANGING_STEP_PX = 32;
 
 /**
- * Layout > Indent & Spacing. RULING (M6.2): per-paragraph controls
- * commit LIVE — unlike document-wide margins (Apply-gated because the
- * whole-document reflow is a heavyweight, deliberate act), a
- * paragraph indent is what the user is looking at; updateAttributes
- * writes the selected paragraphs on every commit/stepper tick, and
- * the paginated relayout is O(edit).
- *
- * FIRST LINE / HANGING (schema decision, documented): two BUTTONS, not
- * a dropdown — they are toggle presets, not a value entry, and the
- * ribbon already speaks buttons. First Line sets
- * firstLineIndent = +32 (one step out); Hanging sets
- * firstLineIndent = −32 AND backs indentLeft to ≥ 32 when needed (the
- * engine floors the first line's left edge at indentLeft + fli, so a
- * hanging first line requires a gutter to hang INTO — Word's 0.5"/0.5"
- * preset, on the 32px step grid). Clicking the active preset clears
- * firstLineIndent (null) — it never touches indentLeft except to
- * raise it when enabling Hanging.
+ * Layout ▸ Indent & Spacing. Per-paragraph controls commit live (unlike
+ * apply-gated document margins). First Line / Hanging are toggle
+ * presets; a hanging first line needs a left gutter to hang into.
  */
 export function ParagraphSpacingGroup({ editor }: { editor: Editor }) {
   const attrs = useEditorState({

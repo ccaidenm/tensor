@@ -9,19 +9,9 @@ import { analyzeMarkdownLossy, hasLossyContent, markdownLossyLines } from './los
 import { baseName, dirName, joinPath, stripExt } from './paths';
 
 /**
- * M-MD — the export flow. Ruling 2: the lossy confirm gates the save
- * dialog — a document carrying unrepresentable content gets the
- * warning FIRST (the in-app shadcn dialog — the developer-mode
- * warning's spelling), and cancelling never opens the dialog at all.
- * The warning REPLACES any post-export summary (the user already
- * agreed to exactly the losses listed).
- *
- * Image refs go out as `media://<sha256>` placeholders from the
- * serializer; inlineMediaAssets rewrites them to
- * `./<name>.assets/<sha>.<ext>` and writes the referenced bytes
- * (content-addressed, deduped, only ids the markdown actually cites).
- * A placeholder whose MediaStore entry is missing (a stale reference
- * the document no longer has bytes for) stays verbatim and is counted.
+ * The export flow: the lossy confirm gates the save dialog (cancel =
+ * no dialog). Image refs are rewritten to `./<name>.assets/<sha>.<ext>`
+ * and the cited bytes written; missing entries stay verbatim, counted.
  */
 
 export type ExportMarkdownOutcome = 'exported' | 'cancelled' | null;
@@ -39,14 +29,13 @@ export async function exportMarkdownFile(
   json: JSONContent,
   options: {
     defaultPath: string;
-    /** #WATERMARK — the doc-level watermark flag (a store fact; the
-     *  docJSON the classifier walks cannot see it). */
+    /** The doc-level watermark flag (a store fact; the docJSON the
+     *  classifier walks cannot see it). */
     hasWatermark?: boolean;
   },
 ): Promise<ExportMarkdownOutcome> {
-  // THE GATE (ruling 2): classify BEFORE the dialog; the in-app shadcn
-  // confirm parks the report and the dialog's buttons settle the
-  // promise. Cancel = no save dialog, no file, no partial state.
+  // Classify BEFORE the dialog; cancel = no save dialog, no file,
+  // no partial state.
   const report = analyzeMarkdownLossy(json, options.hasWatermark === true);
   if (hasLossyContent(report)) {
     const proceed = await useExportConfirmDialogStore.getState().requestConfirm({

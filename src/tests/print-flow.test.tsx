@@ -8,11 +8,10 @@ import { buildPrintDocument } from '@/lib/print/buildDocument';
 import { useDocumentStore } from '@/lib/document/store';
 
 /**
- * M-PRINT (#43, Mark 2) — the print path: the @page CSS derives from
- * the document's pageSetup (margin 0 — the walk is page-frame-
- * absolute), the container mounts the PREVIEW'S OWN walk (one build),
- * window.print() fires with the DOM settled, and the OS dialog's
- * options stay the OS's (delegated per #43).
+ * #43 — the print path: @page CSS derives from the document's
+ * pageSetup (margin 0 — the walk is page-frame-absolute), the
+ * container mounts the preview's own walk, window.print() fires with
+ * the DOM settled, and the OS dialog's options stay the OS's.
  */
 
 describe('printPageSizeOf — the @page size string', () => {
@@ -58,7 +57,7 @@ describe('the print flow (arm → print → disarm)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('printFromPreview arms the container with the preview\'s walk and fires window.print()', async () => {
+  it('printFromPreview arms the container with the preview\'s walk and fires window.print', async () => {
     const { editor } = renderTensor('<p>printable</p>');
     await settleLayout();
     const build = buildPrintDocument(editor);

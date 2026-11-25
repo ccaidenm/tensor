@@ -44,11 +44,9 @@ import { renderTensor, settleLayout } from './harness';
 import { FakeMetrics } from './fakeMetrics';
 
 /**
- * #WATERMARK — the feature suite: the resolver (one derivation), the
- * model's round-trip + the save-GC fix, and the on-screen layer
- * (behind everything by mount order, every page, per-section chain,
- * the ink-only display toggle). The panel (M2) and the exports (M3)
- * grow their describes here too.
+ * The watermark suite: the resolver (one derivation), the model's
+ * round-trip + save-GC, and the on-screen layer (behind everything by
+ * mount order, every page, per-section chain, ink-only display toggle).
  */
 
 const MEASURE = FakeMetrics.measure;
@@ -239,7 +237,7 @@ describe('#WATERMARK: the on-screen layer', () => {
     act(() => {
       const node = editor.state.doc.nodeAt(bandPos)!;
       // The break's setup must be a FULL PageSetup (the adapter's
-      // section-geometry reads margins off it — the setBreakSetup law).
+      // section-geometry reads margins off it).
       editor.view.dispatch(
         editor.state.tr.setNodeMarkup(bandPos, undefined, {
           ...node.attrs,
@@ -272,8 +270,8 @@ describe('#WATERMARK: the on-screen layer', () => {
       useConfigStore.getState().setShowWatermark(false);
     });
     expect(layers()).toHaveLength(0);
-    // The DOCUMENT's watermark survives the hide (the captions NPC
-    // law) — it comes right back with the toggle.
+    // The DOCUMENT's watermark survives the hide (display-only, like
+    // the captions NPC) — it comes right back with the toggle.
     expect(useDocumentStore.getState().pageSetup.watermark).toEqual({ kind: 'text', text: 'DRAFT' });
     act(() => {
       useConfigStore.getState().setShowWatermark(true);
@@ -282,7 +280,7 @@ describe('#WATERMARK: the on-screen layer', () => {
   });
 });
 
-// ─── The panel (M2) ──────────────────────────────────────────────────────
+// The panel
 
 vi.mock('@/lib/media/insert', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/media/insert')>();
@@ -507,7 +505,7 @@ function bodyWM(children: string): string {
 }
 const STYLES_XML_WM = `${W_DECL_WM}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>`;
 
-// ─── The exports (M3): print, PDF, DOCX ─────────────────────────────────
+// The exports: print, PDF, DOCX
 
 describe('#WATERMARK: print + PDF', () => {
   it('buildPrintDocument resolves the same chain the view paints; the print sheet renders the overlay BEFORE content', async () => {
@@ -583,8 +581,8 @@ describe('#WATERMARK: print + PDF', () => {
     expect(opts.x).toBeLessThanOrEqual(LETTER_WM.width * 0.75);
     expect(opts.y).toBeGreaterThanOrEqual(0);
     expect(opts.y).toBeLessThanOrEqual(LETTER_WM.height * 0.75);
-    // The anchor math consulted the real font metrics (the ONE-ruler
-    // law reaches the export).
+    // The anchor math consulted the real font metrics (the one metrics
+    // source, export included).
     expect(fontSpy).toHaveBeenCalled();
     void result;
   });

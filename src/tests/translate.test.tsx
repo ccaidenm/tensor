@@ -37,10 +37,10 @@ function docBare(editor: Editor): string {
 }
 
 /**
- * THE TRANSLATE PIPELINE: the scope walk (the explicit contract),
- * the consent gate, the batched run, and the four commit paths
- * (replace / interleave / append / staleness refusal). `invoke` is
- * mocked; no Rust, no instance.
+ * The translate pipeline: the scope walk (the explicit contract), the
+ * consent gate, the batched run, and the four commit paths (replace /
+ * interleave / append / staleness refusal). `invoke` is mocked; no
+ * Rust, no instance.
  */
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -99,7 +99,7 @@ beforeEach(() => {
   useConfigStore.setState({ config: DEFAULT_CONFIG });
 });
 
-// ─── The walk ───────────────────────────────────────────────────────────
+// The walk
 
 describe('the scope walk', () => {
   it('collects every translatable top-level block and skips the contract\'s exclusions', () => {
@@ -141,7 +141,7 @@ describe('the scope walk', () => {
   });
 });
 
-// ─── The gate ───────────────────────────────────────────────────────────
+// The gate
 
 describe('the consent gate', () => {
   it('no call reaches the network while unconfigured — not even the run entry', async () => {
@@ -225,7 +225,7 @@ describe('the consent gate', () => {
   });
 });
 
-// ─── The run ────────────────────────────────────────────────────────────
+// The run
 
 describe('the run', () => {
   it('batches whole blocks and reports progress per batch', async () => {
@@ -272,7 +272,7 @@ describe('the run', () => {
   });
 });
 
-// ─── The apply ──────────────────────────────────────────────────────────
+// The apply
 
 describe('the apply', () => {
   it('replace: one transaction, headings stay headings, marks survive', async () => {
@@ -282,7 +282,7 @@ describe('the apply', () => {
     const result = await runTranslation(editor, { scope: 'document', targetLang: 'en' }, token(), () => {});
     expect(applyTranslation(editor, result.capturedDoc, 'replace', result.rows)).toBe('applied');
     expect(docBare(editor)).toBe('<h1>Bonjour one</h1><p>Bonjour <strong>two</strong></p>');
-    // One undo step for the whole apply (the replaceAll law).
+    // One undo step for the whole apply.
     editor.commands.undo();
     expect(docBare(editor)).toBe('<h1>Hello one</h1><p>Hello <strong>two</strong></p>');
   });
@@ -340,7 +340,7 @@ describe('the apply', () => {
   });
 });
 
-// ─── The store (the UI contract seam) ───────────────────────────────────
+// The store (the UI contract seam)
 
 describe('the translate store', () => {
   it('runs through phases and applies via the panel\'s action path', async () => {
@@ -362,7 +362,7 @@ describe('the translate store', () => {
   });
 });
 
-// ─── The wiring (the panel command) ─────────────────────────────────────
+// The wiring (the panel command)
 
 describe('the wiring', () => {
   it('translateSidebar opens the docked panel (the registry\'s one body)', () => {

@@ -3,13 +3,9 @@ import type { SpellServerStatus } from './types';
 import { persistDictionary, loadDictionaryFor } from './dictionary';
 
 /**
- * Spell-check UI state: everything EXCEPT the flagged spans themselves
- * (those live in PM plugin state — the model/UI split the search
- * feature also keeps: SearchExtension holds matches, this-shaped store
- * holds chrome state). One store for both view modes.
- *
- * `localInstalled` is `null` until first probed (the settings surface
- * and the setup dialog trigger the probe via Rust commands).
+ * Spell-check UI state — everything EXCEPT the flagged spans (those
+ * live in PM plugin state, the model/UI split). One store for both
+ * view modes; `localInstalled` is null until first probed.
  */
 interface SpellUIState {
   /** LOCAL sidecar lifecycle (the Rust layer's view of the process). */
@@ -121,9 +117,4 @@ export const useSpellStore = create<SpellUIState>((set, get) => ({
  *  sizes are human-scale; building per check run is free). */
 export function dictionarySet(): Set<string> {
   return new Set(useSpellStore.getState().dictionaryWords.map((w) => w.toLowerCase()));
-}
-
-/** Test/live helper: force-reload the active dictionary from disk. */
-export async function reloadDictionary(lang: string): Promise<void> {
-  await useSpellStore.getState().ensureDictionaryLoaded(lang);
 }

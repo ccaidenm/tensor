@@ -34,11 +34,8 @@ export function ProofingGroup() {
         shortcutId="toggleSpellCheck"
       />
       <IconButton label="Dictionary" icon={<BookA size={16} />} onClick={openDictionary} />
-      {/* TRANSLATE — born a disabled stub with the ProofingGroup; now
-          wired to the ONE command body (the palette + this button can
-          never drift — the registry's law): opens the docked Translate
-          panel, whose runs are on-demand and consented (the setup
-          dialog gates the first use). */}
+      {/* Opens the docked Translate panel — runs are on-demand and
+          consented (the setup dialog gates the first use). */}
       <IconButton label="Translate" icon={<Languages size={16} />} onClick={() => { void getCommand('translateSidebar')?.run(); }} />
       <IconButton
         label="Document Properties"

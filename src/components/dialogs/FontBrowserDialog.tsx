@@ -42,17 +42,9 @@ import {
 import { getCatalogSources, searchCatalogs, type MergedCatalogFont } from '@/lib/fonts/catalogs';
 import { loadPreviewFace, releasePreviewFace } from '@/lib/fonts/catalogs/preview';
 
-/**
- * M-FONTS-A + B — the Font Browser. Two panes, Style-dialog styling,
- * preview-never-lies. A: installed list (search + source filter +
- * icon-only upload), detail (real-font preview, Use this font,
- * Uninstall uploaded/catalog). B, gated by privacy.allowFontCatalogs:
- * OFF → a banner with a Privacy deep-link and NO network module
- * constructed; ON → the search bar goes live (debounced), results are
- * deduped across Google Fonts / Font Share / Fontsource with source
- * chips, and the detail pane previews the REAL font via a lazy
- * single-slot temp face before an all-or-nothing install.
- */
+// The Font Browser. Online search is gated by privacy.allowFontCatalogs:
+// OFF constructs no network module (banner + Privacy deep-link); ON
+// previews the real font via a lazy temp face before an all-or-nothing install.
 
 const PREVIEW_TEXT = 'The quick brown fox jumps over the lazy dog — 0123456789';
 
@@ -65,8 +57,7 @@ interface InstallState {
   status: 'idle' | 'installing' | 'error';
 }
 
-/** Source badges — an icon per origin, shadcn-tooltipped as
- *  "Source (Name)". Fontsource coverage note rides its tooltip. */
+/** Source badges — an icon per origin, tooltipped with the source name. */
 function SourceBadge({ source, catalog }: { source: FontEntry['source']; catalog?: CatalogId }) {
   const base = 'inline-flex size-4 shrink-0 items-center justify-center rounded';
   if (source === 'catalog') {
@@ -151,14 +142,11 @@ function SourceBadge({ source, catalog }: { source: FontEntry['source']; catalog
   }
 }
 
-/** A catalog source's mark: the service's OWN favicon (fetched once
- *  at boot — brandMarks.ts) when available, the lucide fallback
- *  otherwise, the inlined official G for Google. Used by BOTH the
- *  installed-sidebar badges and the result chips so the mark is one
- *  spelling everywhere. */
+/** A catalog source's mark: the service's own favicon (fetched at boot,
+ *  brandMarks.ts) or a lucide/letter fallback. Shared by sidebar badges
+ *  and result chips so the mark is spelled one way everywhere. */
 function CatalogMark({ id }: { id: CatalogId }) {
-  // The reactive hook: a favicon that lands after first paint swaps
-  // the fallback out instantly (no stale plain-G).
+  // Reactive: a favicon landing after first paint swaps the fallback out instantly.
   const url = useBrandMark(id);
   if (url) {
     return <img src={url} alt="" data-testid="brand-mark" className="size-2.5 object-contain" />;
@@ -209,9 +197,8 @@ function CatalogChip({ id, muted, onClick }: { id: CatalogId; muted?: boolean; o
   );
 }
 
-/** The subtitle badges: how many styles the family offers (variable
- *  fonts carry the axis, spelled on the badge — never appended to the
- *  family name) + script direction. */
+/** The subtitle badges: style count (or "Variable" on the badge — never
+ *  appended to the family name) + script direction. */
 function StyleBadges({ entry }: { entry: FontEntry }) {
   const styleCount = entry.variable
     ? null
@@ -258,8 +245,7 @@ export function FontBrowserDialog() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // ── B: online search state (constructed ONLY when the toggle is
-  // on — the gate is getCatalogSources; OFF constructs nothing).
+  // Online search state — constructed only via getCatalogSources; OFF constructs nothing.
   const [results, setResults] = useState<MergedCatalogFont[]>([]);
   const [unavailable, setUnavailable] = useState<CatalogId[]>([]);
   const [searching, setSearching] = useState(false);
@@ -284,8 +270,6 @@ export function FontBrowserDialog() {
   const installedSelected = entries.find((e) => e.id === selectedId) ?? visible[0] ?? null;
   const catalogSelected = results.find((r) => r.key === selectedCatalogKey) ?? null;
 
-  // Construct/destroy the source adapters with the toggle; release
-  // preview state when the dialog closes or the selection moves.
   useEffect(() => {
     if (!isOpen) {
       sourcesRef.current = [];
@@ -297,14 +281,12 @@ export function FontBrowserDialog() {
       return;
     }
     sourcesRef.current = allowFontCatalogs ? getCatalogSources() : [];
-    // Opening the browser is an explicit user action — retry any
-    // still-missing brand marks (a failed boot fetch must not pin
-    // fallback icons for the session).
+    // Retrying here: a failed boot fetch must not pin fallback icons
+    // for the session.
     if (allowFontCatalogs) void ensureBrandMarks();
   }, [isOpen, allowFontCatalogs]);
 
-  // Debounced online search (~300ms) — an explicit user action per
-  // request: typing. No search fires while the toggle is OFF.
+  // Debounced search (~300ms), fired only by typing — never while the toggle is OFF.
   useEffect(() => {
     if (!isOpen || !allowFontCatalogs) return;
     const q = query.trim();
@@ -380,9 +362,8 @@ export function FontBrowserDialog() {
     setPreviewFamily(null);
   }
 
-  /** All-or-nothing install: download every face, then the registry's
-   *  addCatalogFont writes + registers (A's verbatim path). Failures
-   *  surface a retryable error state — no partial anything. */
+  /** All-or-nothing install: download every face, then addCatalogFont
+   *  writes + registers. Failures surface a retryable error — no partials. */
   async function installCatalogFont(font: MergedCatalogFont) {
     const id = chosenSource ?? font.sources[0];
     if (!id) return;
@@ -412,9 +393,8 @@ export function FontBrowserDialog() {
     }
   }
 
-  /** "Use font": apply to the selection via the picker's own path,
-   *  note it as recently used, and CLOSE — the next act is selecting
-   *  text in the editor, not browsing more fonts. */
+  /** Apply to the selection, note as recently used, and close — the
+   *  next act is selecting text in the editor, not browsing more fonts. */
   function useThisFont(entry: FontEntry) {
     const editor = useDocumentStore.getState().editor;
     editor?.chain().focus().setFontFamily(entry.family).run();
@@ -450,8 +430,7 @@ export function FontBrowserDialog() {
                   onChange={(e) => {
                     setQuery(e.target.value);
                     // The preview follows the search — a stale catalog
-                    // selection (and its temp face) never outlives
-                    // the query it belonged to.
+                    // selection never outlives its query.
                     deselectCatalogFont();
                   }}
                 />
@@ -475,11 +454,8 @@ export function FontBrowserDialog() {
               </Tooltip>
             </div>
 
-            {/* OFF: the banner + Privacy deep-link. ON: nothing — the
-                search box above already carries the affordance. */}
-            {/* OFF: a slim assurance line — the actionable guidance
-                (icon + link) lives in the Online tab's Empty, and the
-                Online tab itself stays visible so previously installed
+            {/* OFF: a slim assurance line — the actionable link lives in
+                the Online tab's Empty; the tab stays visible so installed
                 catalog fonts still list. */}
             {!allowFontCatalogs && (
               <div

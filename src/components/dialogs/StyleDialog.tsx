@@ -46,24 +46,9 @@ import { captureStyleFromSelection } from '@/lib/styles/selection';
 import { PT_PER_PX, fontPxToDisplayPt, fontPtToPx } from '@/lib/editor/fontSize';
 import { isBuiltinId, type StyleKind, type StyleProperties, type TextTransform } from '@/lib/styles/types';
 
-/**
- * The style editor (M-STYLES STEP 4 + addendum 2), UI-polished:
- *
- * LAYOUT, top to bottom — name/font/font-size, then the EDITABLE
- * centered live preview (no label), then the icon-button tiers
- * (B/I/U/S | alignment | case | colors), then the remaining measure
- * inputs, each wearing its lucide icon in the label. The preview is
- * wired to the SAME resolveRun both render modes use — no parallel
- * preview logic — and its SAMPLE TEXT is editable (type your own).
- *
- * Validation is INK ON THE CONTROL: a missing name rings the name box
- * (aria-invalid), never a floating red line.
- *
- * Measurements speak POINTS at the chrome and commit px (M6-PRE).
- * CREATE mode captures the selection's EFFECTIVE formatting (reverse
- * resolution). SAVING over an existing style is a DEFINITION EDIT
- * through the registry-epoch path — never a stamp.
- */
+// The style editor. The preview runs the same resolveRun both render modes
+// use; measurements display pt and commit px. Create captures the selection’s
+// effective formatting; saving is a definition edit, not a stamp.
 
 export interface StyleDialogState {
   open: boolean;
@@ -128,7 +113,7 @@ function SmallIcon({ children }: { children: React.ReactNode }) {
   return <span className="text-muted-foreground [&>svg]:size-3.5">{children}</span>;
 }
 
-/** Measurement input: displays pt, commits px (chrome law, M6-PRE). */
+/** Measurement input: displays pt, commits px. */
 function PtField({
   px,
   onChange,
@@ -179,9 +164,7 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
   const [properties, setProperties] = useState<StyleProperties>({});
 
   // Reset the draft when the dialog (re)opens: edit mode seeds from the
-  // definition; create mode CAPTURES the selection's effective
-  // formatting (reverse resolution — receipt test: a directly-bolded
-  // Normal span captures bold: true).
+  // definition; create mode captures the selection's effective formatting.
   useEffect(() => {
     if (!state.open) return;
     setNameInvalid(false);
@@ -199,8 +182,8 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
       }
       setName(state.kind === 'character' ? 'New Text Style' : 'New Paragraph Style');
     }
-    // The capture intentionally runs once per open — re-capturing on
-    // every keystroke in the dialog would fight the user's edits.
+    // The capture runs once per open — re-capturing per keystroke would
+    // fight the user's edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.open, state.editingId, state.kind]);
 
@@ -213,8 +196,7 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
       return next;
     });
 
-  // LIVE PREVIEW — the same resolveRun the editor's render paths use,
-  // fed the DRAFT definition: exactly what applying it would render.
+  // Live preview — the same resolveRun the render paths use, fed the draft.
   const previewStyle = useMemo(() => {
     const base = baselineRunStyle({ fontFamily: defaultFontFamily, fontSize: defaultFontSize });
     const resolved = resolveRun({
@@ -247,8 +229,7 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
     setNameInvalid(false);
     try {
       if (editing) {
-        // DEFINITION EDIT — the registry-epoch path: every user of the
-        // style restyles in both modes; nothing is stamped.
+        // Definition edit: every user of the style restyles in both modes.
         updateDefinition(editing.id, { name: name.trim(), properties });
       } else {
         createDefinition({ name: name.trim(), kind, properties });
@@ -325,10 +306,9 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
           </Field>
         </div>
 
-        {/* The EDITABLE live preview — centered, label-less, same
-            resolveRun both render modes use. Type your own sample:
-            UNCONTROLLED on purpose (constant children mean React never
-            diffs the typed text back — the caret survives keystrokes). */}
+        {/* The editable live preview — uncontrolled on purpose: constant
+            children mean React never diffs the typed text back, so the
+            caret survives keystrokes. */}
         <div className="rounded-lg border bg-muted/30 p-3">
           <div
             contentEditable
@@ -479,14 +459,9 @@ export function StyleDialog({ state, onClose }: { state: StyleDialogState; onClo
           )}
         </div>
 
-        {/* M-FLOW — pagination flags at the STYLE tier (Word's style
-         * pPr: w:keepNext / w:keepLines / w:pageBreakBefore, plus the
-         * Tensor superset). Paragraph kind only. The checkbox is
-         * opt-in: CHECKED writes the affirmative spelling, UNCHECKED
-         * leaves the property ABSENT (the style says nothing — inherit
-         * the engine defaults: keeps off, widowControl on). Explicit
-         * style-level OFF is not expressible in the v1 dialog (rare;
-         * the direct-attr popover owns the off spelling). */}
+        {/* Pagination flags, paragraph kind only. Opt-in: checked writes the
+            flag, unchecked leaves it absent (engine defaults apply) —
+            explicit style-level OFF belongs to the direct-attr popover. */}
         {kind === 'paragraph' && (
           <>
             <div className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

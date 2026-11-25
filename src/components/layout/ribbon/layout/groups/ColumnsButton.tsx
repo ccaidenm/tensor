@@ -10,16 +10,9 @@ import { applyPageSetup } from '@/lib/editor/sections';
 import type { ColumnSetup } from '@/lib/document/pageSetup';
 
 /**
- * #74 COLUMNS — the Layout tab's Columns entrance: the QUICK PRESET
- * popover (Word's preset row — One/Two/Three/Left/Right) over the
- * "More columns…" dialog opening. The presets are DOCUMENT-WIDE (the
- * PageSetupGroup quick-controls law: the Layout tab's row reads as
- * "this document flows like this"; predictability beats cleverness —
- * the dialog is the scoped surface). One preset = ONE
- * applyPageSetup('document') commit = one undo step.
- *
- * PAGELESS MODE disables (never hides — the geometry controls'
- * treatment): columns are paginated facts with no pageless meaning.
+ * #74 — the Layout tab's Columns entrance: quick presets over the
+ * "More columns…" dialog. Presets are document-wide (the dialog is the
+ * scoped surface); one preset = one commit = one undo step.
  */
 
 /** The preset's setup spelling (widths in pt — the engine consumes
@@ -54,16 +47,13 @@ export function ColumnsButton() {
 
   function applyPreset(columns: ColumnSetup | null) {
     // Document-wide: the spec merges into every section + the store in
-    // ONE commit (the quick-controls law; null clears — one column).
+    // one commit; null clears (one column).
     applyPageSetup('document', { ...pageSetup, columns }, { columns });
     setOpen(false);
   }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      {/* The Line Spacing button's shape (the Home tab's dropdown
-          trigger): icon + chevron in one ghost button, the tooltip
-          riding the same element. */}
       <Tooltip>
         <TooltipTrigger
           render={

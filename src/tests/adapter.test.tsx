@@ -85,8 +85,8 @@ describe('incremental adapter (reference reuse)', () => {
   });
 
   it('font family on the textStyle mark is extracted (tiptap v3 global attribute)', async () => {
-    // Receipt: the family used to be read from a standalone
-    // 'fontFamily' mark that tiptap v3 never creates.
+    // Receipt: the family is read from the textStyle mark (a standalone
+    // 'fontFamily' mark is one tiptap v3 never creates).
     const { editor } = renderTensorInScrollContainer('<p>styled words</p>');
     await settleLayout();
     act(() => {

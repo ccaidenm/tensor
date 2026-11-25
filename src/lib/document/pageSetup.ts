@@ -20,14 +20,10 @@ export interface PageSetup {
   margins: Margins;
   pageGap: number;
   /**
-   * PAGELESS (the view-mode law): the DOCUMENT's preferred rendering
-   * mode — 'pages' (the paginated engine view) or 'pageless' (the
-   * continuous strip). Absent = the app default
-   * (config.editor.defaultPageLayout) governs, so the config field is
-   * the NEW-DOCUMENT default while each document owns its own choice
-   * once set (the toggle writes HERE, marking the doc dirty). Rides
-   * .wpdoc metadata with the rest of pageSetup (wholesale by
-   * construction). resolveViewMode() is the ONE resolver.
+   * The document's preferred rendering mode ('pages' or 'pageless').
+   * Absent = the app default (config.editor.defaultPageLayout) governs;
+   * once set the doc owns its choice (the toggle writes here, marking
+   * it dirty). resolveViewMode() is the one resolver.
    */
   viewMode?: 'pages' | 'pageless';
   /** 'landscape' swaps the page size's width/height for layout. */
@@ -38,47 +34,32 @@ export interface PageSetup {
   customWidth?: number;
   customHeight?: number;
   /**
-   * M-FLOW — the DOCUMENT-LEVEL widow/orphan default (Word's
-   * Compatibility/layout option): true/absent = protection ON (the
-   * engine's LayoutOptions default); false = natural splits
-   * everywhere a paragraph doesn't override via its own flow.
+   * The document-level widow/orphan default (Word's Compatibility
+   * option): true/absent = protection on; false = natural splits
+   * where a paragraph doesn't override via its own flow.
    */
   widowControl?: boolean;
   /**
-   * #WATERMARK — the decorative page overlay ("DRAFT",
-   * "CONFIDENTIAL", an image), painted BEHIND all content on every
-   * page. PAINT-ONLY ink (the pageColor law): it never enters
-   * toLayoutOptions — the engine never knows. Deliberately INSIDE
-   * PageSetup (unlike #48's positional pageStyles): per-SECTION
-   * watermarks ride the sectionBreak setup-riding mechanism verbatim
-   * (the pageColor precedent) — the per-page chain is section
-   * override → doc default, resolved paint-side. null = none (the
-   * PM JSON round-trip convention).
+   * The decorative page overlay ("DRAFT", "CONFIDENTIAL", an image),
+   * painted behind content on every page. Paint-only ink — never
+   * enters toLayoutOptions. Per-section watermarks ride the
+   * sectionBreak mechanism. null = none.
    */
   watermark?: WatermarkSettings | null;
   /**
-   * #74 COLUMNS — the document-level column spec (newsletter-style
-   * multi-column flow). RIDES toLayoutOptions (the engine consumes the
-   * spec verbatim — layout, not paint). Per-SECTION columns ride the
-   * sectionBreak setup-riding mechanism verbatim (the pageColor/
-   * watermark precedent). null = explicitly none (the PM JSON
-   * round-trip convention) — mapped to undefined (the engine's
-   * absent ≡ one column additive law) at the boundary; absent behaves
-   * identically. The engine validates loudly (integer count ≥ 1, a
-   * non-negative gap, widths[] of the right length).
+   * #74 — the document-level column spec; rides toLayoutOptions
+   * (layout, not paint). Per-section columns ride the sectionBreak
+   * mechanism. null ≡ absent ≡ one column (mapped to undefined at the
+   * boundary); the engine validates loudly.
    */
   columns?: ColumnSetup | null;
 }
 
 /**
- * #74 COLUMNS — the SETUP spelling of the column spec. The store law
- * governs: persisted measurements are POINTS, so `gap` is pt here and
- * toLayoutOptions converts to the engine's px. `widths` carries the
- * ABSOLUTE per-column widths in pt (the UI's spelling — Word's dialog
- * shows each column's width); the engine consumes them as RELATIVE
- * weights (any positive numbers normalize to the post-gap space), so
- * the scale cancels and pt is safe to pass verbatim. `balanced`
- * defaults true (Word's balance law).
+ * #74 — the setup spelling of the column spec. Persisted measurements
+ * are points (toLayoutOptions converts the gap to px). `widths` are
+ * absolute per-column pt widths, consumed by the engine as relative
+ * weights, so pt passes verbatim.
  */
 export interface ColumnSetup {
   /** Column count, integer ≥ 1; 1 ≡ one column (clears). */
@@ -92,23 +73,18 @@ export interface ColumnSetup {
 }
 
 /**
- * #WATERMARK — the watermark's two spellings. Every field carries an
- * ABSENT = DEFAULT reading (defaults live at the edges; the paint
- * sites resolve via resolveWatermark — one derivation, all
- * consumers): text defaults to Word's own look (silver, −45°
- * diagonal, 50% opacity); image defaults to horizontal (Word's
- * picture-watermark posture) at half the page width.
+ * The watermark's two spellings. Every field is absent = default;
+ * resolveWatermark is the one derivation all consumers use. Text
+ * defaults to Word's own look; image defaults to horizontal at half
+ * the page width.
  */
 export interface WatermarkSettings {
   kind: 'text' | 'image';
   // ── the text spelling ──
   /** The words ("DRAFT"). kind === 'text'; blank = nothing paints. */
   text?: string;
-  /**
-   * px. ABSENT = AUTO: the text spans ~70% of the page diagonal
-   * (Word's auto-scale look), measured through the ONE-ruler metrics
-   * at render time — never a second ruler.
-   */
+  /** px. Absent = auto: spans ~70% of the page diagonal, measured
+   *  through the one-ruler metrics at render time. */
   fontSize?: number;
   /** hex; default silver #c0c0c0 (Word's default watermark gray). */
   color?: string;
@@ -118,15 +94,13 @@ export interface WatermarkSettings {
   /** 0..1; default 0.5 (Word's "semTransparent"). */
   opacity?: number;
   // ── the image spelling ──
-  /** 'media://<sha>' — the existing image infrastructure (the node
-   *  path's content-address contract; registerImageBytes is the
-   *  no-insert variant). */
+  /** 'media://<sha>' — content-addressed like image nodes;
+   *  registerImageBytes is the no-insert variant. */
   src?: string;
   /**
-   * Natural px — REQUIRED DOCUMENT DATA for kind === 'image' (the
-   * image law: dims are data, never fetched at render time). An
-   * image watermark without valid dims paints nothing (the resolver
-   * declines, never guesses).
+   * Natural px — required for kind === 'image' (dims are data, never
+   * fetched at render time); without them the resolver paints nothing
+   * rather than guessing.
    */
   width?: number;
   height?: number;
@@ -135,19 +109,10 @@ export interface WatermarkSettings {
 }
 
 /**
- * #48 — PAGE STYLES: the per-page presentation layer. A page's
- * geometry can never be its own (the engine's one-geometry-per-page
- * law — a page IS its section's), but its DECOR can be: background
- * colors ride the POSITIONAL map below.
- *
- * THE POSITIONAL RULING (spec of record, the session's locked
- * decision): styles key PAGE NUMBERS, not content — "make page 1 a
- * dark cover" is literal, the paint chain resolves
- * per-page → per-section → document → white, and a style for a page
- * index that no longer exists (content deleted) is simply INERT (the
- * chain falls through to the section/doc layers; the map entry rides
- * until the user clears it). Page numbers are 0-based in the model;
- * the dialog speaks 1-based to the user.
+ * #48 — a page's geometry can never be its own (a page IS its
+ * section's), but its decor can: styles key page numbers, not content.
+ * The paint chain resolves per-page → per-section → document → white;
+ * a style for a page index that no longer exists is simply inert.
  */
 export interface PageStyle {
   /** Full-page background color; unset = inherit the chain. */
@@ -158,10 +123,9 @@ export interface PageStyle {
 export type PageStyles = Record<number, PageStyle>;
 
 /**
- * The file-side spelling: JSON object keys are strings, so the .wpdoc
- * metadata carries `Record<string, PageStyle>` and this converts to the
- * model's numeric keys (garbage keys drop loudly-quietly — a corrupted
- * index never crashes a file open).
+ * The file-side spelling: JSON object keys are strings, so .wpdoc
+ * carries `Record<string, PageStyle>`; this converts to numeric keys
+ * (garbage keys drop — a corrupted index never crashes an open).
  */
 export function normalizePageStyles(
   raw: Record<string, unknown> | null | undefined
@@ -217,21 +181,16 @@ export function formatPt(pt: number, unit: MeasurementUnit): string {
   return String(Math.round((pt / meta.ptPer) * 100) / 100);
 }
 
-/**
- * One pt value + unit → its human display ("1\"", "2.54 cm", "72 pt").
- * Inches use the double-prime mark (Word's own display); every other
- * unit spells its suffix.
- */
+/** One pt value + unit → its human display ("1\"", "2.54 cm", "72 pt");
+ *  inches use the double-prime mark, others spell their suffix. */
 export function formatPtWithUnit(pt: number, unit: MeasurementUnit): string {
   const value = formatPt(pt, unit);
   return unit === 'inches' ? `${value}"` : `${value} ${MEASUREMENT_UNITS[unit].suffix}`;
 }
 
-/** #58 — the PRESET margins → ONE human line: uniform margins read as
- *  one number ("1\" margins"); the top/bottom vs left/right pairs read
- *  by AXIS ("1\" vertical, 0.75\" horizontal" — the CSS box model's
- *  pairing; "gutter" is Word's binding-edge margin, a different
- *  thing). */
+/** #58 — preset margins → one human line: uniform margins read as one
+ *  number; top/bottom vs left/right pairs read by axis ("gutter" is
+ *  Word's binding-edge margin, a different thing). */
 export function summarizeMarginPreset(margins: Margins, unit: MeasurementUnit): string {
   if (margins.top === margins.bottom && margins.left === margins.right) {
     const top = formatPtWithUnit(margins.top, unit);
@@ -240,7 +199,6 @@ export function summarizeMarginPreset(margins: Margins, unit: MeasurementUnit): 
       ? `${top} margins`
       : `${top} bands, ${side} sides`;
   }
-  // An all-different shape: spell the four edges.
   return (
     `${formatPtWithUnit(margins.top, unit)} top, ` +
     `${formatPtWithUnit(margins.bottom, unit)} bottom, ` +
@@ -250,12 +208,9 @@ export function summarizeMarginPreset(margins: Margins, unit: MeasurementUnit): 
 }
 
 /**
- * The four margins → ONE human summary (the print dialog's Paper card):
- *  - all equal        → `1" all sides`
- *  - T==B and L==R    → `1" top/bottom · 1.25" left/right`
- *  - otherwise        → `T 1" · B 1" · L 1.25" · R 1.25"`
- * Never "72/72/72/72 pt" — the display unit is the user's
- * config.editor.measurementUnit (one source).
+ * The four margins → one human summary: all equal → `1" all sides`;
+ * T==B and L==R → `1" top/bottom · 1.25" left/right`; otherwise
+ * `T 1" · B 1" · L 1.25" · R 1.25"`.
  */
 export function formatMarginsSummary(margins: Margins, unit: MeasurementUnit): string {
   const f = (pt: number) => formatPtWithUnit(pt, unit);
@@ -270,10 +225,9 @@ export function formatMarginsSummary(margins: Margins, unit: MeasurementUnit): s
 }
 
 /**
- * User input in the display unit → points. Returns null for
- * unparseable/non-positive input — margins are the one caller that
- * passes allowZero (a 0pt margin is legal: the content box then meets
- * the sheet edge); page DIMENSIONS must stay positive.
+ * User input in the display unit → points, or null for
+ * unparseable/non-positive input. Margins pass allowZero (a 0pt
+ * margin is legal); page dimensions must stay positive.
  */
 export function parseUnitToPt(
   raw: string,
@@ -325,15 +279,9 @@ export const DEFAULT_MARGINS: Margins = {
   right: 72,
 };
 
-// Word's physical margin presets, stored in POINTS (the store's
-// canonical unit — the engine receives px via toLayoutOptions at
-// 96/72 px/pt). pt ↔ px table (engine units):
-//   Narrow   36pt all        → 48px all       (0.5")
-//   Normal   72pt all        → 96px all       (1.0" — ≡ DEFAULT_MARGINS)
-//   Moderate T/B 72, L/R 54  → T/B 96, L/R 72 (1.0" / 0.75")
-//   Wide     T/B 72, L/R 144 → T/B 96, L/R 192 (1.0" / 2.0")
-// "Normal" is kept reference-equal to DEFAULT_MARGINS by construction
-// (pinned by test) so the preset and the store default can never drift.
+// Word's physical margin presets, stored in POINTS (the engine receives
+// px via toLayoutOptions at 96/72 px/pt). "Normal" is kept reference-equal
+// to DEFAULT_MARGINS by construction (pinned by test) so they never drift.
 export interface MarginPreset {
   label: string;
   margins: Margins;
@@ -359,11 +307,10 @@ export const MARGIN_PRESETS: Record<string, MarginPreset> = {
 };
 
 /**
- * PAGELESS — the strip's own preset row (the user ruling: Narrow /
- * Normal / Wide / Full — Moderate's tapered sides mean little edge-
- * to-edge). Full zeroes every side: the content spans the strip.
- * Narrow/Normal/Wide reuse the paginated presets' margins (ONE margin
- * concept per document — the values are the same numbers).
+ * Pageless margin presets: Narrow/Normal/Wide reuse the paginated
+ * presets (one margin concept per document); Full zeroes every side
+ * (the content spans the strip). Moderate is absent — its tapered
+ * sides mean little edge-to-edge.
  */
 export const PAGELESS_MARGIN_PRESETS: Record<string, MarginPreset> = {
   Narrow: MARGIN_PRESETS.Narrow,
@@ -376,10 +323,9 @@ export const PAGELESS_MARGIN_PRESETS: Record<string, MarginPreset> = {
 };
 
 /**
- * PAGELESS — the ONE view-mode resolver: the document's own choice
- * when set, else the app default (config.editor.defaultPageLayout —
- * the new-document default). Pure so non-React consumers
- * (ScrollGuardExtension) resolve through the same law.
+ * The one view-mode resolver: the document's choice when set, else
+ * the app default (config.editor.defaultPageLayout). Pure, so
+ * non-React consumers (ScrollGuardExtension) resolve the same way.
  */
 export function resolveViewMode(
   docViewMode: string | undefined,
@@ -416,16 +362,12 @@ export function toLayoutOptions(pageSetup: PageSetup): LayoutOptions {
       bottom: ptToPx(pageSetup.margins.bottom),
       left: ptToPx(pageSetup.margins.left),
     },
-    // M-FLOW — the document-level widow/orphan default; the engine's
-    // own default (true) covers absent (old documents).
+    // The document-level widow/orphan default; the engine's own
+    // default (true) covers absent (old documents).
     preventWidowsAndOrphans: pageSetup.widowControl ?? true,
-    // #74 COLUMNS — the spec rides to the engine with the boundary
-    // conversion: gap pt → px (the store's canonical-unit law);
-    // widths pass VERBATIM (the engine consumes them as relative
-    // weights — any positive numbers normalize to the post-gap space,
-    // so the pt scale cancels). null ≡ absent ≡ one column (the
-    // additive law — the ?? undefined maps both spellings away, the
-    // engine never sees null).
+    // #74 — gap pt → px at the boundary; widths pass verbatim (the
+    // engine consumes them as relative weights, so the pt scale
+    // cancels). null ≡ absent ≡ one column (the engine never sees null).
     ...(pageSetup.columns
       ? {
           columns: {

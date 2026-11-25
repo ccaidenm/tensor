@@ -3,28 +3,12 @@ import type { MathfieldElement } from 'mathlive';
 import { configureMathField, loadMathLive } from '@/lib/equations/wysiwyg';
 
 /**
- * M-EQ-2 — the WYSIWYG math field: a thin React wrapper over
- * MathLive's <math-field> custom element.
- *
- * OWNERSHIP: the field is the EDITING surface — its `input` event is
- * the one latex producer (draft state in the bubble); `onChange` is
- * the bubble's live-apply. The `latex` prop flows back only when it
- * changes OUTSIDE the field (the Source textarea path, undo): the
- * setValue is echo-guarded by the last-emitted ref so the field never
- * fights its own input events.
- *
- * THE FALLBACK LAW: MathLive needs real layout (ResizeObserver,
- * custom-element upgrade, webfonts) — none of which jsdom has. The
- * loader is lazy; on failure (tests, exotic webviews) this component
- * calls `onUnavailable()` ONCE and renders nothing — the bubble swaps
- * to its Source textarea as the editing surface. Graceful, never a
- * crash (the broken-glyph law's editor arm).
- *
- * PALETTE INSERTS ride `executeCommand(['insert', latex])` — the
- * structural forms carry `#@` (the current selection) and `#?`
- * (placeholder the caret lands in): clicking "Fraction" puts the
- * caret INSIDE the new fraction's empty slot. Exposed via the ref
- * handle.
+ * A thin React wrapper over MathLive's <math-field>. The field is the
+ * EDITING surface: its `input` event is the one latex producer; `latex`
+ * flows back only for EXTERNAL changes (Source textarea, undo),
+ * echo-guarded so the field never fights its own input. MathLive needs
+ * real layout (jsdom has none) — on load failure `onUnavailable()` fires
+ * ONCE and the bubble swaps to the Source textarea, never a crash.
  */
 
 export interface MathLiveFieldHandle {
@@ -46,9 +30,8 @@ export const MathLiveField = forwardRef<MathLiveFieldHandle, MathLiveFieldProps>
   const mfRef = useRef<MathfieldElement | null>(null);
   const lastEmittedRef = useRef<string>(latex);
   const unavailableRef = useRef(false);
-  // The latest callbacks, read by the MOUNT-time listeners through
-  // refs — the field mounts once per bubble open, but the callbacks'
-  // closures stay fresh (the exhaustive-deps law, honored not silenced).
+  // Latest callbacks read by the MOUNT-time listeners through refs —
+  // the field mounts once per bubble, but closures stay fresh.
   const onChangeRef = useRef(onChange);
   const onUnavailableRef = useRef(onUnavailable);
   const latexRef = useRef(latex);
@@ -78,9 +61,8 @@ export const MathLiveField = forwardRef<MathLiveFieldHandle, MathLiveFieldProps>
         if (cancelled || !hostRef.current) return;
         const mf = document.createElement('math-field') as MathfieldElement;
         hostRef.current.appendChild(mf);
-        // AFTER attachment (the option accessors require a mounted
-        // field): smart typing + the `/`→fraction shortcut, configured
-        // read-extend against MathLive's default set (wysiwyg.ts).
+        // AFTER attachment — the option accessors require a mounted
+        // field (configureMathField: smart typing, `/`→fraction).
         configureMathField(mf);
         mfRef.current = mf;
         mf.value = latexRef.current;
@@ -109,9 +91,8 @@ export const MathLiveField = forwardRef<MathLiveFieldHandle, MathLiveFieldProps>
         mfRef.current = null;
       }
     };
-    // The field mounts once per bubble open; latex and the callbacks
-    // flow through refs (below) — a stable deps array is the honest
-    // spelling, no disable directive needed.
+    // Mounts once per bubble open; latex and callbacks flow through
+    // refs — the stable deps array needs no disable directive.
   }, []);
 
   // EXTERNAL latex changes (the Source textarea, undo): push into the

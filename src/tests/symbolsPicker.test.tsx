@@ -11,10 +11,9 @@ import { __resetCoverage } from '@/lib/editor/symbols/coverage';
 import { renderTensor } from './harness';
 
 /**
- * THE SYMBOL PICKER UI — Common instant, lazy core on search, windowed
+ * The symbol picker UI: Common instant, lazy core on search, windowed
  * grid at scale, coverage-disabled cells, insert-keeps-open. The
- * decompressor is the seam's passthrough (deterministic; the native
- * gzip path has its own direct test in symbolsCatalog).
+ * decompressor seam is deterministic (native gzip: symbolsCatalog).
  */
 
 /** The core fixture in the GROUPED wire format ('>groupId' section
@@ -244,10 +243,10 @@ describe('the symbol picker', () => {
     expect(loadedChars().length).toBeGreaterThan(commonChars().length + 1000);
   });
 
-  // ─── THE CLOSE LAW (the user ruling) ─────────────────────────────────
-  // A menu the user never moved is a transient — click-away auto-closes
-  // it. A menu the user DRAGGED is a parked tool — it persists until
-  // closed explicitly (Done / the ribbon toggle). No X: the header is
+  // Close behavior: a menu the user never moved is a transient —
+  // click-away auto-closes it. A menu the user DRAGGED is a parked
+  // tool — it persists until closed explicitly (Done / the ribbon
+  // toggle). No X: the header is
   // purely the drag handle; Done lives in the footer (equation parity).
 
   it('click-away closes an UNDRAGGED bubble (the transient law)', async () => {
@@ -269,7 +268,7 @@ describe('the symbol picker', () => {
       expect(document.querySelector('[data-testid="symbol-picker"]')).not.toBeNull();
     });
     // Tear it off: header pointerdown → move → up. (No visual badge —
-    // the law is behavior; the chrome stays quiet.)
+    // the behavior is the contract; the chrome stays quiet.)
     const header = document.querySelector('[data-testid="symbol-bubble-header"]')!;
     fireEvent.pointerDown(header, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
     fireEvent.pointerMove(header, { clientX: 160, clientY: 140, pointerId: 1 });
@@ -332,9 +331,9 @@ describe('the symbol picker', () => {
     });
   });
 
-  // ─── THE COLLAPSE LAW (the chip row) ─────────────────────────────────
-  // One row of Common + the user's last-used groups; everything else
-  // lives in the ellipsis dropdown. Recency is config-persisted.
+  // The chip row: one row of Common + the user's last-used groups;
+  // everything else lives in the ellipsis dropdown. Recency is
+  // config-persisted.
 
   it('picking a group moves it into the row and persists recency in config', async () => {
     mountButton();
@@ -344,8 +343,8 @@ describe('the symbol picker', () => {
     await waitFor(() => {
       expect(document.querySelector('[data-testid="symbol-group-greek"]')).not.toBeNull();
     });
-    // The config now carries the recency (the user ruling: YOUR groups
-    // persist across sessions).
+    // The config now carries the recency (YOUR groups persist across
+    // sessions).
     const recents = useConfigStore.getState().config.editor.recentSymbolGroups;
     expect(recents).toEqual(['greek']);
     // A fresh bubble honors it: reopen shows the Greek chip directly.
@@ -379,9 +378,9 @@ describe('the symbol picker', () => {
   });
 });
 
-// ─── THE COMMAND PALETTE'S CODEPOINT PATH ─────────────────────────────
-// Typing "U+03A9" surfaces a one-item insert group (the tableDims
-// precedent) — keyboard-first symbol entry.
+// The command palette's codepoint path
+// Typing "U+03A9" surfaces a one-item insert group (like tableDims) —
+// keyboard-first symbol entry.
 
 describe('the command palette codepoint insert', () => {
   it('typing U+03A9 surfaces the insert item and inserts Ω at the caret', async () => {

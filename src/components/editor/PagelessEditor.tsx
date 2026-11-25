@@ -29,45 +29,38 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
   const containerRef = useRef<HTMLDivElement>(null);
   const linkBubbleRef = useRef<HTMLDivElement>(null);
   const linkBubble = useLinkBubble(editor, linkBubbleRef);
-  // M-EQ: the equation editor bubble — same chrome spot as the link
-  // bubble (anchored to the clicked node view's DOM box; pageless has
-  // no painted-rect projection).
+  // The equation editor bubble — same chrome spot as the link bubble
+  // (anchored to the clicked node view's DOM box; pageless has no
+  // painted-rect projection).
   const equationBubbleRef = useRef<HTMLDivElement>(null);
   const { state: equationState, close: closeEquationEditor } = useEquationEditor(editor, equationBubbleRef);
   const showNonPrintingChars = useConfigStore((s) => s.config.editor.showNonPrintingChars);
   const zoomLevel = useConfigStore((s) => s.config.editor.zoomLevel);
   const showFloatingToolbar = useConfigStore((s) => s.config.useFloatingToolbar);
   const floatingToolbarPosition = useFloatingToolbar(editor, showFloatingToolbar);
-  // One setting, two surfaces (M6.1 carryover): the document's page
-  // background paints the paginated SHEETS and this pageless editing
-  // SURFACE alike. Absent ('') = no background style.
+  // One setting, two surfaces: the document's page background paints
+  // the paginated SHEETS and this pageless SURFACE alike. Absent ('') =
+  // no background style.
   const pageColor = useDocumentStore((s) => s.pageSetup.pageColor);
-  // THE STRIP (the pageless law): real margins from the DOCUMENT's
-  // pageSetup (pt → px — the same margins the paginated view's sheets
-  // use, so one margin concept per document, ruled by the Page Setup
-  // dialog), a responsive max-width column (GDocs-pageless style), and
-  // the document's page color painting the strip (WHITE default — the
-  // strip is the page now; the desk stays muted behind it).
+  // THE STRIP: the document's pageSetup margins (pt → px — the same
+  // margins the paginated sheets use), a responsive max-width column,
+  // and the page color painting the strip (WHITE default — the strip
+  // is the page; the desk stays muted behind it).
   const margins = useDocumentStore((s) => s.pageSetup.margins);
-  // THE HOOK LAW: both subscriptions run UNCONDITIONALLY (an `&&` on a
-  // selector would short-circuit the second hook call — the hook count
-  // would flip with the toggle). Combine after both have run.
+  // Both hooks run UNCONDITIONALLY (an `&&` on a selector would flip
+  // the hook count with the toggle). Combine after both have run.
   const showHorizontalRulerConfig = useConfigStore((s) => s.config.editor.showHorizontalRuler);
   const focusActive = useFocusStore((s) => s.active);
   const showHorizontalRuler = showHorizontalRulerConfig && !focusActive;
-  // THE SELECTION SYNC (the paginated parity): a configured selection
-  // background paints the pageless selections at the SAME alpha the
-  // paginated SelectionHighlights uses (0.35 — text under it stays
-  // readable); absent = the theme primary at 25% (the default look).
-  // The strip sets the CSS var; the stylesheet's ::selection rule
-  // consumes it.
+  // SELECTION SYNC (paginated parity): a configured selection color
+  // paints at the same 0.35 alpha as paginated SelectionHighlights;
+  // absent = the theme primary at 25%. The strip sets the CSS var the
+  // stylesheet's ::selection rule consumes.
   const selectionColor = useConfigStore((s) => s.config.editor.selectionColor);
   const selectionBg = selectionColor ? withAlpha(selectionColor, 0.35) : undefined;
-  // FULL HEIGHT (the sheet law): the strip fills the desk's visible
-  // height — GDocs-pageless posture, the white sheet never ends. The
-  // desk scroller's height minus its pt-8/pb-6 breathing room, divided
-  // by the zoom (the strip lives inside the zoom transform — the layout
-  // height must undo it so the RENDERED strip fills the desk). jsdom's
+  // FULL HEIGHT: the strip fills the desk's visible height. Layout
+  // height = (scroller height − 56) / zoom — the strip lives inside
+  // the zoom transform, so the layout height must undo it. jsdom's
   // zero-height client floors at 200.
   const [deskHeight, setDeskHeight] = useState(0);
   useEffect(() => {
@@ -83,21 +76,18 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     };
   }, []);
   const stripMinHeight = Math.max(200, (deskHeight - 56) / (zoomLevel / 100));
-  // Accessibility: the double-line container class (the descendant CSS
-  // rule flips grammar decorations to text-decoration-style: double —
-  // live, without rebuilding the decoration set).
+  // Accessibility: this class flips grammar decorations to
+  // text-decoration-style: double via CSS — live, no decoration rebuild.
   const grammarDoubleLine = useConfigStore((s) => s.config.accessibility.grammarDoubleLine);
-  // #COMMENTS — the boundary gutter (the anchored thread cards): the
-  // strip's own ref anchors the cards (content-space ÷ zoom — the
-  // gutter rides the scaled strip). THE OVERLAY RULING: the strip never
-  // moves (no reservation); the column attaches at its right edge. One
-  // visibility selector, synced with PaginatedView's.
+  // The boundary gutter: the strip's ref anchors the cards
+  // (content-space ÷ zoom — the gutter rides the scaled strip). The
+  // strip never moves (no reservation); the column attaches at its
+  // right edge. Visibility synced with PaginatedView's.
   const stripRef = useRef<HTMLDivElement>(null);
   const boundaryVisible = useCommentsGutterVisible();
 
-  // The suggestion bubble (GDocs rule: plain click on a flagged word).
-  // The anchor stores the OPEN-TIME offset from the container — the
-  // pageless surface has no painted-rect projection to re-derive from.
+  // The suggestion bubble: the anchor stores the OPEN-TIME offset from
+  // the container — no painted-rect projection to re-derive from.
   const [spellBubble, setSpellBubble] = useState<{ error: SpellError; left: number; top: number } | null>(null);
   // Typing invalidates the anchored word.
   useEffect(() => {
@@ -109,12 +99,10 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     };
   }, [editor]);
 
-  /** A plain click on a flagged span (the decoration's DOM span — the
-   *  pageless surface IS the PM view) opens the suggestion bubble.
-   *  Spelling AND grammar spans are both flagged spans. The span's
-   *  text identifies the error (the plugin's drop-guard keeps span
-   *  text == word by construction — no posAtCoords needed). The
-   *  click-outside/Escape dismissal lives on the bubble itself. */
+  /** A plain click on a flagged span (the pageless surface IS the PM
+   *  view) opens the bubble. The span's TEXT identifies the error (the
+   *  plugin's drop-guard keeps span text == word — no posAtCoords);
+   *  dismissal lives on the bubble itself. */
   function handleSpellClick(e: React.MouseEvent) {
     if (!editor) return;
     const span = (e.target as HTMLElement).closest(".tensor-spell-error, .tensor-grammar-error");
@@ -128,15 +116,14 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     setSpellBubble({ error, left: spanRect.left - containerRect.left, top: spanRect.bottom - containerRect.top + 4 });
   }
 
-  /** M-T4 — the pageless arm of the right-click rule
-   *  (rightClickSelection.ts), on the CONTEXTMENU event: PM ignores
-   *  non-primary buttons, so a right-click here never moved the caret
-   *  and the menu read the STALE selection — including the
-   *  menu-already-open case, where the dismissal swallows the mousedown
-   *  but the native contextmenu still fires. This handler sits DEEPER
-   *  than the menu trigger, so it runs before the trigger's own
-   *  handler (base-ui stopEvent's it) and the re-opened menu reads the
-   *  click-resolved selection. */
+  /** The pageless arm of the right-click rule (rightClickSelection.ts),
+   *  on the CONTEXTMENU event: PM ignores non-primary buttons, so a
+   *  right-click never moved the caret and the menu read the STALE
+   *  selection — including the menu-already-open case (the dismissal
+   *  swallows the mousedown, but the native contextmenu still fires).
+   *  This handler sits DEEPER than the menu trigger (base-ui
+   *  stopEvent's it), so the re-opened menu reads the click-resolved
+   *  selection. */
   function handleContextMenu(e: React.MouseEvent) {
     if (!editor || e.button !== 2) return;
     // Coordinate-less dispatches (tests, keyboard-invoked menus): the
@@ -146,12 +133,10 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
     applyRightClickSelection(editor, coords ? coords.pos : null);
   }
 
-  /** CLICK ANYWHERE TO FOCUS (the paginated parity): the paginated
-   *  sheet IS the ProseMirror element, so clicks anywhere on it land
-   *  in the editor. The pageless strip's gutters and full-height tail
-   *  sit OUTSIDE the ProseMirror DOM — a click there focuses the
-   *  editor and drops the caret at the document's end (GDocs'
-   *  click-below-content behavior). */
+  /** CLICK ANYWHERE TO FOCUS (paginated parity): the pageless strip's
+   *  gutters and full-height tail sit OUTSIDE the ProseMirror DOM — a
+   *  click there focuses the editor and drops the caret at the
+   *  document's end. */
   function handleSurfaceClick(e: React.MouseEvent) {
     if (!editor) return;
     if ((e.target as HTMLElement).closest('.ProseMirror')) return;
@@ -160,9 +145,8 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
 
   return (
     <TooltipProvider>
-      {/* The bubble mounts OUTSIDE the zoom transform (chrome at 100%
-          — the paginated FloatingToolbar law); the inner container
-          keeps the scale and the original structure. */}
+      {/* The bubbles mount OUTSIDE the zoom transform (chrome at 100%);
+          the inner container keeps the scale. */}
       <div className="relative">
         <div
           ref={containerRef}
@@ -174,13 +158,9 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           onContextMenu={handleContextMenu}
           onClick={handleSpellClick}
         >
-          {/* THE STRIP — the continuous sheet: centered responsive
-              column (max-width, shrinks on narrow windows), the
-              document's margins as padding, the document's page color
-              (WHITE default) as the sheet, a shadow to lift it off
-              the muted desk. THE PAGE, infinitely tall. The selection
-              var rides the style (the stylesheet's ::selection rule
-              consumes it — the paginated selection parity). */}
+          {/* THE STRIP — the continuous sheet: the document's margins as
+              padding, the page color as the sheet, infinitely tall. The
+              selection var rides the style (the ::selection rule consumes it). */}
           <div
             data-testid="pageless-surface"
             ref={stripRef}
@@ -199,11 +179,9 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
               className="prose prose-neutral min-h-100 focus:outline-none text-black"
               style={{ fontFamily, fontSize: `${fontSize}px` }}
             />
-            {/* #COMMENTS — the boundary gutter: inside the strip (its
-                containing block), left-full hugs the sheet's right
-                edge. Cards scale with the strip (the v1 ruling — the
-                gutter rides the zoom transform; chrome-fixed sizing is
-                a follow-up if it reads wrong at extremes). */}
+            {/* The boundary gutter: inside the strip (its containing
+                block), left-full hugs the sheet's right edge. Cards scale
+                with the strip — the gutter rides the zoom transform. */}
             {boundaryVisible && (
               <CommentsGutter
                 getAnchorTop={(threadId) => {
@@ -229,9 +207,8 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
             />
           )}
 
-          {/* M-EQ: body-portal + fixed inside the component (escapes
-              the zoomed container and the scroll clip — drag-safe over
-              the ribbon); the pageless DOM anchor derives at render. */}
+          {/* Body-portal + fixed (escapes the zoomed container and the
+              scroll clip — drag-safe over the ribbon). */}
           {equationState && editor && (
             <EquationEditorBubble
               ref={equationBubbleRef}
@@ -261,10 +238,8 @@ export function PagelessEditor({ editor, fontFamily, fontSize }: PagelessEditorP
           />
         )}
       </div>
-      {/* THE PAGELESS RULER — the read-only horizontal bar (margins
-          bands + ticks) over the strip, portaled into the desk wrapper
-          (the paginated bar's own chrome slot — outside the scroll
-          flow, flush under the ribbon). Gated on the config toggle. */}
+      {/* THE PAGELESS RULER — portaled into the desk wrapper, outside
+          the scroll flow; gated on the config toggle. */}
       {/* FOCUS MODE: the ruler is chrome — it hides with the rest. */}
       {showHorizontalRuler && <PagelessRuler containerRef={containerRef} />}
     </TooltipProvider>

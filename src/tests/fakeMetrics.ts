@@ -13,8 +13,8 @@ export const FakeMetrics: TextMetrics = {
   descent: (style) => 0.2 * style.fontSize,
 };
 
-/** M-EQ: the equation dims port's deterministic double — same 10px/
- *  char shape as the text ruler (jsdom cannot measure DOM, so the real
+/** The equation dims port's deterministic double — same 10px/char
+ *  shape as the text ruler (jsdom cannot measure DOM, so the real
  *  KaTeX measurer's rects read as zeros there; tests inject this). */
 export const FakeEquationMetrics: EquationMetrics = {
   measure: (latex, fontSize) => ({

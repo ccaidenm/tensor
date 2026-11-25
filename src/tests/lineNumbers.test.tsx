@@ -11,11 +11,11 @@ import { ArrangeGroup } from '@/components/layout/ribbon/layout/groups/ArrangeGr
 import { getCommand } from '@/lib/commands/registry';
 import { renderTensor, renderTensorInScrollContainer, GEOMETRY, settleLayout } from './harness';
 
-// ─── Tauri surface mocks (file operations round-trip) ─────────────────────
+// Tauri surface mocks (file operations round-trip)
 
-// M-IMAGES-0: the .wpdoc v2 container simulator — mirrors the Rust
-// wire contract (package stores; unpackage returns v2, throws the
-// NOT_ZIP marker for v1, a generic error for corrupted archives).
+// .wpdoc v2 container simulator — mirrors the Rust wire contract
+// (package stores; unpackage returns v2, throws the NOT_ZIP marker
+// for v1, a generic error for corrupted archives).
 const wpdocFiles = vi.hoisted(() => new Map<string, { kind: 'v2'; document: string; media: unknown[] } | { kind: 'v1'; raw: string }>());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: { path?: string; documentJson?: string; media?: unknown[]; url?: string }) => {
@@ -67,7 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ─── 1. Pure counting: the full matrix ───────────────────────────────────
+// 1. Pure counting: the full matrix
 
 /** Minimal LineBox stand-in — the counter reads only the identity
  *  fields (blockId/pageIndex/lineIndex); rect/segments are inert. */
@@ -135,7 +135,7 @@ describe('countLineNumbers (pure)', () => {
   });
 });
 
-// ─── 2. Gutter render + positioning ──────────────────────────────────────
+// 2. Gutter render + positioning
 
 const gutter = () => document.querySelector('[data-testid="line-number-gutter"]') as HTMLElement | null;
 const num = (n: number) => document.querySelector(`[data-testid="line-number-${n}"]`) as HTMLElement | null;
@@ -209,7 +209,7 @@ describe('gutter render (projection of LayoutResult + setting)', () => {
     });
     await settleLayout();
     // The stack scales; the number's own inline geometry is UNTOUCHED
-    // — that IS the no-compensation law (asserted, not assumed).
+    // (asserted, not assumed).
     expect(
       (document.querySelector('[data-testid="paginated-stack"]') as HTMLElement).style.transform,
     ).toBe('scale(1.5)');
@@ -218,7 +218,7 @@ describe('gutter render (projection of LayoutResult + setting)', () => {
   });
 });
 
-// ─── 3. Margin-click regression (the M5 nearest-line fixtures) ────────────
+// Margin-click regression
 
 describe('margin clicks with the gutter visible (M5 regression)', () => {
   // The legacy dead-zone fixtures, re-run with line numbers ON — the
@@ -274,7 +274,7 @@ describe('margin clicks with the gutter visible (M5 regression)', () => {
   });
 });
 
-// ─── 4. Live renumber — the sync path, no debounce ────────────────────────
+// 4. Live renumber — the sync path, no debounce
 
 describe('live renumber', () => {
   it('inserting a line mid-document shifts subsequent numbers in the SAME commit', async () => {
@@ -301,7 +301,7 @@ describe('live renumber', () => {
   });
 });
 
-// ─── 5. Persistence round-trip ──────────────────────────────────────────
+// 5. Persistence round-trip
 
 describe('persistence (.wpdoc metadata, styles precedent)', () => {
   it('schema: lineNumbers round-trips; old files parse without it', () => {
@@ -349,8 +349,7 @@ describe('persistence (.wpdoc metadata, styles precedent)', () => {
   it('openDocument returns the setting (and null for old files)', async () => {
     const { editor } = renderTensor('<p>hello</p>');
     dialogMocks.openPath = '/x/a.wpdoc';
-    // The file is a v1 plain JSON (the converter path — old-file
-    // reads are v1 by construction now):
+    // The file is a v1 plain JSON (the converter path):
     wpdocFiles.set('/x/a.wpdoc', {
       kind: 'v1',
       raw: JSON.stringify({
@@ -372,19 +371,15 @@ describe('persistence (.wpdoc metadata, styles precedent)', () => {
   });
 });
 
-// ─── 6. Layout tab split button + palette commands ───────────────────────
+// 6. Layout tab split button + palette commands
 
 describe('Layout tab (ArrangeGroup) + palette commands', () => {
   it('the View tab keeps NO line-numbers control (placeholder group restored)', () => {
     render(<ShowGroup />);
     expect(document.querySelector('button[aria-label="Show Line Numbers"]')).toBeNull();
-    // M-RULER: Show Rulers is LIVE (both bars ship); its button is a
-    // real toggle. M-HEADER-FOOTER: Show Headers & Footers is LIVE too
-    // (the captions NPC precedent). #WATERMARK: Show Watermark is LIVE
-    // as well; #COMMENTS rewired the Show Margins placeholder into the
-    // LIVE Show Boundary Content toggle — the ONE remaining placeholder
-    // is Show Footnotes & Endnotes.
-    expect(document.querySelectorAll('button[disabled]').length).toBe(1);
+    // #101 hid the last placeholder — the View tab ships ZERO disabled
+    // buttons; the rest are live toggles.
+    expect(document.querySelectorAll('button[disabled]').length).toBe(0);
     const rulers = document.querySelector('button[aria-label="Show Rulers"]') as HTMLButtonElement;
     expect(rulers.disabled).toBe(false);
     const hf = document.querySelector('button[aria-label="Show Headers & Footers"]') as HTMLButtonElement;

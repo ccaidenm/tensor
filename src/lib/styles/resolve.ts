@@ -3,17 +3,10 @@ import type { StyleDefinition, StyleProperties, TextTransform } from './types';
 import type { TextAlign } from '@/lib/paginated/positionMap';
 
 /**
- * THE ONE RESOLUTION FUNCTION (M-STYLES STEP 3). Both render modes and
- * every UI surface (pageless stylesheet, Font/size dropdowns, style
- * dialog preview, capture-from-selection) resolve through here —
- * never parallel logic, never undefined-property guessing.
- *
- * PRECEDENCE (per property, weak → strong):
- *   baseStyle < paragraph style < paragraph attrs (direct block
- *   formatting) < char style < direct marks
- * Every tier only overrides with PRESENT values; the result is ALWAYS
- * a complete concrete style (the registry's contract: a render path
- * never guesses a missing property).
+ * The one resolution function — both render modes and every UI
+ * surface resolve through here. Precedence, weak → strong: base <
+ * para style < para attrs < char style < direct marks; tiers override
+ * only with present values (the result is always complete).
  */
 
 export interface RunStyle {
@@ -105,9 +98,8 @@ export interface BlockTier {
   indentLeft: number;
   indentRight: number;
   firstLineIndent?: number;
-  /** 'justify' passes through here for the pageless CSS to render; the
-   * ADAPTER sanitizes it to left + the loud dropped-attr warning
-   * (justify is engine work — the same ruling the textAlign attr has). */
+  /** 'justify' passes through for the pageless CSS to render; the
+   *  adapter sanitizes it to left + the dropped-attr warning. */
   align: TextAlign | 'justify';
 }
 
@@ -125,11 +117,9 @@ function numOrUndefined(value: unknown): number | undefined {
 }
 
 /**
- * Paragraph-tier geometry: direct ATTRS beat the paragraph-style
- * properties (set = non-default attr value), which beat the baseline
- * (0 / left). `baseIndentLeft` is the projection's structural indent
- * (list depth gutter, blockquote gutter) — always present, never a
- * style concern.
+ * Paragraph-tier geometry: direct attrs beat the paragraph style,
+ * which beats the baseline (0 / left). `baseIndentLeft` is the
+ * projection's structural indent (list/blockquote gutter).
  */
 export function resolveBlockTier(
   para: StyleDefinition | null,
@@ -159,7 +149,7 @@ export function resolveBlockTier(
   };
 }
 
-// ─── Flow-tier resolution (pagination flags — M-FLOW) ───────────────────
+// ─── Flow-tier resolution (pagination flags) ──────────────────────────
 
 /** The flow-flag spellings on paragraph/heading attrs (null = unset —
  * the PM JSON round-trip convention; ParagraphExtensions owns the
@@ -177,15 +167,9 @@ const boolOrUndefined = (v: unknown): boolean | undefined => (v === true || v ==
 const pageOrUndefined = (v: unknown): 'page' | undefined => (v === 'page' ? 'page' : undefined);
 
 /**
- * M-FLOW — the pagination-flag cascade: direct attrs beat the
- * paragraph style's flow properties; every unresolved flag stays UNSET
- * (omitted — the engine then applies its own defaults: keeps off,
- * widowControl on via the document-level default). Deliberately NOT
- * part of BlockTier: geometry resolves to an always-complete value,
- * while flow is tri-state by nature (null = inherit). Returns
- * undefined when no flag resolves — the adapter then emits no `flow`
- * field at all (hashBlock covers flow; an empty object would needlessly
- * churn every paragraph's hash).
+ * Direct attrs beat the style's flow properties; unresolved flags
+ * stay unset (the engine defaults apply). Returns undefined when
+ * nothing resolves — an empty object would churn every paragraph's hash.
  */
 export function resolveFlowTier(para: StyleDefinition | null, attrs: FlowTierAttrs): FlowPolicy | undefined {
   const p = para?.properties;
@@ -218,33 +202,9 @@ export function resolveFlowTier(para: StyleDefinition | null, attrs: FlowTierAtt
 // ─── Text transform (adapter-side; the engine measures the result) ─────────
 
 /**
- * Apply a length-preserving text transform to RUN TEXT during adapter
- * resolution — the engine then measures the TRANSFORMED text, so wraps
- * are correct (uppercase is wider than source in real fonts). PM keeps
- * the source text: selection, find, and clipboard all work in source
- * coordinates, and the length-preserving invariant keeps engine
- * offsets identity-mapped to PM offsets (asserted — a transform that
- * changed length would silently misplace every caret after it, so it
- * throws instead).
- *
- * 'capitalize'/'title-case' mirror CSS text-transform: capitalize —
- * the FIRST LETTER of each word is uppercased, every other character
- * is left untouched (CSS spec wording: "other characters are
- * unaffected"). Word boundary = "previous character was not a
- * letter" (Unicode-aware). DOCUMENTED DIVERGENCE: browser engines may
- * resolve word boundaries around punctuation/digits differently from
- * this JS spelling; both modes agree with each other via this function
- * for paginated and via CSS for pageless, and the edge-word parity is
- * pinned by test — where a browser diverges, the test documents it
- * rather than silently shipping it.
- *
- * UPPERCASE/LOWERCASE DIVERGENCE (v1): a few characters change length
- * under case mapping — ß → 'SS' is the canonical one. CSS would render
- * the expansion; v1 LEAVES length-changing characters UNCHANGED
- * (ß stays ß under uppercase) so the length-preserving invariant —
- * and with it the PM↔engine offset identity — holds for every
- * document, not just ASCII. True expanded mapping needs
- * transformed-offset bookkeeping in the position bridge; 'M-later'.
+ * Adapter-side: the engine measures the TRANSFORMED text (uppercase
+ * is wider); PM keeps the source — length preservation keeps offsets
+ * identity-mapped; length-changing transforms throw.
  */
 export function transformText(text: string, transform: TextTransform): string {
   if (transform === 'none' || transform === undefined) return text;
@@ -256,8 +216,8 @@ export function transformText(text: string, transform: TextTransform): string {
       out = '';
       for (const ch of text) {
         const mapped = up ? ch.toUpperCase() : ch.toLowerCase();
-        // Length-changing mappings (ß → SS, ligatures) stay UNCHANGED —
-        // the v1 ban is on length change itself.
+        // Length-changing mappings (ß → SS, ligatures) stay unchanged
+        // — the ban is on length change itself.
         out += mapped.length === 1 ? mapped : ch;
       }
       break;
@@ -269,7 +229,7 @@ export function transformText(text: string, transform: TextTransform): string {
       for (const ch of text) {
         const isLetter = /\p{L}/u.test(ch);
         let mapped = isLetter && !prevLetter ? ch.toUpperCase() : ch;
-        if (mapped.length !== 1) mapped = ch; // ß and friends: see the note above
+        if (mapped.length !== 1) mapped = ch; // ß and friends: stays unchanged
         out += mapped;
         prevLetter = isLetter;
       }
@@ -289,14 +249,12 @@ export function transformText(text: string, transform: TextTransform): string {
   return out;
 }
 
-// ─── baseStyle := resolve('normal') (amendment 6) ─────────────────────────
+// ─── baseStyle := resolve('normal') ─────────────────────────────────────
 
 /**
  * The document baseStyle is the resolved 'normal' style: absent
- * properties fall to the config defaults, an edited 'normal' overrides
- * them. Re-derived by callers on every registry epoch bump; the
- * existing baseStyleHash / adapter-generation path carries it into the
- * engine (empty lines measure under baseStyle, so they restyle too).
+ * properties fall to the config defaults, an edited 'normal'
+ * overrides them. Re-derived on every registry epoch bump.
  */
 export function resolveNormalBase(
   fontFamily: string,
@@ -313,10 +271,8 @@ export function resolveNormalBase(
 // ─── Capture (reverse resolution — "create style from selection") ─────────
 
 /**
- * The definition-capture half of resolution: given the EFFECTIVE
- * resolved style at a selection and the baseline it would have had,
- * emit the properties that DIFFER. Test receipt: capture from a
- * directly-bolded Normal span → { bold: true } in the definition.
+ * Reverse resolution: given the effective resolved style at a
+ * selection and its baseline, emit the properties that differ.
  */
 export function captureFromResolved(resolved: RunStyle, baseline: RunStyle): StyleProperties {
   const props: StyleProperties = {};
@@ -334,7 +290,7 @@ export function captureFromResolved(resolved: RunStyle, baseline: RunStyle): Sty
   return props;
 }
 
-// ─── CSS serialization (pageless sheet + dialog preview — ONE mapper) ──────
+// ─── CSS serialization (pageless sheet + dialog preview) ───────────────
 
 /** CSS property pairs for a definition's properties. Only DEFINED
  * properties emit (bold: false emits font-weight: 400 — an explicit

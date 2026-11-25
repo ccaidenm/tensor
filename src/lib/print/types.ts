@@ -1,21 +1,9 @@
 import type { TextStyle } from '@tensor-editor/engine';
 
 /**
- * M-PRINT (#43/#39) — the print document DATA MODEL. The renderer
- * (render.ts) walks the engine's LineBoxes ONCE into these positioned
- * elements (all coordinates PAGE-RELATIVE px — contentBox added at
- * walk time); the view (PrintDocumentView) renders them as absolutely
- * positioned DOM. THREE consumers share one walk: the preview modal,
- * the OS print path (window.print), and the PDF synthesizer (pdf-lib
- * draws the same facts). Element order in the array IS paint order
- * (the view renders in order, all one stacking context).
- *
- * GEOMETRY LAW: every element derives from the engine's placement
- * facts (LineBox rect/baseline/segments, placed[] rects) through the
- * SAME derivations the canvas uses (alignOffset, fieldShiftBefore,
- * fitDownImage) — never re-measured, never re-derived. Page breaks
- * match the on-screen view by construction (same engine, same
- * metrics).
+ * #43/#39 — the print data model: one walk into page-relative elements
+ * shared by the preview, window.print, and the PDF synthesizer. Element
+ * order is paint order; geometry is never re-measured.
  */
 
 export interface PrintText {
@@ -25,15 +13,13 @@ export interface PrintText {
   /** Page-relative TOP of the ink box (baseline − ascent) — the DOM
    *  view's datum (absolute positioning). */
   top: number;
-  /** Page-relative BASELINE — the PDF's datum (drawText y). Both ride
-   *  because the two consumers differ (v1 of the walk carried only
-   *  top and the PDF had to re-derive ascent per style — re-derivation
-   *  is the asymmetry-bug class this model kills). */
+  /** Page-relative baseline — the PDF's datum (drawText y). Both
+   *  datums ride because the two consumers differ. */
   baseline: number;
   width: number;
   text: string;
   style: TextStyle;
-  /** Text ink color ('#000' default — the paint law). */
+  /** Text ink color ('#000' default). */
   color: string;
   /** Text decoration ('' | 'underline' | 'line-through' | both). */
   decoration: string;
@@ -77,7 +63,7 @@ export interface PrintImage {
   /** A renderable URL (the bitmap's src — object URL or data URL). */
   src: string;
   /** The content address ('media://<sha>' minus the scheme) — the PDF
-   *  embeds from the MediaStore's BYTES (an object URL is a view-side
+   *  embeds from the MediaStore's bytes (an object URL is a view-side
    * handle; the export is a standalone file). */
   sha: string;
   alt: string;
@@ -109,21 +95,18 @@ export interface PrintPage {
   width: number;
   height: number;
   /** #48 — the page's background fill: the per-page → per-section →
-   *  doc chain resolved at BUILD time (the same chain the on-screen
-   * view paints). Unset = white paper (the sheet/PDF default). */
+   *  doc chain resolved at build time. Unset = white paper. */
   background?: string;
   /**
-   * #WATERMARK — the page's overlay, RESOLVED at build time (the
-   * resolveWatermark spec — self-contained: font, size, rotation,
-   * opacity; the same section → doc chain as the background). Unset
-   * = none. Painted FIRST — before the elements — by every consumer
-   * (the preview sheet, window.print, the PDF synthesizer).
+   * The page's overlay, resolved at build time (the same section →
+   * doc chain as the background). Painted before the elements by
+   * every consumer.
    */
   watermark?: PrintWatermark;
   elements: PrintElement[];
 }
 
-/** #WATERMARK — the resolved text overlay (the PDF's font book keys
+/** The resolved text overlay (the PDF's font book keys
  * off fontFamily; the anchor math keys off fontSize). */
 export interface PrintWatermarkText {
   kind: 'text';
@@ -135,7 +118,7 @@ export interface PrintWatermarkText {
   opacity: number;
 }
 
-/** #WATERMARK — the resolved image overlay: the dual handle of
+/** The resolved image overlay: the dual handle of
  * PrintImage (src = the view's URL; sha = the export's bytes key). */
 export interface PrintWatermarkImage {
   kind: 'image';

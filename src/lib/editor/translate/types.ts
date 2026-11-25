@@ -1,15 +1,7 @@
 /**
- * Translate — shared types: the wire contract (the Rust command's
- * shape), the block model (one translatable top-level block), and the
- * preview/apply surfaces.
- *
- * PRIVACY POSTURE (the spell-check consent law): translation is
- * inherently an ONLINE feature — the selected text (or the whole
- * document) leaves the device for the LibreTranslate instance the
- * user chose. The gate lives in client.ts (the catalogsAllowed
- * precedent): no invoke fires while config.translation.configured is
- * false, and the endpoint is the user's own, never a hardcoded
- * default.
+ * Translate — shared types: the wire contract, the block model, the
+ * preview/apply surfaces. PRIVACY: inherently ONLINE — the text leaves
+ * the device for the user-chosen endpoint (gate in client.ts).
  */
 
 /** One instance language — the wire shape (GET /languages). */
@@ -19,15 +11,9 @@ export interface TranslationLanguage {
 }
 
 /**
- * One translatable top-level block: its serialized HTML (the
- * schema's own serializer — the same tags the document model speaks)
- * plus the PM range it occupies.
- *
- * GRANULARITY LAW: translation is TOP-LEVEL-block granularity — a
- * bullet list, blockquote, or table travels whole (its inner
- * paragraphs are part of the block's HTML), so structure never has
- * to be re-nested by hand and interleave inserts sibling blocks that
- * are already valid.
+ * One translatable top-level block: schema-serialized HTML plus its PM
+ * range. TOP-LEVEL granularity — a list or table travels whole, so
+ * structure never needs re-nesting and interleaved inserts are siblings.
  */
 export interface TranslateBlock {
   /** Stable identity (BlockIdExtension) — the preview's react key. */

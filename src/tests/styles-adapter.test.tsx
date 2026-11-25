@@ -6,8 +6,8 @@ import { useStyleRegistryStore, lookupStyle } from '@/lib/styles/registry';
 import type { StyleDefinition, StyleRegistrySnapshot } from '@/lib/styles/types';
 
 /**
- * M-STYLES STEP 5: the ADAPTER half of resolution — registry-driven
- * runs, the epoch cache, transformed text, missing-id fallback.
+ * The ADAPTER half of resolution — registry-driven runs, the epoch
+ * cache, transformed text, missing-id fallback.
  *
  * EPOCH COLLISION NOTE: the rendered PaginatedView relayouts with the
  * STORE's snapshot (small epoch numbers); these direct adapter calls
@@ -200,8 +200,8 @@ describe('the registry epoch invalidates the adapter identity cache', () => {
       const adapted = pmDocToSemantic(editor.state.doc, BASE, snapshot([justified]));
       expect(adapted.blocks[0]!.align).toBe('left');
       // The dropped-attr warning fired — justify is engine work, the
-      // same loud ruling the textAlign attr always had (pageless
-      // renders it natively through the stylesheet).
+      // same loud path the textAlign attr takes (pageless renders it
+      // natively through the stylesheet).
       expect(warn.mock.calls.some((c) => JSON.stringify(c).includes('justify'))).toBe(true);
     } finally {
       warn.mockRestore();
