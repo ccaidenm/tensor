@@ -1,4 +1,5 @@
 name: Release
+
 on:
   push:
     tags: ["v*"]
@@ -28,7 +29,7 @@ jobs:
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.targets }}
+          targets: ${{ matrix.rust_targets }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -49,4 +50,4 @@ jobs:
           releaseName: "Tensor ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: --target ${{ matrix.targets }}
+          args: --target ${{ matrix.tauri_target }}
