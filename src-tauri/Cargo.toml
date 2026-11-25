@@ -1,7 +1,7 @@
 [package]
 name = "tensor"
-version = "0.1.0"
-description = "Tensor — a paginated, engine-driven word processor"
+version = "1.0.0"
+description = "Lightweight, private, & modern document editor."
 authors = ["Caiden"]
 edition = "2021"
 
